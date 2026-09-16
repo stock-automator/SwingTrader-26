@@ -7,11 +7,13 @@ Donchian 20-day Momentum Breakout Strategy
 - ATR-based stop
 """
 
-import pandas as pd
-import numpy as np
-from typing import List
-from .base_strategy import BaseStrategy, Signal
 from datetime import datetime
+from typing import List
+
+import numpy as np
+import pandas as pd
+
+from .base_strategy import BaseStrategy, Signal
 
 
 class DonchianBreakout(BaseStrategy):

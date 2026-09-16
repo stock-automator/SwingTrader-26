@@ -4,17 +4,17 @@ Machine learning model to predict win probability of each signal
 Trains on closed trades, ranks new signals by predicted quality
 """
 
-import pandas as pd
-import numpy as np
-from pathlib import Path
-from typing import Dict, List, Optional
 import json
 import pickle
+from pathlib import Path
+from typing import Dict, List, Optional
 
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import cross_val_score, train_test_split
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.preprocessing import StandardScaler
 
 
 class SignalQualityClassifier:
