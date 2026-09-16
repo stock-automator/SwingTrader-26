@@ -12,18 +12,17 @@ Tests cover:
 - Verification and reporting
 """
 
-import json
-import tempfile
-import shutil
 import hashlib
-from pathlib import Path
+import json
+import shutil
+import tempfile
 from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
-import pytest
-import pandas as pd
 import numpy as np
-
+import pandas as pd
+import pytest
 
 # ==============================================================================
 # FIXTURES
@@ -1028,7 +1027,7 @@ class TestPerformance:
     def test_checkpoint_load_speed(self, mock_config):
         """Checkpoint loads quickly even with large data."""
         import time
-        
+
         # Create large checkpoint
         checkpoint_data = {
             "downloaded": [
@@ -1054,7 +1053,7 @@ class TestPerformance:
     def test_large_parquet_read_speed(self, temp_dir):
         """Large Parquet files load efficiently."""
         import time
-        
+
         # Create large Parquet
         dates = pd.date_range("2014-01-01", periods=2600, freq="D")
         df = pd.DataFrame({

@@ -2,13 +2,14 @@
 Tests for Donchian Breakout Strategy
 """
 
-import pytest
-import pandas as pd
-import numpy as np
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import sys
+import numpy as np
+import pandas as pd
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.strategies.donchian_breakout import DonchianBreakout
