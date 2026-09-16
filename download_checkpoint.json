@@ -1,0 +1,3056 @@
+{
+  "started_at": "2026-09-16T14:46:46.761368",
+  "last_updated": "2026-09-16T15:05:22.738340",
+  "last_ticker_index": 11,
+  "downloaded": [
+    {
+      "ticker": "A",
+      "rows": 3194,
+      "hash": "0f70e09c55fe44c6a1015806c27e7d4df9c43b66180f5cf8562ad92d83d45723",
+      "timestamp": "2026-09-16T14:48:03.747126"
+    },
+    {
+      "ticker": "ABBV",
+      "rows": 3194,
+      "hash": "1a9218daa2de327bc402da918bed4dbd6ad2af604699b34ff427eea2dfc009bb",
+      "timestamp": "2026-09-16T14:48:06.304349"
+    },
+    {
+      "ticker": "ABNB",
+      "rows": 1446,
+      "hash": "d0dc2cca9ae7f38246d65bc3bde468999176de066f86183b1257ef8d0f5353bf",
+      "timestamp": "2026-09-16T14:48:07.683922"
+    },
+    {
+      "ticker": "ABT",
+      "rows": 3194,
+      "hash": "2653ff7ad432acbf7c511f3d5eaeb8a2276e906be3527629a7fa992fec50ab87",
+      "timestamp": "2026-09-16T14:48:09.224918"
+    },
+    {
+      "ticker": "ACGL",
+      "rows": 3194,
+      "hash": "06e22da7ff6588698489e7d9f7b42bd09e4ac90aa7d8f02ab8fd4bda1fb247a5",
+      "timestamp": "2026-09-16T14:48:10.713002"
+    },
+    {
+      "ticker": "ACN",
+      "rows": 3194,
+      "hash": "2fb736e022218f51271e12ee1ea6b7ef4638242154de95465113571d161981ea",
+      "timestamp": "2026-09-16T14:48:12.202967"
+    },
+    {
+      "ticker": "ADBE",
+      "rows": 3194,
+      "hash": "d1ba8cfede322a2d3dbf342f91adde2ab27599d53c3dc04dc25bc966c8ec2fed",
+      "timestamp": "2026-09-16T14:48:13.685631"
+    },
+    {
+      "ticker": "ADI",
+      "rows": 3194,
+      "hash": "9ec51f53c397bde66322156a60288e6cbab92caf3495bc149616001c951af540",
+      "timestamp": "2026-09-16T14:48:15.186800"
+    },
+    {
+      "ticker": "ADM",
+      "rows": 3194,
+      "hash": "35469146757a84fcea571b96d4c105195c1c0cfa162d84f3ce5e80ac6b962556",
+      "timestamp": "2026-09-16T14:48:16.722704"
+    },
+    {
+      "ticker": "ADP",
+      "rows": 3194,
+      "hash": "b2fa65189eb8f955c98d606efd7ee91aeddb565ddaae1f112c149afcb316e403",
+      "timestamp": "2026-09-16T14:48:18.351726"
+    },
+    {
+      "ticker": "ADSK",
+      "rows": 3194,
+      "hash": "f9bb4bd8d9b546fae5794b72db213240e0bb2b680449dbe9ee515529735803d7",
+      "timestamp": "2026-09-16T14:48:19.812525"
+    },
+    {
+      "ticker": "AEE",
+      "rows": 3194,
+      "hash": "e97db5ff2fd7f85965c8682223b84b69a21a2c158820701aa0767fe8badea9bd",
+      "timestamp": "2026-09-16T14:48:21.369095"
+    },
+    {
+      "ticker": "AEP",
+      "rows": 3194,
+      "hash": "e89c36c9a7595253403dfae6b3e54af5faa7992097096a218c11a5c2d9ba3568",
+      "timestamp": "2026-09-16T14:48:22.939261"
+    },
+    {
+      "ticker": "AES",
+      "rows": 3194,
+      "hash": "f08ea7a15ed5bc7ec02c6603964c306fb197b88ef97ecdf51b06adfc49b22078",
+      "timestamp": "2026-09-16T14:48:24.459964"
+    },
+    {
+      "ticker": "AFL",
+      "rows": 3194,
+      "hash": "8b828f27b2c3b99943b8a40041595b3d927c52e2d87e77be58da1ac89553f6d5",
+      "timestamp": "2026-09-16T14:48:26.016109"
+    },
+    {
+      "ticker": "AIG",
+      "rows": 3194,
+      "hash": "6a6d7120240e14c2d931758a06f8c4fab2ab27a0363ef907c57d68b2e7aa7523",
+      "timestamp": "2026-09-16T14:48:27.515601"
+    },
+    {
+      "ticker": "AIZ",
+      "rows": 3194,
+      "hash": "1290a04f299a779b9ece2f05a8cfe6180db5f8a7c7267e312fa0737b57324d73",
+      "timestamp": "2026-09-16T14:48:29.053755"
+    },
+    {
+      "ticker": "AJG",
+      "rows": 3194,
+      "hash": "8448441333f6ab8233932f27db717c0e796bba45cee6b8494f896a408d925db6",
+      "timestamp": "2026-09-16T14:48:30.577726"
+    },
+    {
+      "ticker": "AKAM",
+      "rows": 3194,
+      "hash": "7ce75ea96bae05fbf41aa9790fd9f9677fbc92262e2003237f43e8d54775c2f9",
+      "timestamp": "2026-09-16T14:48:32.021341"
+    },
+    {
+      "ticker": "ALB",
+      "rows": 3194,
+      "hash": "14c6a026e0cd853c93820f94afc12c02aa933f6cbed409b7cdf5d69f629557ae",
+      "timestamp": "2026-09-16T14:48:33.561906"
+    },
+    {
+      "ticker": "ALGN",
+      "rows": 3194,
+      "hash": "d756183fd3301eb16aa0892a22acc34e49eeecbbced1a32e387fb4da80fef24d",
+      "timestamp": "2026-09-16T14:48:35.021167"
+    },
+    {
+      "ticker": "ALL",
+      "rows": 3194,
+      "hash": "58c8e99302d42f8ef7e585d675a0e2aec78242dff49fe646c0cca350bc0295b0",
+      "timestamp": "2026-09-16T14:48:36.552577"
+    },
+    {
+      "ticker": "ALLE",
+      "rows": 3194,
+      "hash": "da298a93d17d74b987d68ddb24aa93d4e5738a2760aa7be0c113000f45c3b90b",
+      "timestamp": "2026-09-16T14:48:38.030134"
+    },
+    {
+      "ticker": "AMAT",
+      "rows": 3194,
+      "hash": "4c041c384af8ab477cc1007f90c59fe3c0d83e3490ac578dcf2a83374869e2b7",
+      "timestamp": "2026-09-16T14:48:39.669587"
+    },
+    {
+      "ticker": "AMCR",
+      "rows": 3194,
+      "hash": "841c3dfe3f48ab32328b2e4d2f85c1d2d9ea333a2e201eb591dedf6cec579681",
+      "timestamp": "2026-09-16T14:48:41.158699"
+    },
+    {
+      "ticker": "AMD",
+      "rows": 3194,
+      "hash": "1e1243781f954c205e0e6e01725f38ff89b3d4f81ce7d749d01cd506156d30bc",
+      "timestamp": "2026-09-16T14:48:42.608129"
+    },
+    {
+      "ticker": "AME",
+      "rows": 3194,
+      "hash": "7147c942c716a964961901b0cc7b1bc617c94ab2643ffd2c8df66a595b33166c",
+      "timestamp": "2026-09-16T14:48:44.130052"
+    },
+    {
+      "ticker": "AMGN",
+      "rows": 3194,
+      "hash": "0f5c4c6c7d0810d93e0f0ada1dd7f2d8a106187d8a5a6ad3940a159838ae079a",
+      "timestamp": "2026-09-16T14:48:45.656537"
+    },
+    {
+      "ticker": "AMP",
+      "rows": 3194,
+      "hash": "ae6e4339c8cf6bcae0bca79b3540546500319433b8843b2ad15e06d924d8055b",
+      "timestamp": "2026-09-16T14:48:47.138288"
+    },
+    {
+      "ticker": "AMT",
+      "rows": 3194,
+      "hash": "d2c331f449ce33a7ddc3919b7005fea9f47edec09bc6cccfeda6bc26b02f36c5",
+      "timestamp": "2026-09-16T14:48:48.629567"
+    },
+    {
+      "ticker": "AMZN",
+      "rows": 3194,
+      "hash": "eb0dc5120d873eaa19faab701e607aaffe623d6d369ebe3e76d7ad34d0b20e18",
+      "timestamp": "2026-09-16T14:48:50.110280"
+    },
+    {
+      "ticker": "ANET",
+      "rows": 3087,
+      "hash": "76d74ad727a1f59d4d1b8902969a1c8bfe107dc21ef3d2955e31bd564857ba77",
+      "timestamp": "2026-09-16T14:48:51.597190"
+    },
+    {
+      "ticker": "AON",
+      "rows": 3194,
+      "hash": "73feecbc2daf72fe88b1dd5f20d1fcca6e785c8086ba12eb6e63622c060005e8",
+      "timestamp": "2026-09-16T14:48:53.122337"
+    },
+    {
+      "ticker": "AOS",
+      "rows": 3194,
+      "hash": "778ba8fc465fe4a37ab7575f4abf5ccbe0be6d6b4f52d534d72efac455d552d7",
+      "timestamp": "2026-09-16T14:48:54.635927"
+    },
+    {
+      "ticker": "APA",
+      "rows": 3194,
+      "hash": "e16674bc4f1aa217734246d1f262886e51ea42348a2730322092109544f39c15",
+      "timestamp": "2026-09-16T14:48:56.146634"
+    },
+    {
+      "ticker": "APD",
+      "rows": 3194,
+      "hash": "dd1b6a9ccf7a160b9325c7e726810d8685b984053cf31d547f919d9947abb38a",
+      "timestamp": "2026-09-16T14:48:57.723970"
+    },
+    {
+      "ticker": "APH",
+      "rows": 3194,
+      "hash": "b105d1b94e6d0417dc622c3da13d53c3f16bfe92a23330678d5c6e85fbb7eeb4",
+      "timestamp": "2026-09-16T14:48:59.297682"
+    },
+    {
+      "ticker": "APO",
+      "rows": 3194,
+      "hash": "c88f281a62c44d124d814be73ec4f1e032153ea9dfb962b0f11792328509f31a",
+      "timestamp": "2026-09-16T14:49:00.799552"
+    },
+    {
+      "ticker": "APTV",
+      "rows": 3194,
+      "hash": "aec3d77a218ecbf6b340965b98e56875bc9e2b4c94373071ebb7927f3f525194",
+      "timestamp": "2026-09-16T14:49:02.380382"
+    },
+    {
+      "ticker": "ARE",
+      "rows": 3194,
+      "hash": "23ae1167beeda4f743f5ee3bd4e17f9f69e6b1ceb6a68a31f18fe536945d50e6",
+      "timestamp": "2026-09-16T14:49:03.897469"
+    },
+    {
+      "ticker": "ATO",
+      "rows": 3194,
+      "hash": "ca6f8048fda7f5e2fcab8a5497bb215fa8db128d8c0e474d1b890a3bd2a2fbc1",
+      "timestamp": "2026-09-16T14:49:05.417544"
+    },
+    {
+      "ticker": "AVGO",
+      "rows": 3194,
+      "hash": "670f23110c4c50db3f0827cc3c0f2aa1d6427842faf71105926db8ecbdce31e4",
+      "timestamp": "2026-09-16T14:49:08.278240"
+    },
+    {
+      "ticker": "AVY",
+      "rows": 3194,
+      "hash": "a0eae52f07ef7246b28d11f07a43f4678b1bed524ada50fd90ef78b5f70c5a52",
+      "timestamp": "2026-09-16T14:49:09.879631"
+    },
+    {
+      "ticker": "AWK",
+      "rows": 3194,
+      "hash": "25d43f2eb61dba7aa4473b49e52e6dc7e302659e2abdbb799e79b00d6627b6ba",
+      "timestamp": "2026-09-16T14:49:11.432188"
+    },
+    {
+      "ticker": "AXON",
+      "rows": 3194,
+      "hash": "7b30ea82a05a9181c422fc48634db2cf75967e00be57f8da77fbba04a1126a8a",
+      "timestamp": "2026-09-16T14:49:12.887060"
+    },
+    {
+      "ticker": "AXP",
+      "rows": 3194,
+      "hash": "8960f4e4c0b41a33dc97478e75434847a3a3885b6e37d59336471c22b0a90034",
+      "timestamp": "2026-09-16T14:49:14.421268"
+    },
+    {
+      "ticker": "AZO",
+      "rows": 3194,
+      "hash": "a7eb37c305a72fb44134d18db9b86d450e4a39d230343b8f240a3ecc6429261e",
+      "timestamp": "2026-09-16T14:49:15.870616"
+    },
+    {
+      "ticker": "BA",
+      "rows": 3194,
+      "hash": "fd793b893b5afa73c278fb816f15bb4034ef64f1165a652cec58b79328e763de",
+      "timestamp": "2026-09-16T14:49:17.399813"
+    },
+    {
+      "ticker": "BAC",
+      "rows": 3194,
+      "hash": "17302f8639c5385824bb3f76d052ffd0728a4eab8b2bc2ad3551d9650a560769",
+      "timestamp": "2026-09-16T14:49:18.925480"
+    },
+    {
+      "ticker": "BALL",
+      "rows": 3194,
+      "hash": "b7cb4c7419bf0ba90fddaba6c133449a3780f387c04a1f4bd8011441c0040dcb",
+      "timestamp": "2026-09-16T14:49:20.429303"
+    },
+    {
+      "ticker": "BAX",
+      "rows": 3194,
+      "hash": "7f43489344b5303a56f7939df692f16b6b89097cc2695b72924d856cd3f82958",
+      "timestamp": "2026-09-16T14:49:22.007526"
+    },
+    {
+      "ticker": "BBY",
+      "rows": 3194,
+      "hash": "565954d92612cf4a8fd75df229612d49a6bdc5c95c210d51b56bbf685b333da0",
+      "timestamp": "2026-09-16T14:49:23.500102"
+    },
+    {
+      "ticker": "BDX",
+      "rows": 3194,
+      "hash": "7a0ddcbd4ba0e0ce83a729fdee900170b410c3a786048136b2c1566d5a766e05",
+      "timestamp": "2026-09-16T14:49:25.097901"
+    },
+    {
+      "ticker": "BEN",
+      "rows": 3194,
+      "hash": "460cb68a9a38c1b45797111751c21aa3b90d853113625daab2a9e47bb30a35cf",
+      "timestamp": "2026-09-16T14:49:26.635063"
+    },
+    {
+      "ticker": "BG",
+      "rows": 3194,
+      "hash": "8fff0c0ed4e37e65357ede01c31493e73ba6245b799dabb2bb4feaaede4cc681",
+      "timestamp": "2026-09-16T14:49:28.168604"
+    },
+    {
+      "ticker": "BIIB",
+      "rows": 3194,
+      "hash": "56fd3af09a4dc4e36cd1b2ee4f5353d5f1532692814077e068a37b72a30e8d80",
+      "timestamp": "2026-09-16T14:49:29.612843"
+    },
+    {
+      "ticker": "BKNG",
+      "rows": 3194,
+      "hash": "0bdeb764ce964f2eb419d712afb56ee6e774b3b433ddfb7f6f60ebe69ce85125",
+      "timestamp": "2026-09-16T14:49:32.744637"
+    },
+    {
+      "ticker": "BKR",
+      "rows": 3194,
+      "hash": "2055f48c70a1e064e6fb36a6ad732d10954b5fec4bddb6b2457b6a5db2abae30",
+      "timestamp": "2026-09-16T14:49:34.245199"
+    },
+    {
+      "ticker": "BLDR",
+      "rows": 3194,
+      "hash": "10f1c1b4d2827da6c52ad49a1cd8f4903e00354ebbe86f3ee85513b56cc1b373",
+      "timestamp": "2026-09-16T14:49:35.736958"
+    },
+    {
+      "ticker": "BLK",
+      "rows": 3194,
+      "hash": "0dc5a4a163c9e9894a8f869671e904338e8bc909b9f3119a6c1de8513f23ff00",
+      "timestamp": "2026-09-16T14:49:37.501596"
+    },
+    {
+      "ticker": "BMY",
+      "rows": 3194,
+      "hash": "67fc90bafb174d36b580d528efad1e1f6d3d6f22d19163c402186b0625c73474",
+      "timestamp": "2026-09-16T14:49:39.198928"
+    },
+    {
+      "ticker": "BR",
+      "rows": 3194,
+      "hash": "08e14172f43efde201976366e62306df5990b28276142b79129a35026f3bb7cc",
+      "timestamp": "2026-09-16T14:49:40.796201"
+    },
+    {
+      "ticker": "BRO",
+      "rows": 3194,
+      "hash": "508c69a389c803645bd45b214b710bec507fc2504d54f3665cd008a254be8965",
+      "timestamp": "2026-09-16T14:49:42.472635"
+    },
+    {
+      "ticker": "BSX",
+      "rows": 3194,
+      "hash": "86fa3a235af999e3c69f479d1d91679292878b4d9ef1ab4b77c2f27625ef1c8f",
+      "timestamp": "2026-09-16T14:49:44.031790"
+    },
+    {
+      "ticker": "BX",
+      "rows": 3194,
+      "hash": "250cde7f4afc5a41a5311b6763f04983d0278dbea5d477a1e3a8bc7ccf15463c",
+      "timestamp": "2026-09-16T14:49:45.745337"
+    },
+    {
+      "ticker": "BXP",
+      "rows": 3194,
+      "hash": "546af36a79ff166823dc672a0f8c7f37b51c4162946d8ab4467f458eb09decee",
+      "timestamp": "2026-09-16T14:49:47.366220"
+    },
+    {
+      "ticker": "C",
+      "rows": 3194,
+      "hash": "c156c79578193806622adba58cf609f515a46678456aeca9cc30f0075956857c",
+      "timestamp": "2026-09-16T14:49:48.955430"
+    },
+    {
+      "ticker": "CAG",
+      "rows": 3194,
+      "hash": "f83f935f743f0a94977112a7ae336722526be759ad83855f6518049bd7308ad4",
+      "timestamp": "2026-09-16T14:49:50.639752"
+    },
+    {
+      "ticker": "CAH",
+      "rows": 3194,
+      "hash": "158bb13991255ce8b3e268b320875bdd943624892d2c432c413ce18a7d09f08b",
+      "timestamp": "2026-09-16T14:49:52.293010"
+    },
+    {
+      "ticker": "CARR",
+      "rows": 1631,
+      "hash": "199e9c00de321e0618b0ca8c4ecb67c3222d443f59f5e4738fefa4a81c6c630a",
+      "timestamp": "2026-09-16T14:49:53.770710"
+    },
+    {
+      "ticker": "CAT",
+      "rows": 3194,
+      "hash": "fb0a672c82577f2f5b4dc03cd98eb7b99b09d6f24f97a7cc317bf8ef864f6a15",
+      "timestamp": "2026-09-16T14:49:55.403264"
+    },
+    {
+      "ticker": "CB",
+      "rows": 3194,
+      "hash": "c40263cab9e1dc7db3db7659f97f95df01efa7e642ae9aa477c276765055d506",
+      "timestamp": "2026-09-16T14:49:57.073364"
+    },
+    {
+      "ticker": "CBOE",
+      "rows": 3194,
+      "hash": "1f6ce64e44a8a7741dd0429c27d91bfb5ae4c8bc49858a08b56152c531a4dabb",
+      "timestamp": "2026-09-16T14:49:58.666699"
+    },
+    {
+      "ticker": "CBRE",
+      "rows": 3194,
+      "hash": "655911764eacaea878c6eeeb3f9a00a690e9b829f43c8a2faa00cea166dd9fbb",
+      "timestamp": "2026-09-16T14:50:00.221481"
+    },
+    {
+      "ticker": "CCI",
+      "rows": 3194,
+      "hash": "d3cb9bd122df5a5de5b2b93cd3c98a368183e3263d168f5771de9d1bd81a5875",
+      "timestamp": "2026-09-16T14:50:01.844871"
+    },
+    {
+      "ticker": "CCL",
+      "rows": 3194,
+      "hash": "0f57e7627aa2ea55c54dc09af5063eba5585627e93542021dceaa9d563b876dc",
+      "timestamp": "2026-09-16T14:50:03.546029"
+    },
+    {
+      "ticker": "CDNS",
+      "rows": 3194,
+      "hash": "fa9ac361db05a403bea2e09b9f8f6d71ca899cba8a08ba6fa3d138ed5c501684",
+      "timestamp": "2026-09-16T14:50:05.091504"
+    },
+    {
+      "ticker": "CDW",
+      "rows": 3194,
+      "hash": "7b33dfe0dcaa1bdc149cfa19618701cd28668d0ee605c16586b6bf235b0fca6b",
+      "timestamp": "2026-09-16T14:50:06.580977"
+    },
+    {
+      "ticker": "CEG",
+      "rows": 1168,
+      "hash": "8dab191f4773fcf3b7b292183ee4deb8450fd1230f3efe8e136191cb9872f20d",
+      "timestamp": "2026-09-16T14:50:07.976415"
+    },
+    {
+      "ticker": "CF",
+      "rows": 3194,
+      "hash": "e3a38682475d393701532264a23e4885036c149b59ea6cd87b1d5bd5eebc5c4f",
+      "timestamp": "2026-09-16T14:50:09.488769"
+    },
+    {
+      "ticker": "CFG",
+      "rows": 3011,
+      "hash": "f8b98bda6ef7538100ad69f07b4f8db85dd28fe77f657b75ffeee6ff97618329",
+      "timestamp": "2026-09-16T14:50:11.059010"
+    },
+    {
+      "ticker": "CHD",
+      "rows": 3194,
+      "hash": "e91a828b44d94481f5935dc05e6c431aafdbf1e5e53dc95fa028a9a5d8f22d4a",
+      "timestamp": "2026-09-16T14:50:12.672949"
+    },
+    {
+      "ticker": "CHRW",
+      "rows": 3194,
+      "hash": "2909198f37348cd34cb5c6b292d1abcd7635d714c2d346173bf74c84b2cbfd99",
+      "timestamp": "2026-09-16T14:50:14.194411"
+    },
+    {
+      "ticker": "CHTR",
+      "rows": 3194,
+      "hash": "e566bb1a4f5f421586b135eeae4b7365542c8f26b1fcc5352f480701a90899c5",
+      "timestamp": "2026-09-16T14:50:15.683233"
+    },
+    {
+      "ticker": "CI",
+      "rows": 3194,
+      "hash": "08e78813abab544e9c3c86cccf71a965ccd2789bb26ad0c7e07295ae1cb17905",
+      "timestamp": "2026-09-16T14:50:17.353748"
+    },
+    {
+      "ticker": "CINF",
+      "rows": 3194,
+      "hash": "17c22e0f0feb97726fa91d868e7fe62764dc367bb9e47451136591e03596acc0",
+      "timestamp": "2026-09-16T14:50:18.917130"
+    },
+    {
+      "ticker": "CL",
+      "rows": 3194,
+      "hash": "efe453ef8b5cb8b9b270c6feb056d25157c7e27424449e273cd2134b4b9b0e45",
+      "timestamp": "2026-09-16T14:50:20.480566"
+    },
+    {
+      "ticker": "CLX",
+      "rows": 3194,
+      "hash": "5cf1eabe7b1c609d0eabd42c32d4c469e3cbf5a5eec845bbc4607b2a7551e058",
+      "timestamp": "2026-09-16T14:50:22.009181"
+    },
+    {
+      "ticker": "CMCSA",
+      "rows": 3194,
+      "hash": "e3f91cbf2b47f6a9d09642c7b09a9b6825f6cfb16070c24797f43b6d44857862",
+      "timestamp": "2026-09-16T14:50:23.609541"
+    },
+    {
+      "ticker": "CME",
+      "rows": 3194,
+      "hash": "f1be37930652875c93f27e03434476dacc3bdc4b596406212717b69918dbff88",
+      "timestamp": "2026-09-16T14:50:25.128886"
+    },
+    {
+      "ticker": "CMG",
+      "rows": 3194,
+      "hash": "f38d27f2b6d72912f5cf6776040d82c23e8f8947884e1c11223c253673f70dc6",
+      "timestamp": "2026-09-16T14:50:26.677678"
+    },
+    {
+      "ticker": "CMI",
+      "rows": 3194,
+      "hash": "9d66059a25567e39e9c1322c61e2b63717e11a68c3ffd37987fc4e386cb9e5d5",
+      "timestamp": "2026-09-16T14:50:28.269762"
+    },
+    {
+      "ticker": "CMS",
+      "rows": 3194,
+      "hash": "166529aab5edc470005c108ce08f730cf89091f3a49e3570d1e4baf550b28782",
+      "timestamp": "2026-09-16T14:50:29.786502"
+    },
+    {
+      "ticker": "CNC",
+      "rows": 3194,
+      "hash": "dce6818e5caa943393070e56ffa38b3878d4a15f33b4fb6eb96d173478dfc65f",
+      "timestamp": "2026-09-16T14:50:31.244827"
+    },
+    {
+      "ticker": "CNP",
+      "rows": 3194,
+      "hash": "163576513f12ad52b05c143c3c0ae1860f98f4dae226bc52c85c995916c2f107",
+      "timestamp": "2026-09-16T14:50:32.784097"
+    },
+    {
+      "ticker": "COF",
+      "rows": 3194,
+      "hash": "12fd8b72ac53deaf700aa6bed5386f4bff1f516e731960342db8d587a7fb037e",
+      "timestamp": "2026-09-16T14:50:34.314225"
+    },
+    {
+      "ticker": "COIN",
+      "rows": 1362,
+      "hash": "1468bb0fc9a2ddd941e8740536e88b629f3c5b9c09bbb28d6934c07db2683c85",
+      "timestamp": "2026-09-16T14:50:35.685701"
+    },
+    {
+      "ticker": "COO",
+      "rows": 3194,
+      "hash": "39fb55ad63a83f84d572721449fef2b334798f6e3d750ca5261385af3e2c4a4e",
+      "timestamp": "2026-09-16T14:50:37.223622"
+    },
+    {
+      "ticker": "COP",
+      "rows": 3194,
+      "hash": "da548938ce404dc649fb7221c2af2735b3008a9f4920a078e94bcf0629ad3665",
+      "timestamp": "2026-09-16T14:50:38.777877"
+    },
+    {
+      "ticker": "COR",
+      "rows": 3194,
+      "hash": "c0532c11377f677e086ac1c9f51f99aaec3dcfeee4fff494880c2cb83ae4657c",
+      "timestamp": "2026-09-16T14:50:40.296314"
+    },
+    {
+      "ticker": "COST",
+      "rows": 3194,
+      "hash": "f47271046a5347fb2178b0433e8427d00bdef077ec44f20cbd55473d5fc2814c",
+      "timestamp": "2026-09-16T14:50:41.807737"
+    },
+    {
+      "ticker": "CPAY",
+      "rows": 3194,
+      "hash": "ac90afb6102e3c7c025a83f0016dd1f193ba3ea212c59889621d3e835356d6dc",
+      "timestamp": "2026-09-16T14:50:43.263514"
+    },
+    {
+      "ticker": "CPB",
+      "rows": 3194,
+      "hash": "5ecee0f111fa55aa485a23563eb69c62f0c8837c6fda8dbbb49d7f9bd070f16f",
+      "timestamp": "2026-09-16T14:50:44.781727"
+    },
+    {
+      "ticker": "CPRT",
+      "rows": 3194,
+      "hash": "23fb06996e3354fc5c64d0581c886c02ad2e5483da021e3d842c28d8b3f90674",
+      "timestamp": "2026-09-16T14:50:46.241428"
+    },
+    {
+      "ticker": "CPT",
+      "rows": 3194,
+      "hash": "d575ffff80f493cd443df5fec89b4adafbba3a382ad3a9fc350378296200b768",
+      "timestamp": "2026-09-16T14:50:47.775391"
+    },
+    {
+      "ticker": "CRL",
+      "rows": 3194,
+      "hash": "c4105dcb68ec9d34d12ae3dc1a696fb57a2f9f09321f92acfceb84d0fa3ce80b",
+      "timestamp": "2026-09-16T14:50:49.269141"
+    },
+    {
+      "ticker": "CRM",
+      "rows": 3194,
+      "hash": "9eccebc53a583955a75d0510ce0d65f9544d400669dd9911301c4e8f483c51ac",
+      "timestamp": "2026-09-16T14:50:50.753684"
+    },
+    {
+      "ticker": "CRWD",
+      "rows": 1825,
+      "hash": "07b326a2a57ac34f12943beb2d152fe362f8123b4d0c8120826c865e61602947",
+      "timestamp": "2026-09-16T14:50:52.134426"
+    },
+    {
+      "ticker": "CSCO",
+      "rows": 3194,
+      "hash": "6ff5388caa32268d9219fdf41805e214039dbe690f9f9317e5865b889e6da128",
+      "timestamp": "2026-09-16T14:50:53.642993"
+    },
+    {
+      "ticker": "CSGP",
+      "rows": 3194,
+      "hash": "df262cc334016b6d25c3b8f3bff3b75d5f8baa2b1c20d688dce4c11ea0ce9be4",
+      "timestamp": "2026-09-16T14:50:55.131520"
+    },
+    {
+      "ticker": "CSX",
+      "rows": 3194,
+      "hash": "48e1aed6a2a76e8f8fa8e34e03388bb37b2d9668ac0b5ae06dd5ed1bc25d07dc",
+      "timestamp": "2026-09-16T14:50:56.660099"
+    },
+    {
+      "ticker": "CTAS",
+      "rows": 3194,
+      "hash": "29e261e047239428943d390a8cac9bd13df4f2e8c0f9a2fbc9e8bdd73e31493e",
+      "timestamp": "2026-09-16T14:50:58.234064"
+    },
+    {
+      "ticker": "CTSH",
+      "rows": 3194,
+      "hash": "63048cfdcbc6b96088ba016bb70bcbafeb16239d3ff3abdd15ca347029e22e15",
+      "timestamp": "2026-09-16T14:51:01.654488"
+    },
+    {
+      "ticker": "CTVA",
+      "rows": 1837,
+      "hash": "bcb8cbad7a30a459b086968f3ba67d48761cc6d8eed2fdfce4bfbe1531f387de",
+      "timestamp": "2026-09-16T14:51:03.101353"
+    },
+    {
+      "ticker": "CVS",
+      "rows": 3194,
+      "hash": "0e34c2edf9d369247fd62e3be641f1b6a4274de57ed65ee80344e50bbc88a811",
+      "timestamp": "2026-09-16T14:51:04.642008"
+    },
+    {
+      "ticker": "CVX",
+      "rows": 3194,
+      "hash": "fce87ea16160fbc2ffbcb60acd3f112f495397f19fd72f5611cff029df90226e",
+      "timestamp": "2026-09-16T14:51:06.218535"
+    },
+    {
+      "ticker": "CZR",
+      "rows": 3013,
+      "hash": "8815bcb5e6d6ee89fae8525344acee61ba1c72f718d38fe7fac95277abb08bd9",
+      "timestamp": "2026-09-16T14:51:07.674792"
+    },
+    {
+      "ticker": "D",
+      "rows": 3194,
+      "hash": "b596f4112b263728ec0434c6b08659bb599ce554b292ef069b3f460e9607eb99",
+      "timestamp": "2026-09-16T14:51:09.183932"
+    },
+    {
+      "ticker": "DAL",
+      "rows": 3194,
+      "hash": "ae96d6a9383723aaedce7633236f485de28eb07fb73ddcd755a8a39cf6bda827",
+      "timestamp": "2026-09-16T14:51:10.721369"
+    },
+    {
+      "ticker": "DASH",
+      "rows": 1447,
+      "hash": "28880bb0bc5a2a18239e3bea3b9aa6cf704cd9deb78277406a77252bd39b3fad",
+      "timestamp": "2026-09-16T14:51:12.138955"
+    },
+    {
+      "ticker": "DD",
+      "rows": 3194,
+      "hash": "ed7ea59beff3f4f6b8a16b098aea0901018fc01d597a6183287a3134ad8a8a3a",
+      "timestamp": "2026-09-16T14:51:15.424765"
+    },
+    {
+      "ticker": "DDOG",
+      "rows": 1756,
+      "hash": "74b58100000b6f099d9c55fc7c6c3faed486af1527a2fc125c78fb7e285c8d2b",
+      "timestamp": "2026-09-16T14:51:16.807918"
+    },
+    {
+      "ticker": "DE",
+      "rows": 3194,
+      "hash": "5f14d667dd6f6ab98399af99a189c90b389ebd5f0a51f74ecdeaf5d0007cb6f9",
+      "timestamp": "2026-09-16T14:51:18.362942"
+    },
+    {
+      "ticker": "DECK",
+      "rows": 3194,
+      "hash": "a63344b9bb421abb57c8f6d1d0133480618b3367336eed55eaf9cee6477c38f1",
+      "timestamp": "2026-09-16T14:51:19.840186"
+    },
+    {
+      "ticker": "DELL",
+      "rows": 2533,
+      "hash": "94f7022cf2b252d4044b03c659b9dd8c9ecf5e1bcaac5928c0a75634dad861d9",
+      "timestamp": "2026-09-16T14:51:21.364175"
+    },
+    {
+      "ticker": "DG",
+      "rows": 3194,
+      "hash": "2f435181c210ea6d1b26fc770d7c303c64fd84a8a040194f83ed10f7d2ff3bed",
+      "timestamp": "2026-09-16T14:51:22.865731"
+    },
+    {
+      "ticker": "DGX",
+      "rows": 3194,
+      "hash": "0fc792381be8107b7004c0826f5ea7416970e0a69fcdd546fe5d96a1f8d39dcf",
+      "timestamp": "2026-09-16T14:51:24.378136"
+    },
+    {
+      "ticker": "DHI",
+      "rows": 3194,
+      "hash": "c703ec452e151eac98c370d07aedc552c051f080f0015337bfc1c69046a71ace",
+      "timestamp": "2026-09-16T14:51:25.885229"
+    },
+    {
+      "ticker": "DHR",
+      "rows": 3194,
+      "hash": "5e6e09c3620eb7109f966f02fffb9251de3c55869991d72baa838ad2cf477b81",
+      "timestamp": "2026-09-16T14:51:27.466367"
+    },
+    {
+      "ticker": "DIS",
+      "rows": 3194,
+      "hash": "5af53d75fa24ae8c0694954065591cfeb2a8072effb8a4e1e690cf5105e0cec9",
+      "timestamp": "2026-09-16T14:51:29.018528"
+    },
+    {
+      "ticker": "DLR",
+      "rows": 3194,
+      "hash": "93e5befaf4c7c2a7210b3002145fec83c5ed934bdffabd17e7cda1ca678a409d",
+      "timestamp": "2026-09-16T14:51:30.522598"
+    },
+    {
+      "ticker": "DLTR",
+      "rows": 3194,
+      "hash": "621f31c205bbea98a7072d41a7668a5a6b6ffcbabd4533d8ce6213fe2a9b2fbe",
+      "timestamp": "2026-09-16T14:51:31.980782"
+    },
+    {
+      "ticker": "DOC",
+      "rows": 3194,
+      "hash": "56cdda8f68d69034f853a516ad612b69ac175dbf5b3ec2e64389b84c3f33049b",
+      "timestamp": "2026-09-16T14:51:33.551637"
+    },
+    {
+      "ticker": "DOV",
+      "rows": 3194,
+      "hash": "c23cee12e760e8ae8636fa50bb5c001d40e16dfa28c1ab5a12d06feeebdb8188",
+      "timestamp": "2026-09-16T14:51:35.123817"
+    },
+    {
+      "ticker": "DOW",
+      "rows": 1883,
+      "hash": "23ad8fe9bc75a3b5e186cb93394215dd4e9de7efddc1fc2989d3080988e52eef",
+      "timestamp": "2026-09-16T14:51:36.598875"
+    },
+    {
+      "ticker": "DPZ",
+      "rows": 3194,
+      "hash": "746756d5b79ad2a15d8ac4478c3492079a0adf1e6e7c7d98fa1fe3724bb02b28",
+      "timestamp": "2026-09-16T14:51:38.144010"
+    },
+    {
+      "ticker": "DRI",
+      "rows": 3194,
+      "hash": "8c1655863c49ae1d5630aa5212737abc565d368bc91e3e52b832f8e4517ab6a1",
+      "timestamp": "2026-09-16T14:51:39.712380"
+    },
+    {
+      "ticker": "DTE",
+      "rows": 3194,
+      "hash": "1d98a965d74f3f5fda082b260f151588c20633ee9ed760018f39271408d9acb8",
+      "timestamp": "2026-09-16T14:51:41.303830"
+    },
+    {
+      "ticker": "DUK",
+      "rows": 3194,
+      "hash": "ef06d37d9787240e31380902287eafa0b3409580776736d3cd75cd541aeff261",
+      "timestamp": "2026-09-16T14:51:42.810052"
+    },
+    {
+      "ticker": "DVA",
+      "rows": 3194,
+      "hash": "afb7e4754f4e138aa933cda6877ccb47fa78b679f67fa6ac9d9a1135ada874ce",
+      "timestamp": "2026-09-16T14:51:44.245632"
+    },
+    {
+      "ticker": "DVN",
+      "rows": 3194,
+      "hash": "22aa4e9b204a1f535cc1d96add4c7a70e919179de0afe57badc0165717afed72",
+      "timestamp": "2026-09-16T14:51:46.304617"
+    },
+    {
+      "ticker": "DXCM",
+      "rows": 3194,
+      "hash": "a283b7fcfe5b3d92f947028f606925f4da1824e6f752380416535eb69e7ff47b",
+      "timestamp": "2026-09-16T14:51:47.762326"
+    },
+    {
+      "ticker": "EBAY",
+      "rows": 3194,
+      "hash": "20b6529585572e70718d5adfd76d6ff37da01deb865ffa5eaee2f1b470debeda",
+      "timestamp": "2026-09-16T14:51:50.546268"
+    },
+    {
+      "ticker": "ECL",
+      "rows": 3194,
+      "hash": "b374020460541ca231778d57c02abf1ed0540622c8ef65db0b9dddf167d1be59",
+      "timestamp": "2026-09-16T14:51:52.063723"
+    },
+    {
+      "ticker": "ED",
+      "rows": 3194,
+      "hash": "f9c1f885498be6afec9847829b903897715e91d76d54585d1886070c0497ace4",
+      "timestamp": "2026-09-16T14:51:53.625851"
+    },
+    {
+      "ticker": "EFX",
+      "rows": 3194,
+      "hash": "1fb2e05da8dcda8d4dc86efc57af288702d6754e69d6f9b6e3157f46a62597d8",
+      "timestamp": "2026-09-16T14:51:55.138664"
+    },
+    {
+      "ticker": "EG",
+      "rows": 3194,
+      "hash": "ec25006d8329da768b7749b54a85c3c3b6e049a47a453973249ec798ee2c6350",
+      "timestamp": "2026-09-16T14:51:56.656015"
+    },
+    {
+      "ticker": "EIX",
+      "rows": 3194,
+      "hash": "a0ba83b8c4cafa760f11b63b927236b6abe364c39bb505421f9c776a23ea3ee4",
+      "timestamp": "2026-09-16T14:51:58.199679"
+    },
+    {
+      "ticker": "EL",
+      "rows": 3194,
+      "hash": "86c6150f36166793080c52e4b27e8ecd50748350aee64eb0225833ff411138dd",
+      "timestamp": "2026-09-16T14:51:59.696400"
+    },
+    {
+      "ticker": "ELV",
+      "rows": 3194,
+      "hash": "8b2004fd44fd0f12f1a282f7c3a1fdc88442d0a8f702a84ac43cc2bc18436157",
+      "timestamp": "2026-09-16T14:52:01.222515"
+    },
+    {
+      "ticker": "EMN",
+      "rows": 3194,
+      "hash": "e5894933b902da56d46472fa4f3b1aad5c5835abf34dec52a128f7e409533aa0",
+      "timestamp": "2026-09-16T14:52:02.721268"
+    },
+    {
+      "ticker": "EMR",
+      "rows": 3194,
+      "hash": "469fd78b819ed0853a333c4d6424f88d59f1ce52e3b3b126b1a12cc0dac98bbf",
+      "timestamp": "2026-09-16T14:52:04.246304"
+    },
+    {
+      "ticker": "ENPH",
+      "rows": 3194,
+      "hash": "be6395edaab3e49e327cb74584941c6473826f33b9f3b279ec5997e982c25e32",
+      "timestamp": "2026-09-16T14:52:05.695987"
+    },
+    {
+      "ticker": "EOG",
+      "rows": 3194,
+      "hash": "597067612372a720e93e9a9809dc2572ef3e1df0ae61ed88aff63aaa0b90436f",
+      "timestamp": "2026-09-16T14:52:07.232226"
+    },
+    {
+      "ticker": "EPAM",
+      "rows": 3194,
+      "hash": "5a7e75a8762215d05af5350b872fba87d123f7194c01235a4870ce6ed34927e3",
+      "timestamp": "2026-09-16T14:52:08.694434"
+    },
+    {
+      "ticker": "EQIX",
+      "rows": 3194,
+      "hash": "82d5bfa71baedb9ca272126ce7b024ab953bd8157a562c15b9e26571c26fe6a5",
+      "timestamp": "2026-09-16T14:52:10.295534"
+    },
+    {
+      "ticker": "EQT",
+      "rows": 3194,
+      "hash": "c82df20c656f7b0e1418f58a352ce4c7b4e672081abf29a9aeefab02cf686e1c",
+      "timestamp": "2026-09-16T14:52:13.298895"
+    },
+    {
+      "ticker": "ERIE",
+      "rows": 3194,
+      "hash": "9e11b033b5be5b5d1e97852ecb8605675aa6c6ea31a949c7c788217c7a3f0152",
+      "timestamp": "2026-09-16T14:52:14.817764"
+    },
+    {
+      "ticker": "ES",
+      "rows": 3194,
+      "hash": "9b314ea98395ca1d1cfe6671369f4f92227d827ff532e081d3b7ab654145f1d1",
+      "timestamp": "2026-09-16T14:52:16.359623"
+    },
+    {
+      "ticker": "ESS",
+      "rows": 3194,
+      "hash": "95cc1d87df8eb240767d2b4593385091879de8962a2af4b5e28c71470cc295a5",
+      "timestamp": "2026-09-16T14:52:17.869702"
+    },
+    {
+      "ticker": "ETN",
+      "rows": 3194,
+      "hash": "7e138cdf0bbde6471aa376662bed301cfb2f992885cbfb5250a30ed9b70e26e8",
+      "timestamp": "2026-09-16T14:52:19.421305"
+    },
+    {
+      "ticker": "ETR",
+      "rows": 3194,
+      "hash": "43e5fa31135d5bb672f3e32876d62dd4dbb3cdc974ba01706d7172cff73d9958",
+      "timestamp": "2026-09-16T14:52:20.938006"
+    },
+    {
+      "ticker": "EVRG",
+      "rows": 3194,
+      "hash": "be876c567f369b9d4717b2325ca001873512c8deee19282e47d565c1ca04128b",
+      "timestamp": "2026-09-16T14:52:22.458896"
+    },
+    {
+      "ticker": "EW",
+      "rows": 3194,
+      "hash": "7490fa5ac67679b9b071cabd16c83b70eb64f004236c4ecc930d2591e0b71c0a",
+      "timestamp": "2026-09-16T14:52:23.960412"
+    },
+    {
+      "ticker": "EXC",
+      "rows": 3194,
+      "hash": "4be244219622817c8079de2423841cf5e959dd4ef31f3919d0cc3e803a7b6bac",
+      "timestamp": "2026-09-16T14:52:25.578727"
+    },
+    {
+      "ticker": "EXE",
+      "rows": 1405,
+      "hash": "a7f5ddeb4063d0f17296d4440e42aaf48ff381ce39b526b4def71d78d53848e9",
+      "timestamp": "2026-09-16T14:52:26.967965"
+    },
+    {
+      "ticker": "EXPD",
+      "rows": 3194,
+      "hash": "56f260772dbd6d004372cfa8dddebb85942bb426f9ce4f12abd559c6611ff27e",
+      "timestamp": "2026-09-16T14:52:28.490759"
+    },
+    {
+      "ticker": "EXPE",
+      "rows": 3194,
+      "hash": "18eb0c6a50aebdd9caac2fa75f7401040c513cb4865cb0187512f9ceec4253a2",
+      "timestamp": "2026-09-16T14:52:29.986358"
+    },
+    {
+      "ticker": "EXR",
+      "rows": 3194,
+      "hash": "83d100069f18a03f3a06d5a7eea1cc6ee9006b819bd437cdaa98481d7782fae1",
+      "timestamp": "2026-09-16T14:52:31.482881"
+    },
+    {
+      "ticker": "F",
+      "rows": 3194,
+      "hash": "1d25a6b165f16b41816d95b713a51fdac9c516d57f771ac99df6b9918d2e594f",
+      "timestamp": "2026-09-16T14:52:33.039310"
+    },
+    {
+      "ticker": "FANG",
+      "rows": 3194,
+      "hash": "e2b3ec73927c2d0c44f63a5d625e6bf372dcb006227d80fb824b34890853f509",
+      "timestamp": "2026-09-16T14:52:34.564251"
+    },
+    {
+      "ticker": "FAST",
+      "rows": 3194,
+      "hash": "5ec52d5c1492169a6dc63360193e0f822c8787440f781a0a56e1aa38e0c8ffc3",
+      "timestamp": "2026-09-16T14:52:36.146221"
+    },
+    {
+      "ticker": "FCX",
+      "rows": 3194,
+      "hash": "f8127eabe6b422d5c477ceff3d8cf50f245521e270f61dcbf1d7270e93006666",
+      "timestamp": "2026-09-16T14:52:37.657771"
+    },
+    {
+      "ticker": "FDS",
+      "rows": 3194,
+      "hash": "4519f5b4c4fa5ddac32cb210955d10fa0fc2103f0c2e8e0267b914973c3b063a",
+      "timestamp": "2026-09-16T14:52:39.209653"
+    },
+    {
+      "ticker": "FDX",
+      "rows": 3194,
+      "hash": "00b41e3318709eb59e01b56253746b3ba75b97e2f3e02374f563481c3b3995d3",
+      "timestamp": "2026-09-16T14:52:40.799672"
+    },
+    {
+      "ticker": "FE",
+      "rows": 3194,
+      "hash": "e968353fb49718ad3ba7aaa631b2f077b553a2805eba94f4f16c5abcc19b17f9",
+      "timestamp": "2026-09-16T14:52:42.354027"
+    },
+    {
+      "ticker": "FFIV",
+      "rows": 3194,
+      "hash": "090c8767ef9bce8407473c51bcbf85a1b01fad47a0622199fa84f89dbd916ede",
+      "timestamp": "2026-09-16T14:52:43.797493"
+    },
+    {
+      "ticker": "FICO",
+      "rows": 3194,
+      "hash": "bad8f1f7b4aa9bc0a91fbc8367b9ffdc5a281c97c96b33ac5d98208c46784378",
+      "timestamp": "2026-09-16T14:52:47.016226"
+    },
+    {
+      "ticker": "FIS",
+      "rows": 3194,
+      "hash": "d55110887e5171a1f553fead13c196c71ca902d8f774a007f479c521c6aa6ba2",
+      "timestamp": "2026-09-16T14:52:48.508548"
+    },
+    {
+      "ticker": "FITB",
+      "rows": 3194,
+      "hash": "2650d64c10f84390acc756c90bde6649d6f08d8b9ae567c3af33c9619e1e0b1e",
+      "timestamp": "2026-09-16T14:52:50.017217"
+    },
+    {
+      "ticker": "FOX",
+      "rows": 1888,
+      "hash": "8c291fac0779bd5840d2589199b5ff1590af35251721ce2465c2e3b423107de8",
+      "timestamp": "2026-09-16T14:52:51.478570"
+    },
+    {
+      "ticker": "FOXA",
+      "rows": 1889,
+      "hash": "a6f26fc80708ae8e58693df24135ca62ea68bedf39984bad1f41046a385b363d",
+      "timestamp": "2026-09-16T14:52:52.958777"
+    },
+    {
+      "ticker": "FRT",
+      "rows": 3194,
+      "hash": "c40a95b8e7d06daa710958c9fe5fa2f29ee8701747d6f13906403524d7dda0d6",
+      "timestamp": "2026-09-16T14:52:54.470829"
+    },
+    {
+      "ticker": "FSLR",
+      "rows": 3194,
+      "hash": "2f0a7adb8dabf1c8532632f6434d4122d11d1e5f4a1f06c688fa7eb817ffad73",
+      "timestamp": "2026-09-16T14:52:55.925175"
+    },
+    {
+      "ticker": "FTNT",
+      "rows": 3194,
+      "hash": "7ba304e5e6d2a192c463dbcd063b502e7ab3901b7cedbe7cc9e0b99a5c03ddc6",
+      "timestamp": "2026-09-16T14:52:57.377225"
+    },
+    {
+      "ticker": "FTV",
+      "rows": 2564,
+      "hash": "1bcd3bacfc77e08dd3601e7557f26caf9c7252592745ef108a7c96d6508ec3ec",
+      "timestamp": "2026-09-16T14:52:59.017866"
+    },
+    {
+      "ticker": "GD",
+      "rows": 3194,
+      "hash": "747310c7e29e5eae35a0a7d54e0ee9856f85d5d9032701ed8ec71be6b90428ae",
+      "timestamp": "2026-09-16T14:53:00.576815"
+    },
+    {
+      "ticker": "GDDY",
+      "rows": 2882,
+      "hash": "b236f625f115c2cc25c50fcb82155657bba2f2fc953fe57a06ff9bed37363122",
+      "timestamp": "2026-09-16T14:53:02.085233"
+    },
+    {
+      "ticker": "GE",
+      "rows": 3194,
+      "hash": "f74f1deac8a68d85a1a26df9f79720179e66006da2fd018d955359986adcf23d",
+      "timestamp": "2026-09-16T14:53:03.687805"
+    },
+    {
+      "ticker": "GEHC",
+      "rows": 939,
+      "hash": "713861a4a9097d0fcb56488ecfc7c958ad3f30857e44e82f298d6897ddbea05d",
+      "timestamp": "2026-09-16T14:53:05.076664"
+    },
+    {
+      "ticker": "GEN",
+      "rows": 3194,
+      "hash": "37b58013af9800e665e0b8dd8d189bb84983410dcba060302d8d07cd1df8ff8f",
+      "timestamp": "2026-09-16T14:53:06.640891"
+    },
+    {
+      "ticker": "GEV",
+      "rows": 619,
+      "hash": "97c225cfd3e94b460441a70258d2bbe1cd8cc9d39ed919a7d0a96113e942d060",
+      "timestamp": "2026-09-16T14:53:08.001779"
+    },
+    {
+      "ticker": "GILD",
+      "rows": 3194,
+      "hash": "b05bf5d6f04519511a69195cfe215e6e6b5b00f9cc2bc15011f75ac0e7c2a35c",
+      "timestamp": "2026-09-16T14:53:09.504721"
+    },
+    {
+      "ticker": "GIS",
+      "rows": 3194,
+      "hash": "8c3b792a752289d36895bb543e3b0d1bd6e8ea033104f8330fbbbe8bb344c0cc",
+      "timestamp": "2026-09-16T14:53:11.047236"
+    },
+    {
+      "ticker": "GL",
+      "rows": 3194,
+      "hash": "81307403569a0ab3428128bc4edd52a2a6ac6596e64c49d31331257ca092036d",
+      "timestamp": "2026-09-16T14:53:12.594285"
+    },
+    {
+      "ticker": "GLW",
+      "rows": 3194,
+      "hash": "bb892d170d6b5845fbb251a10478f67f3cc3495c4db427a37b2a212975d39388",
+      "timestamp": "2026-09-16T14:53:14.102660"
+    },
+    {
+      "ticker": "GM",
+      "rows": 3194,
+      "hash": "9f96284ca94f223869a4f43d5c3f0e343e28fb5fa625cc802406fed05c6a8663",
+      "timestamp": "2026-09-16T14:53:15.584730"
+    },
+    {
+      "ticker": "GNRC",
+      "rows": 3194,
+      "hash": "d592e6f16c0cc504477a8627b746a68fc75262db07434f7374a868fff98b3a51",
+      "timestamp": "2026-09-16T14:53:17.042645"
+    },
+    {
+      "ticker": "GOOG",
+      "rows": 3194,
+      "hash": "f1d3329d97451b87cd5d14b61bc84a060fe394dba221a48de1741c32848d8f7d",
+      "timestamp": "2026-09-16T14:53:18.690222"
+    },
+    {
+      "ticker": "GOOGL",
+      "rows": 3194,
+      "hash": "1e3d5c037e2bf48ca350b19591ff79bcdcccff4ed336dc7ae47dc3ac941f8271",
+      "timestamp": "2026-09-16T14:53:20.254579"
+    },
+    {
+      "ticker": "GPC",
+      "rows": 3194,
+      "hash": "d988a6fef47b4ddf11aaab59a66c2d4893d4bcb057db4a8a099df3059308165b",
+      "timestamp": "2026-09-16T14:53:21.889899"
+    },
+    {
+      "ticker": "GPN",
+      "rows": 3194,
+      "hash": "09318993f86e861bd2807d6eaf938c8f95363c218016d13ece54f3d33f074b16",
+      "timestamp": "2026-09-16T14:53:23.413921"
+    },
+    {
+      "ticker": "GRMN",
+      "rows": 3194,
+      "hash": "81db740b1e05d16fa5bcf11f1251b134507157a0311dbc08aafc8428fe3b46ca",
+      "timestamp": "2026-09-16T14:53:24.925270"
+    },
+    {
+      "ticker": "GS",
+      "rows": 3194,
+      "hash": "4d151252453f197ef03c93f5b862f1850cef9f0f1bfd5af89d033b10be9a0a29",
+      "timestamp": "2026-09-16T14:53:26.418757"
+    },
+    {
+      "ticker": "GWW",
+      "rows": 3194,
+      "hash": "c2ff7e572b5b9843547387f92af316e8d02e84a6a0849777938f5ec8c61b0269",
+      "timestamp": "2026-09-16T14:53:27.943619"
+    },
+    {
+      "ticker": "HAL",
+      "rows": 3194,
+      "hash": "c32d020eb9193d3064c4b73c2c727cd37d637ec269beb43e899a42382f70aef8",
+      "timestamp": "2026-09-16T14:53:29.473017"
+    },
+    {
+      "ticker": "HAS",
+      "rows": 3194,
+      "hash": "d8f110b974730631371a8cb0da83e71b908ab74e5aa8b355b651b1c13f0fe1b0",
+      "timestamp": "2026-09-16T14:53:31.002916"
+    },
+    {
+      "ticker": "HBAN",
+      "rows": 3194,
+      "hash": "8fff6d3213e606dffc301ea8df33e50ff3daaeec3f54fc3a65f1a72ece77c3b1",
+      "timestamp": "2026-09-16T14:53:32.552985"
+    },
+    {
+      "ticker": "HCA",
+      "rows": 3194,
+      "hash": "33362455a020a9ea70d7a3e4f0b5c78b3871ccdc121aaa76cd0f0070f756dc53",
+      "timestamp": "2026-09-16T14:53:34.035317"
+    },
+    {
+      "ticker": "HD",
+      "rows": 3194,
+      "hash": "332c821df3cc5c3759eea9d0a74d62ff6ff8e54757f20924c651cc5b2c95ac93",
+      "timestamp": "2026-09-16T14:53:35.533785"
+    },
+    {
+      "ticker": "HIG",
+      "rows": 3194,
+      "hash": "4f58470b6724443cb5ca61754acb1d645f33a5cf4f41871a21f40fd6a6257519",
+      "timestamp": "2026-09-16T14:53:37.043805"
+    },
+    {
+      "ticker": "HII",
+      "rows": 3194,
+      "hash": "dcf79c60566d954498650e582192b954d0d56dd13a892dc6905d7459b7435d6e",
+      "timestamp": "2026-09-16T14:53:38.537154"
+    },
+    {
+      "ticker": "HLT",
+      "rows": 3194,
+      "hash": "f55f2901573a4833bc3ce4281357008855699032753753f3ed2d6a5d95eaeb27",
+      "timestamp": "2026-09-16T14:53:40.124757"
+    },
+    {
+      "ticker": "HON",
+      "rows": 3194,
+      "hash": "cefb1862fd935aa816efaca9509ec35d2c1fc57f4d34c6ba81776d677471f176",
+      "timestamp": "2026-09-16T14:53:43.335316"
+    },
+    {
+      "ticker": "HPE",
+      "rows": 2742,
+      "hash": "c8baf5bd6d88be5a8068f3cacc9e14756227c2bfa7259c849812945850b28a58",
+      "timestamp": "2026-09-16T14:53:44.860035"
+    },
+    {
+      "ticker": "HPQ",
+      "rows": 3194,
+      "hash": "692e5979ee41e34da5cd478fb51113d60cd5c96dfc9794b651e2df2d46ac8d41",
+      "timestamp": "2026-09-16T14:53:46.513342"
+    },
+    {
+      "ticker": "HRL",
+      "rows": 3194,
+      "hash": "9c65f1ce19ed1fa8adadd7b50cd8c7bc09d2ab4df95c9ed1285a541bdfa75165",
+      "timestamp": "2026-09-16T14:53:48.055762"
+    },
+    {
+      "ticker": "HSIC",
+      "rows": 3194,
+      "hash": "6803e74b37a840555447dd0b4b719bfbd115fc11b9c4589e6986e704e696416b",
+      "timestamp": "2026-09-16T14:53:49.529751"
+    },
+    {
+      "ticker": "HST",
+      "rows": 3194,
+      "hash": "70b0eb46bc3efba2db8384f4f87d092edb454dc8ec076970784913da2fd84217",
+      "timestamp": "2026-09-16T14:53:51.029480"
+    },
+    {
+      "ticker": "HSY",
+      "rows": 3194,
+      "hash": "63801dc601ed55cef50c26df18c475c5f976ac8e9fa843242221721d2d8c0d28",
+      "timestamp": "2026-09-16T14:53:52.596635"
+    },
+    {
+      "ticker": "HUBB",
+      "rows": 3194,
+      "hash": "c3e68219011d40dcbb19390a1598a57927fa95a8113ce74f2ccde2fbe34f6a2e",
+      "timestamp": "2026-09-16T14:53:54.201486"
+    },
+    {
+      "ticker": "HUM",
+      "rows": 3194,
+      "hash": "5a742dd866209d07e9c6d65e56814ebdf487ede1f23563045918cac6c30855ce",
+      "timestamp": "2026-09-16T14:53:55.723069"
+    },
+    {
+      "ticker": "HWM",
+      "rows": 2480,
+      "hash": "4e728456b8a0021dc51c38f026279ca9a23b8402083b9fc8a926a2ca16b59643",
+      "timestamp": "2026-09-16T14:53:57.207706"
+    },
+    {
+      "ticker": "IBM",
+      "rows": 3194,
+      "hash": "3624d2bbeb22c12d7da3445a726b0f6b739350442c01fae23c982c57c8f855a0",
+      "timestamp": "2026-09-16T14:53:58.818426"
+    },
+    {
+      "ticker": "ICE",
+      "rows": 3194,
+      "hash": "24cd15eb29cf2c66d920a90c7e47f67e4ab411d5cb3f6caa5580bc93ca1b40e1",
+      "timestamp": "2026-09-16T14:54:00.318018"
+    },
+    {
+      "ticker": "IDXX",
+      "rows": 3194,
+      "hash": "9a809f557472eeff93b7423c6bff7c5b07bc793e41f0b97ba5177d48ef84bc81",
+      "timestamp": "2026-09-16T14:54:02.068094"
+    },
+    {
+      "ticker": "IEX",
+      "rows": 3194,
+      "hash": "4b85a5c1ece597b799fea6da0f2de160468793d0531ab8df07161c4167e9a330",
+      "timestamp": "2026-09-16T14:54:03.584763"
+    },
+    {
+      "ticker": "IFF",
+      "rows": 3194,
+      "hash": "e4fb9b4d6974f96f1631941ff74f87465c40dbcf1830ae4efe1dc9d8c87199a3",
+      "timestamp": "2026-09-16T14:54:05.869190"
+    },
+    {
+      "ticker": "INCY",
+      "rows": 3194,
+      "hash": "d2e3c0ed50abcceb2319befe5d1515e65b7949c888a4ef9b2d9460b92e1a269e",
+      "timestamp": "2026-09-16T14:54:07.383141"
+    },
+    {
+      "ticker": "INTC",
+      "rows": 3194,
+      "hash": "6de34049a4b1912d5a78255636e3c64d45c1b9f3a43bb8a8843797bb90180f4c",
+      "timestamp": "2026-09-16T14:54:08.901362"
+    },
+    {
+      "ticker": "INTU",
+      "rows": 3194,
+      "hash": "3f919e5516c67bc150a65f92f41fb8bad521cc792c362bcb77ada74d1e2b66d1",
+      "timestamp": "2026-09-16T14:54:10.385243"
+    },
+    {
+      "ticker": "INVH",
+      "rows": 2418,
+      "hash": "5a067982c9c8373812c4934f27f0803f914ca130fd7015df00e3a08bb2e23dd1",
+      "timestamp": "2026-09-16T14:54:11.844985"
+    },
+    {
+      "ticker": "IP",
+      "rows": 3194,
+      "hash": "5781be6796374798ef12055539e5ae880d4b34cec4c81763ccad4f82033a4335",
+      "timestamp": "2026-09-16T14:54:13.457806"
+    },
+    {
+      "ticker": "IQV",
+      "rows": 3194,
+      "hash": "ff670e92a48f51c3ceedf31bac83fbe8099feaf86f93323e1fc886aff59209a5",
+      "timestamp": "2026-09-16T14:54:16.669634"
+    },
+    {
+      "ticker": "IR",
+      "rows": 2348,
+      "hash": "fe5559a9fd03c2a1f323bf11ffc528f48a6144b42ba349afef80fd8f764cf669",
+      "timestamp": "2026-09-16T14:54:18.156075"
+    },
+    {
+      "ticker": "IRM",
+      "rows": 3194,
+      "hash": "f28ad439898681afe793ca7f555638ebbedb72518fd513c7a22b5bbbdc219da8",
+      "timestamp": "2026-09-16T14:54:19.688019"
+    },
+    {
+      "ticker": "ISRG",
+      "rows": 3194,
+      "hash": "28337fac2d5c7faff74ab97780d307fc9c84cb3e11ded85b9716fbb54cb50021",
+      "timestamp": "2026-09-16T14:54:21.205030"
+    },
+    {
+      "ticker": "IT",
+      "rows": 3194,
+      "hash": "eca595ce1a1598333588628bf32f9fab1d8098751625317867566e1e8082bd5e",
+      "timestamp": "2026-09-16T14:54:22.708117"
+    },
+    {
+      "ticker": "ITW",
+      "rows": 3194,
+      "hash": "ac2b4185dfab9864bf11aad6721167fcc190e2b66d21deab51d45324cfa40bc1",
+      "timestamp": "2026-09-16T14:54:24.243394"
+    },
+    {
+      "ticker": "IVZ",
+      "rows": 3194,
+      "hash": "6c61938abf7b44560e11c605d30d21ad3e99b6f8234ec3a3b3982287e4784e8e",
+      "timestamp": "2026-09-16T14:54:25.795085"
+    },
+    {
+      "ticker": "J",
+      "rows": 3194,
+      "hash": "fb304cf8078e5e8298a314f05d3c63f52e3a454b1f30bf40d7c5e85bbf349c77",
+      "timestamp": "2026-09-16T14:54:27.357798"
+    },
+    {
+      "ticker": "JBHT",
+      "rows": 3194,
+      "hash": "036383d62b9c9cd77bbcbd36cd0035fd1823d75636b9bf120f58e59a83067cdf",
+      "timestamp": "2026-09-16T14:54:28.874269"
+    },
+    {
+      "ticker": "JBL",
+      "rows": 3194,
+      "hash": "ca41c2d6943f54a0c20ec08b4e7cb144491430168e4ecac5d9d4a8f389020253",
+      "timestamp": "2026-09-16T14:54:30.389681"
+    },
+    {
+      "ticker": "JCI",
+      "rows": 3194,
+      "hash": "cfb3442e19703978318312651bfa75b6fae4c0540bb517aba1588085854be1ca",
+      "timestamp": "2026-09-16T14:54:31.910492"
+    },
+    {
+      "ticker": "JKHY",
+      "rows": 3194,
+      "hash": "fabdfc7319695cac3b12f83e38f50a4e457957d596acb9fd8733e99f4e9051a7",
+      "timestamp": "2026-09-16T14:54:33.457387"
+    },
+    {
+      "ticker": "JNJ",
+      "rows": 3194,
+      "hash": "472f4df78cf33352c4d458e7d33a0c5fbb52ff9d41d6adc7a189a302a3c66478",
+      "timestamp": "2026-09-16T14:54:34.998580"
+    },
+    {
+      "ticker": "JPM",
+      "rows": 3194,
+      "hash": "661b57c40a75e0b5fcabbe861820b643f80a80b8d27fbc282b2d13926313ada6",
+      "timestamp": "2026-09-16T14:54:36.520212"
+    },
+    {
+      "ticker": "KDP",
+      "rows": 3194,
+      "hash": "6410426b010daf712c35d03f1352c2e0cf9a0e3691ed77e10cd75a0d7808ccfd",
+      "timestamp": "2026-09-16T14:54:39.605213"
+    },
+    {
+      "ticker": "KEY",
+      "rows": 3194,
+      "hash": "3d53731afec1b7e253d02c1f931f9daea0edb25288fa124128f41d3faaef43f7",
+      "timestamp": "2026-09-16T14:54:41.278554"
+    },
+    {
+      "ticker": "KEYS",
+      "rows": 2993,
+      "hash": "b14eb99a5cef8b42f46ce0c4f2768024a316a2c4f10ed47171fa434aaa957e56",
+      "timestamp": "2026-09-16T14:54:42.747566"
+    },
+    {
+      "ticker": "KHC",
+      "rows": 2816,
+      "hash": "1a49e6e167132d283e36569eb4a5161fbac766b4aff444065b1c17841cef0339",
+      "timestamp": "2026-09-16T14:54:44.239757"
+    },
+    {
+      "ticker": "KIM",
+      "rows": 3194,
+      "hash": "24463e4513a12b9a0be714fbf7ade6ba9ab9237515f2c3a517463112811886d9",
+      "timestamp": "2026-09-16T14:54:45.744975"
+    },
+    {
+      "ticker": "KKR",
+      "rows": 3194,
+      "hash": "c483d592f8bcfbdc97078201650cb2704c20bb42bbcaa7cc01005b1b67c09a10",
+      "timestamp": "2026-09-16T14:54:47.264561"
+    },
+    {
+      "ticker": "KLAC",
+      "rows": 3194,
+      "hash": "1ce1e8c3898038b3dd89ba69670819a1eb8524f606c68139c11890fe62979c15",
+      "timestamp": "2026-09-16T14:54:48.825281"
+    },
+    {
+      "ticker": "KMB",
+      "rows": 3194,
+      "hash": "b567343ae715e3c514b152c7029150649ad510a69f9c5c0718cea2556ccfae74",
+      "timestamp": "2026-09-16T14:54:50.368206"
+    },
+    {
+      "ticker": "KMI",
+      "rows": 3194,
+      "hash": "afa31d4636efbb3e26ab9abf524e0a67a5e2aa602a134c3a11fe7765f1ad456f",
+      "timestamp": "2026-09-16T14:54:51.865851"
+    },
+    {
+      "ticker": "KMX",
+      "rows": 3194,
+      "hash": "392b32ad00438698b2f129418f1d2823cd1c640f9ce02d6fd396d71fb2d09863",
+      "timestamp": "2026-09-16T14:54:53.419405"
+    },
+    {
+      "ticker": "KO",
+      "rows": 3194,
+      "hash": "1cc9bc1c7e938bd542068b25f7dcd933de2463bc0efe11ba0c126019e3f6af6a",
+      "timestamp": "2026-09-16T14:54:54.973219"
+    },
+    {
+      "ticker": "KR",
+      "rows": 3194,
+      "hash": "6b0e50751c871636c31a2e9211f11f0d07d2f00b1fc5986312366254fc43b9b7",
+      "timestamp": "2026-09-16T14:54:56.526816"
+    },
+    {
+      "ticker": "KVUE",
+      "rows": 844,
+      "hash": "4daa1f07e870fea73c770bf0da6518d11e336a428b7896355ee823ed28a2c2f7",
+      "timestamp": "2026-09-16T14:54:57.907491"
+    },
+    {
+      "ticker": "L",
+      "rows": 3194,
+      "hash": "e912df8a4deffe00e907acabfb87377ccf081e4e4f35dc6dfe45391b3624daf5",
+      "timestamp": "2026-09-16T14:54:59.425621"
+    },
+    {
+      "ticker": "LDOS",
+      "rows": 3194,
+      "hash": "30b5ccb4f06bd2932c9c54655498edfc2ab6131c6e1a22aa11c4f0f07761472a",
+      "timestamp": "2026-09-16T14:55:00.928258"
+    },
+    {
+      "ticker": "LEN",
+      "rows": 3194,
+      "hash": "0441cfd31dddca14596c67fd29216130443b8ff3bcba0a7c1d71576458d4710f",
+      "timestamp": "2026-09-16T14:55:02.558070"
+    },
+    {
+      "ticker": "LH",
+      "rows": 3194,
+      "hash": "dd1c0081d1e513caabf8c884d9507ac82f70eba6afbf112b42f94db03e0cc25f",
+      "timestamp": "2026-09-16T14:55:04.144949"
+    },
+    {
+      "ticker": "LHX",
+      "rows": 3194,
+      "hash": "728d260198944de97816c72d411e88d734b80d67a1043f7dc31d7348c2a70e99",
+      "timestamp": "2026-09-16T14:55:05.682881"
+    },
+    {
+      "ticker": "LII",
+      "rows": 3194,
+      "hash": "ee4eb1f503230ecfed0d721c4e06fd54c774db532f83a7e57110e98248dbca36",
+      "timestamp": "2026-09-16T14:55:07.263581"
+    },
+    {
+      "ticker": "LIN",
+      "rows": 3194,
+      "hash": "81303f13eb56954b7f3557cfe3e30d23a66c77fcb8f6a4ed6e9f2e7b5b9f47d4",
+      "timestamp": "2026-09-16T14:55:08.784454"
+    },
+    {
+      "ticker": "LKQ",
+      "rows": 3194,
+      "hash": "2b7be5f1d7c0831d25f9ae34c52b5cf6f195a4102a1cb79696555be2aa75a350",
+      "timestamp": "2026-09-16T14:55:10.298494"
+    },
+    {
+      "ticker": "LLY",
+      "rows": 3194,
+      "hash": "9aa701b29b34d8e95af3ae53047d25eca932ebd9ce56b087519dc8717b940102",
+      "timestamp": "2026-09-16T14:55:11.844995"
+    },
+    {
+      "ticker": "LMT",
+      "rows": 3194,
+      "hash": "f9c247863c188ee482027da0bb990b056e016b8750226743d804cc5b3d95d86b",
+      "timestamp": "2026-09-16T14:55:13.372726"
+    },
+    {
+      "ticker": "LNT",
+      "rows": 3194,
+      "hash": "529f2c9f9cdadb38150a3c004fc71c04b78830b276425e5beacc677ace4bafd6",
+      "timestamp": "2026-09-16T14:55:14.910558"
+    },
+    {
+      "ticker": "LOW",
+      "rows": 3194,
+      "hash": "9960a92d2f38c020fedc072d0572543d5a39a0bf6f076e5d2a4986ebaa1ea6a8",
+      "timestamp": "2026-09-16T14:55:16.445931"
+    },
+    {
+      "ticker": "LRCX",
+      "rows": 3194,
+      "hash": "babc6a5932c0ea6f3f7a213627842c682e8ed3b992a3eb84d1318a27cd55aa80",
+      "timestamp": "2026-09-16T14:55:18.042915"
+    },
+    {
+      "ticker": "LULU",
+      "rows": 3194,
+      "hash": "206ec0c48e0f31a4b146c6ad071c9e8194f794adc97769600ca45655ebefb482",
+      "timestamp": "2026-09-16T14:55:19.770096"
+    },
+    {
+      "ticker": "LUV",
+      "rows": 3194,
+      "hash": "f7c59c724dee68ebeefe95ffdb8009c425cd870741f582d1b0adca4da4325074",
+      "timestamp": "2026-09-16T14:55:21.543909"
+    },
+    {
+      "ticker": "LVS",
+      "rows": 3194,
+      "hash": "d398ca6a509de43f08b5455036f7670ea343a6e6174ce06ba115c0eca3db7999",
+      "timestamp": "2026-09-16T14:55:23.298049"
+    },
+    {
+      "ticker": "LW",
+      "rows": 2473,
+      "hash": "08d29873545e97462fb1df8460c3a96bf1c0bbbb780844ee3fbacd365466c6ea",
+      "timestamp": "2026-09-16T14:55:24.895337"
+    },
+    {
+      "ticker": "LYB",
+      "rows": 3194,
+      "hash": "ff5e4a4281828c5b3d77815d024a9b87e8d24a6764425ca371d52178cb685967",
+      "timestamp": "2026-09-16T14:55:26.647540"
+    },
+    {
+      "ticker": "LYV",
+      "rows": 3194,
+      "hash": "865424eeb511aee8ec2e2441dd1290be15848ca63c17075bffbf9154fe8f7afe",
+      "timestamp": "2026-09-16T14:55:28.235144"
+    },
+    {
+      "ticker": "MA",
+      "rows": 3194,
+      "hash": "4fefe757e2d158990d9fcb5d99e6573e3cec42ca83e36f1bf1f1a0d0fa8786a4",
+      "timestamp": "2026-09-16T14:55:30.017231"
+    },
+    {
+      "ticker": "MAA",
+      "rows": 3194,
+      "hash": "1041888d4f6b02fb3ea58de1c9402e51ffea67da7accf5ffb1e387014fb11afe",
+      "timestamp": "2026-09-16T14:55:31.755113"
+    },
+    {
+      "ticker": "MAR",
+      "rows": 3194,
+      "hash": "64f7ac9fb8674c8703431572103d0062f94631ac48ab42ff35917975ed0d356d",
+      "timestamp": "2026-09-16T14:55:33.588860"
+    },
+    {
+      "ticker": "MAS",
+      "rows": 3194,
+      "hash": "f7c87778534c37c59d3a71eb6b2dfc3b89a278d0c2eed552e43d98f32f33f5f5",
+      "timestamp": "2026-09-16T14:55:36.022735"
+    },
+    {
+      "ticker": "MCD",
+      "rows": 3194,
+      "hash": "deaccf3ea8cec878dc5f094028bd24ceacd0fabaf00f148cbd9aaaaaa262d408",
+      "timestamp": "2026-09-16T14:55:37.664188"
+    },
+    {
+      "ticker": "MCHP",
+      "rows": 3194,
+      "hash": "47a4d927d1ca249f6a8be077774d14a81d2dd24b474aac9832a8b27d73f40fe3",
+      "timestamp": "2026-09-16T14:55:39.384581"
+    },
+    {
+      "ticker": "MCK",
+      "rows": 3194,
+      "hash": "a9ce84493920afe15d64a9e6e8c5bdce945eab89b0a67534bfb53f09eed008ae",
+      "timestamp": "2026-09-16T14:55:41.047502"
+    },
+    {
+      "ticker": "MCO",
+      "rows": 3194,
+      "hash": "bf326aad9f65e8ef62678ee55ee8a72782179d2da47ef09ead0950e16fb6ed6f",
+      "timestamp": "2026-09-16T14:55:42.789265"
+    },
+    {
+      "ticker": "MDLZ",
+      "rows": 3194,
+      "hash": "b84042aef48258737819a67304003f0f689978520256cc3a5a9bc63acd97e241",
+      "timestamp": "2026-09-16T14:55:44.531814"
+    },
+    {
+      "ticker": "MDT",
+      "rows": 3194,
+      "hash": "faa477edd36d9b314dc7334ab2309ddebbd54a41a720ccbd4a1d867452ff3221",
+      "timestamp": "2026-09-16T14:55:46.321452"
+    },
+    {
+      "ticker": "MET",
+      "rows": 3194,
+      "hash": "745e209689e8de831856f01b5b77bcfa67a8d5b3211a9add2d230c174b8012e9",
+      "timestamp": "2026-09-16T14:55:47.896205"
+    },
+    {
+      "ticker": "META",
+      "rows": 3194,
+      "hash": "beaf9cef0da0021a63e021c2ad486f369e509bc06f4e0593c837192278678f93",
+      "timestamp": "2026-09-16T14:55:49.379107"
+    },
+    {
+      "ticker": "MGM",
+      "rows": 3194,
+      "hash": "00f344ae005de101b65a1c3cbbf7a34ed2c6083a660d3319dd7ba17bca4e3c56",
+      "timestamp": "2026-09-16T14:55:50.880269"
+    },
+    {
+      "ticker": "MHK",
+      "rows": 3194,
+      "hash": "467dfceb117bfa7c10d77eecee47d4e0abfb90b80737ea39ce2b9be12cea9ce0",
+      "timestamp": "2026-09-16T14:55:52.343133"
+    },
+    {
+      "ticker": "MKC",
+      "rows": 3194,
+      "hash": "d2d6fd772e36fbecd38e8ec2e3900bfe349255c028742555ea4b203a18ba9e8d",
+      "timestamp": "2026-09-16T14:55:53.879614"
+    },
+    {
+      "ticker": "MKTX",
+      "rows": 3194,
+      "hash": "5a8691933a378219815bb70ec7a9ae2e769937d458cc381cb5f4d35e5d910e91",
+      "timestamp": "2026-09-16T14:55:55.378231"
+    },
+    {
+      "ticker": "MLM",
+      "rows": 3194,
+      "hash": "06f2c83c4741268d0197632be26c91ab1abe5056f761bbf151e5efab15ddcd12",
+      "timestamp": "2026-09-16T14:55:56.888877"
+    },
+    {
+      "ticker": "MMM",
+      "rows": 3194,
+      "hash": "1a3862130d404129e000c35f8703756557a4e43761b6df9f068a89b939d1d05c",
+      "timestamp": "2026-09-16T14:56:00.182342"
+    },
+    {
+      "ticker": "MNST",
+      "rows": 3194,
+      "hash": "112811f806e50a750ea8654b336e96fbd78a6aedd8ca87962ab3cf916509a81b",
+      "timestamp": "2026-09-16T14:56:01.696394"
+    },
+    {
+      "ticker": "MO",
+      "rows": 3194,
+      "hash": "08ca200814e12c689226add276053dd06f889cc629e7da9746b9773768f2a038",
+      "timestamp": "2026-09-16T14:56:03.234319"
+    },
+    {
+      "ticker": "MOH",
+      "rows": 3194,
+      "hash": "db9602d789cc94dda183988f2343b94ed5991eed42774ce5aa094b5fa024ee03",
+      "timestamp": "2026-09-16T14:56:04.707004"
+    },
+    {
+      "ticker": "MOS",
+      "rows": 3194,
+      "hash": "afbf3b56ca13a79fb78288bc00ae322ac95a48e714eecde82f35555070fc7380",
+      "timestamp": "2026-09-16T14:56:06.225958"
+    },
+    {
+      "ticker": "MPC",
+      "rows": 3194,
+      "hash": "c82a8bbfd6f7ca84423d0885ef746f0818ac9c86f405d3ac8c63b444de31d3b8",
+      "timestamp": "2026-09-16T14:56:07.811554"
+    },
+    {
+      "ticker": "MPWR",
+      "rows": 3194,
+      "hash": "28a1d07138cc7c80c2f27097800a1ddf1862c2b654a5ecb0c7f4f45275f576a4",
+      "timestamp": "2026-09-16T14:56:09.341813"
+    },
+    {
+      "ticker": "MRK",
+      "rows": 3194,
+      "hash": "1e7c15e64edfa6e675ee0f0ee93a88f2b6055623e6a375e2a6075e156b2d3491",
+      "timestamp": "2026-09-16T14:56:10.991748"
+    },
+    {
+      "ticker": "MRNA",
+      "rows": 1952,
+      "hash": "50fb89faecd28d9a540bf6f1d7d752cacf23350d2881629ccc7385a0f5506c87",
+      "timestamp": "2026-09-16T14:56:12.428054"
+    },
+    {
+      "ticker": "MS",
+      "rows": 3194,
+      "hash": "5fbd7b77c3fe62e3cbdca1c179409dc5efdc5afb1a1d76c2dc222eb83e551fb2",
+      "timestamp": "2026-09-16T14:56:13.937350"
+    },
+    {
+      "ticker": "MSCI",
+      "rows": 3194,
+      "hash": "cce2ab732234b0a0246b924b5c86a996423c4f54248514fa00288e453ee2c3cc",
+      "timestamp": "2026-09-16T14:56:15.415003"
+    },
+    {
+      "ticker": "MSI",
+      "rows": 3194,
+      "hash": "0b081596e99d8f3d1ae1adeb9723f2c3e6f53ee725d0159861d420539258c781",
+      "timestamp": "2026-09-16T14:56:18.009949"
+    },
+    {
+      "ticker": "MTB",
+      "rows": 3194,
+      "hash": "ee37eb3c173de5a7cbb16ca9d725d498d2c2927e2d6a2ff77dcc75c8eff957c3",
+      "timestamp": "2026-09-16T14:56:19.495112"
+    },
+    {
+      "ticker": "MTCH",
+      "rows": 3194,
+      "hash": "b8295ce34550ff19e8aa4928afa4d357b39d3cb6792992083066bc548b7b6d69",
+      "timestamp": "2026-09-16T14:56:21.064003"
+    },
+    {
+      "ticker": "MTD",
+      "rows": 3194,
+      "hash": "bfe3cc5280f98b09954d6b73b9a469a7e90b9700f2da6f38d532d24465b881e6",
+      "timestamp": "2026-09-16T14:56:22.532328"
+    },
+    {
+      "ticker": "MU",
+      "rows": 3194,
+      "hash": "9c5661d85e4614f9597b190a45e69cd9d35145e25d8087505833c353b5dfeece",
+      "timestamp": "2026-09-16T14:56:24.136738"
+    },
+    {
+      "ticker": "NCLH",
+      "rows": 3194,
+      "hash": "da1cc110be380454cbdc4269b0cdb399370338b09aea18950041cb38f59e1adb",
+      "timestamp": "2026-09-16T14:56:25.578432"
+    },
+    {
+      "ticker": "NDAQ",
+      "rows": 3194,
+      "hash": "88e17e178940dde6e987f85c21b0498e11eaf6e0083bc9a0d4e594eb01391dd8",
+      "timestamp": "2026-09-16T14:56:27.131783"
+    },
+    {
+      "ticker": "NDSN",
+      "rows": 3194,
+      "hash": "767c3e07bf484e18950a01b049130a335ef760fd31572150f836f43393822f26",
+      "timestamp": "2026-09-16T14:56:28.689348"
+    },
+    {
+      "ticker": "NEE",
+      "rows": 3194,
+      "hash": "b00ad5a44a8a47aee9714ed860410480b766f9131f7f506e95630cd569f860a1",
+      "timestamp": "2026-09-16T14:56:30.263426"
+    },
+    {
+      "ticker": "NEM",
+      "rows": 3194,
+      "hash": "46f06dfbcbc8bb145787eb31603d65519d9c54648d2a0c9dcfdf4afc7fe74065",
+      "timestamp": "2026-09-16T14:56:31.828618"
+    },
+    {
+      "ticker": "NFLX",
+      "rows": 3194,
+      "hash": "f13a97426bf824aeb3bb47f010d45885700685dc527cc9c685175fb98370f446",
+      "timestamp": "2026-09-16T14:56:33.366579"
+    },
+    {
+      "ticker": "NI",
+      "rows": 3194,
+      "hash": "c5be6b2647ce86e7fb0090bf1ba84662a85fb184ec32c1327709dbc3ac8d9f2f",
+      "timestamp": "2026-09-16T14:56:34.895055"
+    },
+    {
+      "ticker": "NKE",
+      "rows": 3194,
+      "hash": "f4feb9692471fd6b8b0cbfa526b38ed0c3a19a1ee45adee506f05b557f5a3355",
+      "timestamp": "2026-09-16T14:56:36.470197"
+    },
+    {
+      "ticker": "NOC",
+      "rows": 3194,
+      "hash": "1f4a2bb4188928170fd5e7df28c67bb28ec5643e80cdab21a9e47fa7c1de8769",
+      "timestamp": "2026-09-16T14:56:38.039823"
+    },
+    {
+      "ticker": "NOW",
+      "rows": 3194,
+      "hash": "787e82737f7007a3599f1c9394a62ce50b1efe8d63b8f5498b4866edc4d2a9fc",
+      "timestamp": "2026-09-16T14:56:39.512072"
+    },
+    {
+      "ticker": "NRG",
+      "rows": 3194,
+      "hash": "cd4d2aa5a9f72c6d9ef3d56b772fa72168050696dbd0685d71a67dd8cf3d233a",
+      "timestamp": "2026-09-16T14:56:41.009488"
+    },
+    {
+      "ticker": "NSC",
+      "rows": 3194,
+      "hash": "98e17e68392424c0550bdd9784419634d81b26712930cb488c7bf0233dc21ea4",
+      "timestamp": "2026-09-16T14:56:42.526605"
+    },
+    {
+      "ticker": "NTAP",
+      "rows": 3194,
+      "hash": "0befdb4575cc17da18368f605a9b892ce0b55f897f394fbe3b9268cbf5149588",
+      "timestamp": "2026-09-16T14:56:44.029129"
+    },
+    {
+      "ticker": "NTRS",
+      "rows": 3194,
+      "hash": "072219a57c2bb6d4932d554cf1d7aa53bca6ab26d4ab3a9e4981569878e61822",
+      "timestamp": "2026-09-16T14:56:45.554629"
+    },
+    {
+      "ticker": "NUE",
+      "rows": 3194,
+      "hash": "955a3094a713a5bf5dad2b70011973cbda2257a892d8f468fc38af461e5c2e38",
+      "timestamp": "2026-09-16T14:56:47.160516"
+    },
+    {
+      "ticker": "NVR",
+      "rows": 3194,
+      "hash": "88f5f54ef643a9467714051f62503b6c4bd568c6b906abd7530211ea3cdafe89",
+      "timestamp": "2026-09-16T14:56:49.650598"
+    },
+    {
+      "ticker": "NWS",
+      "rows": 3194,
+      "hash": "bc97deda2f15de013302350e034162693ee62c4b29ccb2b3adcd55173ebac4c8",
+      "timestamp": "2026-09-16T14:56:51.142570"
+    },
+    {
+      "ticker": "NWSA",
+      "rows": 3194,
+      "hash": "336538c1518f37a98e0766ee611eb323eac32c69e82a7af86db6421b1f34aedd",
+      "timestamp": "2026-09-16T14:56:52.637832"
+    },
+    {
+      "ticker": "NXPI",
+      "rows": 3194,
+      "hash": "99a538b33905f2969cc2cc211c931ed60044f38c9195d3e77e7f84a51b73d85f",
+      "timestamp": "2026-09-16T14:56:54.135760"
+    },
+    {
+      "ticker": "O",
+      "rows": 3194,
+      "hash": "aa0a1e8f6dd486946911570fca82bd39894b1a0ffe96fb1816c92dc7620fc5f1",
+      "timestamp": "2026-09-16T14:56:55.744360"
+    },
+    {
+      "ticker": "ODFL",
+      "rows": 3194,
+      "hash": "cfac92da99bc1c3bc73d683be6df085bf474c6db142f3485f0fb7b8b41a5aafb",
+      "timestamp": "2026-09-16T14:56:57.286015"
+    },
+    {
+      "ticker": "OKE",
+      "rows": 3194,
+      "hash": "6081488ef1e231296f6482b14245e2713c5acf5e0987ab89b682b54acf6ade66",
+      "timestamp": "2026-09-16T14:56:58.803686"
+    },
+    {
+      "ticker": "OMC",
+      "rows": 3194,
+      "hash": "c5e20fd5d6d641b2f8140e4333f80422098cbee5b66c9cab8ca498f6ab33a4b0",
+      "timestamp": "2026-09-16T14:57:00.569814"
+    },
+    {
+      "ticker": "ON",
+      "rows": 3194,
+      "hash": "7c4be873aee650dc6998a5a0acd62c56a0faccb5523af85c98bead26a839498a",
+      "timestamp": "2026-09-16T14:57:02.026279"
+    },
+    {
+      "ticker": "ORCL",
+      "rows": 3194,
+      "hash": "23b09e553ec4b621ea5dce6fe9280af6a315a9d1700bba27add7a4b96b45efb7",
+      "timestamp": "2026-09-16T14:57:03.535729"
+    },
+    {
+      "ticker": "ORLY",
+      "rows": 3194,
+      "hash": "eedf93fda78661b8d87fdb61d66dc3f9f4ae080c1ad297dded8e3c48048e0ff0",
+      "timestamp": "2026-09-16T14:57:06.134815"
+    },
+    {
+      "ticker": "OTIS",
+      "rows": 1631,
+      "hash": "1d970f241418a8755b19e1003e1ce61dd1d56653463712f49cadcb9fa804d797",
+      "timestamp": "2026-09-16T14:57:07.640777"
+    },
+    {
+      "ticker": "OXY",
+      "rows": 3194,
+      "hash": "341b115dccd8c64cd405c679eaf8510c9b17fe0e580e4f7012725b41c12d99a7",
+      "timestamp": "2026-09-16T14:57:09.291834"
+    },
+    {
+      "ticker": "PANW",
+      "rows": 3194,
+      "hash": "a279573ce60ae78f5b8c08873d6fb162ed477a114f860d87966f59f328c47862",
+      "timestamp": "2026-09-16T14:57:10.764895"
+    },
+    {
+      "ticker": "PAYC",
+      "rows": 3123,
+      "hash": "363bf389fb37ab4f52ed8b50211c8e7afcb75d4a02a1e1572c606b3b10557df1",
+      "timestamp": "2026-09-16T14:57:12.238212"
+    },
+    {
+      "ticker": "PAYX",
+      "rows": 3194,
+      "hash": "137a26e6f41c532e4b0f1357244c244fcfb09351811a9aa2cefe3ec4f1ee617c",
+      "timestamp": "2026-09-16T14:57:13.759891"
+    },
+    {
+      "ticker": "PCAR",
+      "rows": 3194,
+      "hash": "bfe6f1567b2e538e0f309871198359763c178d0456e66431c2dbfba624eee6bd",
+      "timestamp": "2026-09-16T14:57:15.313033"
+    },
+    {
+      "ticker": "PCG",
+      "rows": 3194,
+      "hash": "710ef644abdf3a263547fdee645e6cb646c518d491ca131b8c19f9f49209b273",
+      "timestamp": "2026-09-16T14:57:16.845790"
+    },
+    {
+      "ticker": "PEG",
+      "rows": 3194,
+      "hash": "e30c6952728e0dfd6b4d94e0398d13e9197225c6e5c3e9feecb8bfcd31c84b3a",
+      "timestamp": "2026-09-16T14:57:18.351393"
+    },
+    {
+      "ticker": "PEP",
+      "rows": 3194,
+      "hash": "37dbd51f282e610cf2743b3f6f4707d545d9fbc03e9cded9fc2e10af1d446f79",
+      "timestamp": "2026-09-16T14:57:19.903641"
+    },
+    {
+      "ticker": "PFE",
+      "rows": 3194,
+      "hash": "dd8ebc3745b0fd7c1a5b2f17a20f548e24e2a883fd5bcd07f16a440b3e58384b",
+      "timestamp": "2026-09-16T14:57:21.508891"
+    },
+    {
+      "ticker": "PFG",
+      "rows": 3194,
+      "hash": "26c5e3eb03bae7a07920563838934f3e81ea44d7047c89f68ccc2f298bfb912b",
+      "timestamp": "2026-09-16T14:57:23.028418"
+    },
+    {
+      "ticker": "PG",
+      "rows": 3194,
+      "hash": "89f2750e0cce40e8f04cecbb82f182b7f29de95048b648737ca3a0470c85ce3c",
+      "timestamp": "2026-09-16T14:57:24.606767"
+    },
+    {
+      "ticker": "PGR",
+      "rows": 3194,
+      "hash": "07494ef665f7e76c26f7b605885b2208e28af3e3206c32f74c6f954e6418a30b",
+      "timestamp": "2026-09-16T14:57:26.133767"
+    },
+    {
+      "ticker": "PH",
+      "rows": 3194,
+      "hash": "1b99e6b3be0c527c8d115a5fb8b1244034225c832a644d6903803b3e7349a511",
+      "timestamp": "2026-09-16T14:57:27.650339"
+    },
+    {
+      "ticker": "PHM",
+      "rows": 3194,
+      "hash": "249995b6a8dc2d38322a16001d3b6f61b9af111075704b9ba0eb3f784902a8ae",
+      "timestamp": "2026-09-16T14:57:29.176039"
+    },
+    {
+      "ticker": "PKG",
+      "rows": 3194,
+      "hash": "6969de2f0f193cb6c52809e4ee01ff45b01b76a1b840bf247b675589f686a846",
+      "timestamp": "2026-09-16T14:57:30.696648"
+    },
+    {
+      "ticker": "PLD",
+      "rows": 3194,
+      "hash": "ba7dcdf0199588b6d7965e6f7effd2f88a9581cc4645b91016d67aa34b50ab1e",
+      "timestamp": "2026-09-16T14:57:32.206533"
+    },
+    {
+      "ticker": "PLTR",
+      "rows": 1496,
+      "hash": "2dc7c03b3dd2e5f25ac01a5cf099ec746e1b709de4e821b74d406ebc97a6d764",
+      "timestamp": "2026-09-16T14:57:33.591506"
+    },
+    {
+      "ticker": "PM",
+      "rows": 3194,
+      "hash": "cfe6c73c6d8cbcba2bea30a11de486a076070e9644e545f3b29d5191e495f658",
+      "timestamp": "2026-09-16T14:57:35.089923"
+    },
+    {
+      "ticker": "PNC",
+      "rows": 3194,
+      "hash": "56f11bb0a29ad70a81473c30bd1ee39c61fe9f881e05004d774687dee4ff5195",
+      "timestamp": "2026-09-16T14:57:36.650131"
+    },
+    {
+      "ticker": "PNR",
+      "rows": 3194,
+      "hash": "9ac73ed41472e75a453720780c21e98928fc8e9d8d050aa81ce5452dd886bd06",
+      "timestamp": "2026-09-16T14:57:38.232645"
+    },
+    {
+      "ticker": "PNW",
+      "rows": 3194,
+      "hash": "c36e4516e8d6bffef975377845ab921423b585fc6b2ba5ee003f0b7f9b892cf9",
+      "timestamp": "2026-09-16T14:57:39.722117"
+    },
+    {
+      "ticker": "PODD",
+      "rows": 3194,
+      "hash": "5468e5906be101cfa95d961537d6a32d8535ec3c60b2b07f2a9b0b4ebf52af85",
+      "timestamp": "2026-09-16T14:57:41.172052"
+    },
+    {
+      "ticker": "POOL",
+      "rows": 3194,
+      "hash": "67df54c1fd5df41ae139db48eff3992aaa2a55fd2fd1cee3e8dd0092240b05ef",
+      "timestamp": "2026-09-16T14:57:42.693637"
+    },
+    {
+      "ticker": "PPG",
+      "rows": 3194,
+      "hash": "1fb563ca62da5b1ec5b7bb963e1aee98eec457035a4a06bff8957876ef7fd002",
+      "timestamp": "2026-09-16T14:57:44.472125"
+    },
+    {
+      "ticker": "PPL",
+      "rows": 3194,
+      "hash": "e6e37e2f415db28b36edd2c529c24b9d2d02f42f3d82bb089109ffb74b06fcfd",
+      "timestamp": "2026-09-16T14:57:46.028249"
+    },
+    {
+      "ticker": "PRU",
+      "rows": 3194,
+      "hash": "21a890c171f440689f6bbca5ebd4cd4d61ef35796aa0bb493d08b84b32069d40",
+      "timestamp": "2026-09-16T14:57:47.616392"
+    },
+    {
+      "ticker": "PSA",
+      "rows": 3194,
+      "hash": "87063ae97311f13a6317363edc122a487e169ad0dc6b985b3ae6dcca23275e7d",
+      "timestamp": "2026-09-16T14:57:49.124348"
+    },
+    {
+      "ticker": "PSX",
+      "rows": 3194,
+      "hash": "e26f1917eb1aec9690187a7a67c69ae6c48dfaf0fd7fa82d3c3c7323b41353c1",
+      "timestamp": "2026-09-16T14:57:50.624628"
+    },
+    {
+      "ticker": "PTC",
+      "rows": 3194,
+      "hash": "33a0ef0a9adc42d516deddb9033dc9b5b8b6bc847d764b4c0a53632650b94c9d",
+      "timestamp": "2026-09-16T14:57:52.122709"
+    },
+    {
+      "ticker": "PWR",
+      "rows": 3194,
+      "hash": "7a58d8e44b20794189413292f26e151866a751e817500b041fa8a38a24154652",
+      "timestamp": "2026-09-16T14:57:53.607449"
+    },
+    {
+      "ticker": "PYPL",
+      "rows": 2816,
+      "hash": "0238e7b55fa36be1ca9ec876a875d7de0e1aa644cb30f7bc32adc3b67b9a10e3",
+      "timestamp": "2026-09-16T14:57:55.080503"
+    },
+    {
+      "ticker": "QCOM",
+      "rows": 3194,
+      "hash": "6a72e200d9e67766dcd7d46631deaa5a1f0da2d8fa4d1b349decf5f1a46c26d1",
+      "timestamp": "2026-09-16T14:57:56.579113"
+    },
+    {
+      "ticker": "RCL",
+      "rows": 3194,
+      "hash": "a5711b40892344153257df6c57b7b9f077e16dd7342976ff4b8591137e3f7004",
+      "timestamp": "2026-09-16T14:57:58.085826"
+    },
+    {
+      "ticker": "REG",
+      "rows": 3194,
+      "hash": "76754fedb13ba8618f6ad55fd3bfa5748a8cf11d4b4b20a0db778bdbeb8ad4b7",
+      "timestamp": "2026-09-16T14:57:59.662333"
+    },
+    {
+      "ticker": "REGN",
+      "rows": 3194,
+      "hash": "9873892fae2de4b0bf3951c6108a2ab3cc76a808daa2c896c87c719c55901a1d",
+      "timestamp": "2026-09-16T14:58:01.156209"
+    },
+    {
+      "ticker": "RF",
+      "rows": 3194,
+      "hash": "6f1d8604f9d0b69f891fea4b47c3c7bc27f20ef61e564c002a5e59c951e91064",
+      "timestamp": "2026-09-16T14:58:02.662727"
+    },
+    {
+      "ticker": "RJF",
+      "rows": 3194,
+      "hash": "cd1ea6dae6f0fffdb65e05e0c3dfa2e095abe2712e50582bb740cf6eda9a07b0",
+      "timestamp": "2026-09-16T14:58:04.196755"
+    },
+    {
+      "ticker": "RL",
+      "rows": 3194,
+      "hash": "3682f6028c13bcce5b1aaa62ef132d24b8a1c91f326b6afcf3fc228d4cae8488",
+      "timestamp": "2026-09-16T14:58:05.706257"
+    },
+    {
+      "ticker": "RMD",
+      "rows": 3194,
+      "hash": "439609f0a785340233061519ab020c823ae57b61485128441b777a093a878ea4",
+      "timestamp": "2026-09-16T14:58:07.228856"
+    },
+    {
+      "ticker": "ROK",
+      "rows": 3194,
+      "hash": "d8b3729eddb7e44c76e146aecf8bcf2dd11e475e3db7ae909505ee3a2d6d8757",
+      "timestamp": "2026-09-16T14:58:08.748716"
+    },
+    {
+      "ticker": "ROL",
+      "rows": 3194,
+      "hash": "8f57007c608160533fb542aba5c9eab5a15377ed82b5359264b191803cc2ca10",
+      "timestamp": "2026-09-16T14:58:10.357734"
+    },
+    {
+      "ticker": "ROP",
+      "rows": 3194,
+      "hash": "bad56856ebf8f9357b58c954e1ed58e34c481f333e1506ee1b2fc6fcc308c590",
+      "timestamp": "2026-09-16T14:58:11.890356"
+    },
+    {
+      "ticker": "ROST",
+      "rows": 3194,
+      "hash": "19bec6ea755a55404a7be84ec4b754aaa411db7f720c8b33c9768efd908b4689",
+      "timestamp": "2026-09-16T14:58:13.410032"
+    },
+    {
+      "ticker": "RSG",
+      "rows": 3194,
+      "hash": "1fb34174d10ce66212923ace9a919b838062cf057964971b790b320b80afe617",
+      "timestamp": "2026-09-16T14:58:14.904434"
+    },
+    {
+      "ticker": "RTX",
+      "rows": 3194,
+      "hash": "5d910af7ca433916cf36c3ea616e90a3ad37f2f2757c018edaa835c6c830325d",
+      "timestamp": "2026-09-16T14:58:16.585575"
+    },
+    {
+      "ticker": "RVTY",
+      "rows": 3194,
+      "hash": "dd59bdee26f02525abeaeccc4424acee33d3ee112099c56ba1ecba72e61af837",
+      "timestamp": "2026-09-16T14:58:18.140695"
+    },
+    {
+      "ticker": "SBAC",
+      "rows": 3194,
+      "hash": "7a19a70cf7d2d52eec791b0a01c26bfc191c9ac337725624b21f4cdbf97becca",
+      "timestamp": "2026-09-16T14:58:19.619771"
+    },
+    {
+      "ticker": "SBUX",
+      "rows": 3194,
+      "hash": "7e4460f77e452b485cae9daa1d743a0770f1f795fa4c41485ea41172ba46543f",
+      "timestamp": "2026-09-16T14:58:21.135875"
+    },
+    {
+      "ticker": "SCHW",
+      "rows": 3194,
+      "hash": "4aab0f988e76656bf7aeb466860684b39e9cae6d3ab6ff87acab1574a63aeed9",
+      "timestamp": "2026-09-16T14:58:22.642866"
+    },
+    {
+      "ticker": "SHW",
+      "rows": 3194,
+      "hash": "593db1fb76ca1c26bb8478308aa2cc8a376e1c8721fe1ef87599e42d1cedadeb",
+      "timestamp": "2026-09-16T14:58:24.215854"
+    },
+    {
+      "ticker": "SJM",
+      "rows": 3194,
+      "hash": "d4bed6f4906c7d4f9d94042ddb41be8d0a2a1fa3c39c725e73724fb4570c84fb",
+      "timestamp": "2026-09-16T14:58:25.727754"
+    },
+    {
+      "ticker": "SLB",
+      "rows": 3194,
+      "hash": "d37a6ef840a44d28b34f5ab92aa563323bda3a01f245e952d265036daa61ee43",
+      "timestamp": "2026-09-16T14:58:27.244514"
+    },
+    {
+      "ticker": "SMCI",
+      "rows": 3194,
+      "hash": "73611dde9f3e966588adaad7e17f86d6fd0f6939c3c7c3fb13f8a2e9c7df0baa",
+      "timestamp": "2026-09-16T14:58:28.705757"
+    },
+    {
+      "ticker": "SNA",
+      "rows": 3194,
+      "hash": "50a40055eef038395f9be2152a29bfaa697fe88010f198981a6f5f71499d07de",
+      "timestamp": "2026-09-16T14:58:30.220755"
+    },
+    {
+      "ticker": "SNPS",
+      "rows": 3194,
+      "hash": "cb96eb4eb1ffc5038115b9286bad5917d956f59ce54437f164787b8a16e87275",
+      "timestamp": "2026-09-16T14:58:31.783299"
+    },
+    {
+      "ticker": "SO",
+      "rows": 3194,
+      "hash": "944e2289257b1098e97cce78c41b50c0e555408d6ea95deda5f9a2f1e51f887e",
+      "timestamp": "2026-09-16T14:58:33.309502"
+    },
+    {
+      "ticker": "SOLV",
+      "rows": 620,
+      "hash": "86134bbc0a1a02dbca8b2b01d9d2f8fde908ba8326a67489413051b1c9eac7c2",
+      "timestamp": "2026-09-16T14:58:34.686464"
+    },
+    {
+      "ticker": "SPG",
+      "rows": 3194,
+      "hash": "fcc1bd9e207c3adba7fa4ed6e1ca86a273e4a058c373cd0887556c71a2e1a124",
+      "timestamp": "2026-09-16T14:58:36.243122"
+    },
+    {
+      "ticker": "SPGI",
+      "rows": 3194,
+      "hash": "70a2ffca563994de63a9fb5f7f3d9a575351d226a71024bc32eefa7b11476d9a",
+      "timestamp": "2026-09-16T14:58:37.918819"
+    },
+    {
+      "ticker": "SRE",
+      "rows": 3194,
+      "hash": "039142904ac3ee239dd3fdf5d654452c492d595bfb4d57b3864b8066fe2d562b",
+      "timestamp": "2026-09-16T14:58:39.472302"
+    },
+    {
+      "ticker": "STE",
+      "rows": 3194,
+      "hash": "cf3150cba32ff432855da522c01763c9e3e1a9e0b0baa6ba61c52eb9bf5758e5",
+      "timestamp": "2026-09-16T14:58:40.960954"
+    },
+    {
+      "ticker": "STLD",
+      "rows": 3194,
+      "hash": "286735a5449148e68ac5c044876901e7217980accdc45ee039e4243806cc9c33",
+      "timestamp": "2026-09-16T14:58:42.481308"
+    },
+    {
+      "ticker": "STT",
+      "rows": 3194,
+      "hash": "78592bddd5b63f8cb289a094cb2c6b196ec09f7d0c00c33a5427db97b3554a7d",
+      "timestamp": "2026-09-16T14:58:44.002321"
+    },
+    {
+      "ticker": "STX",
+      "rows": 3194,
+      "hash": "f4a534c510a6a07103a3424c16568666a6cb220940069d5fa56d76b0c6ddc576",
+      "timestamp": "2026-09-16T14:58:45.509123"
+    },
+    {
+      "ticker": "STZ",
+      "rows": 3194,
+      "hash": "ca61b84759ce953c9c64da0842b521bb50a29b3ae9460dacc3b65036ec20ca88",
+      "timestamp": "2026-09-16T14:58:47.285844"
+    },
+    {
+      "ticker": "SW",
+      "rows": 3194,
+      "hash": "52dd311166314c46d3f98a1b0a06f2802d401747a05366a71014f4f654337250",
+      "timestamp": "2026-09-16T14:58:48.778225"
+    },
+    {
+      "ticker": "SWK",
+      "rows": 3194,
+      "hash": "8861558493da9e86fca9ed14a032de4037acb59d4c1fac7674890166ac7f09b6",
+      "timestamp": "2026-09-16T14:58:50.286606"
+    },
+    {
+      "ticker": "SWKS",
+      "rows": 3194,
+      "hash": "9affebb8204de2c9b324761270dd0dac4541d22bcd92fb737c0b5e431cd44d3a",
+      "timestamp": "2026-09-16T14:58:51.791798"
+    },
+    {
+      "ticker": "SYF",
+      "rows": 3049,
+      "hash": "9c1d063ab2dbfee51287756c592a7093bb6982ed7c81c49da112c95772ff4380",
+      "timestamp": "2026-09-16T14:58:53.273311"
+    },
+    {
+      "ticker": "SYK",
+      "rows": 3194,
+      "hash": "c15596ace7b4ab7594b543b5515291614b0fd2cf91ade5664b9bdced2bc35208",
+      "timestamp": "2026-09-16T14:58:54.794898"
+    },
+    {
+      "ticker": "SYY",
+      "rows": 3194,
+      "hash": "fe4657f86bd6dd4c582c56ca8268af8d70db544ee0358a6d2ec000033a149f33",
+      "timestamp": "2026-09-16T14:58:56.391321"
+    },
+    {
+      "ticker": "T",
+      "rows": 3194,
+      "hash": "d3f2cff9260af0e2114f290e2ef238d6d44bbdeb58532e3db367039a08d2948f",
+      "timestamp": "2026-09-16T14:58:57.974578"
+    },
+    {
+      "ticker": "TAP",
+      "rows": 3194,
+      "hash": "f10a3da586c2bdd11dd5f915f9aa96d400e6342628ec3bb7ef3ed0999c7137b5",
+      "timestamp": "2026-09-16T14:58:59.491983"
+    },
+    {
+      "ticker": "TDG",
+      "rows": 3194,
+      "hash": "6870cadccfeaf46d14dd240606168e48add0b3547ca63616a68de1ead27731de",
+      "timestamp": "2026-09-16T14:59:01.061918"
+    },
+    {
+      "ticker": "TDY",
+      "rows": 3194,
+      "hash": "c376f32b093acf23c36c67a90748f910c0f0dcd92ef0c9f596578f35a07e36e6",
+      "timestamp": "2026-09-16T14:59:02.510844"
+    },
+    {
+      "ticker": "TECH",
+      "rows": 3194,
+      "hash": "b759c2082f3e33fda77b58d93169e297589696c741a4a5ad8854baaacca0daae",
+      "timestamp": "2026-09-16T14:59:04.069768"
+    },
+    {
+      "ticker": "TEL",
+      "rows": 3194,
+      "hash": "e899f7bab2225253971a9f870671f635498961b8e7c0edfab767dfe0e9f9e59f",
+      "timestamp": "2026-09-16T14:59:05.570242"
+    },
+    {
+      "ticker": "TER",
+      "rows": 3194,
+      "hash": "cf6a728ee0ae86ad3a46ecf2a3a40d84eb9fddbba584776332e3c61dd6c86603",
+      "timestamp": "2026-09-16T14:59:07.099815"
+    },
+    {
+      "ticker": "TFC",
+      "rows": 3194,
+      "hash": "be9a8d894da7178ce41018a64d58daf6e825fa16650ceb1513e97194caed56cd",
+      "timestamp": "2026-09-16T14:59:08.638433"
+    },
+    {
+      "ticker": "TGT",
+      "rows": 3194,
+      "hash": "0b2e5af8a1f1eba954000f5d2eebefb5f16d03c31668eed2e84fe2d037a04e18",
+      "timestamp": "2026-09-16T14:59:10.157356"
+    },
+    {
+      "ticker": "TJX",
+      "rows": 3194,
+      "hash": "085a2452fbb5aa1affd64ac69556eba6d29c12a176e8005fc7a2d15fb653ff88",
+      "timestamp": "2026-09-16T14:59:11.692671"
+    },
+    {
+      "ticker": "TKO",
+      "rows": 3194,
+      "hash": "f92cfa931b3eadd2549adbe50134fe73a6a1d03bdfd83df92b151eadf7adadde",
+      "timestamp": "2026-09-16T14:59:13.200024"
+    },
+    {
+      "ticker": "TMO",
+      "rows": 3194,
+      "hash": "146b2399720136bc506bf188d2f8a34b45019158c1c8bab6b015ee83e6429173",
+      "timestamp": "2026-09-16T14:59:14.706079"
+    },
+    {
+      "ticker": "TMUS",
+      "rows": 3194,
+      "hash": "2ec3517f80929ba3a0588fa489bfedc3f772fc6b8e217843fe16ef870f62c5f2",
+      "timestamp": "2026-09-16T14:59:16.213682"
+    },
+    {
+      "ticker": "TPL",
+      "rows": 3194,
+      "hash": "911b8fa589e6c87bbb1157918362481847d6f7f3d2b30533e8c9866ebfae0ead",
+      "timestamp": "2026-09-16T14:59:17.819887"
+    },
+    {
+      "ticker": "TPR",
+      "rows": 3194,
+      "hash": "2e29861d453e717d0c33fc133dbea40622d9d3e199018371552f552bd34d372a",
+      "timestamp": "2026-09-16T14:59:19.332681"
+    },
+    {
+      "ticker": "TRGP",
+      "rows": 3194,
+      "hash": "76910795029b8a03c266ec21eec02ba493c7a8612beb977f4af232efedc54299",
+      "timestamp": "2026-09-16T14:59:20.854141"
+    },
+    {
+      "ticker": "TRMB",
+      "rows": 3194,
+      "hash": "3c1b26835e67fceb8a44bf3483c1d576018ecc61de421b11824062d138eadd57",
+      "timestamp": "2026-09-16T14:59:22.302494"
+    },
+    {
+      "ticker": "TROW",
+      "rows": 3194,
+      "hash": "916a3646fd54d9d6ef539b295bccc8c99115db9797b6b4ab769f74b58a9b3b71",
+      "timestamp": "2026-09-16T14:59:23.823978"
+    },
+    {
+      "ticker": "TRV",
+      "rows": 3194,
+      "hash": "1defa79eb6dfee9dc50fccec0f93e362b393af85557b66a20d294da6ea75a4aa",
+      "timestamp": "2026-09-16T14:59:25.422660"
+    },
+    {
+      "ticker": "TSCO",
+      "rows": 3194,
+      "hash": "ceb1cfd759366a0d234a0276894ea2b6487d461e904cfec8422264afaaf378a3",
+      "timestamp": "2026-09-16T14:59:27.181628"
+    },
+    {
+      "ticker": "TSLA",
+      "rows": 3194,
+      "hash": "94ff4cf04d01b96ca5384476444e24db06d6b677dc197515a66937b7b504ee27",
+      "timestamp": "2026-09-16T14:59:28.666579"
+    },
+    {
+      "ticker": "TSN",
+      "rows": 3194,
+      "hash": "b282fb2349e35f1333af169daa9e2a15e580a04aabec46ddf8fb0876f94ad552",
+      "timestamp": "2026-09-16T14:59:30.203989"
+    },
+    {
+      "ticker": "TT",
+      "rows": 3194,
+      "hash": "92a74aad9e88c5ba6096e5847d156e099f2267a1b6f7dc047ec449d3a9284f9e",
+      "timestamp": "2026-09-16T14:59:32.071942"
+    },
+    {
+      "ticker": "TTD",
+      "rows": 2509,
+      "hash": "7fc919f744f4bbe788f804f1e97c71dbcbc98f3e3a31da1c6542cbf42b670dc1",
+      "timestamp": "2026-09-16T14:59:33.526158"
+    },
+    {
+      "ticker": "TTWO",
+      "rows": 3194,
+      "hash": "9c07b5f1932ef4c45c0a14a0f4a83dba72fb66343cf3b08be83a9eed04eff79e",
+      "timestamp": "2026-09-16T14:59:34.988881"
+    },
+    {
+      "ticker": "TXN",
+      "rows": 3194,
+      "hash": "7a0131e5a4711f4de1237b0dd2bd835130d50c2b1cb55047f43c7368a216e671",
+      "timestamp": "2026-09-16T14:59:36.494005"
+    },
+    {
+      "ticker": "TXT",
+      "rows": 3194,
+      "hash": "65d6c76dd26d412f26b912b285b244d669a23b69ee270bee9c04e5cb463a9ebb",
+      "timestamp": "2026-09-16T14:59:38.015449"
+    },
+    {
+      "ticker": "TYL",
+      "rows": 3194,
+      "hash": "9ad2d4dc019d366a79300964517085abb43af0b5bac6dac9ba1e11f70dd7f441",
+      "timestamp": "2026-09-16T14:59:39.526692"
+    },
+    {
+      "ticker": "UAL",
+      "rows": 3194,
+      "hash": "832d35dccd39f4febf3e3bcde00c026d1b051984c2d112a7883ceb8ae6941813",
+      "timestamp": "2026-09-16T14:59:40.987623"
+    },
+    {
+      "ticker": "UBER",
+      "rows": 1847,
+      "hash": "66271e9809c74bc3046b1cbc4c8cfed21aa1fc3ca8b0eb3d55a0efd97c9b36ea",
+      "timestamp": "2026-09-16T14:59:42.369042"
+    },
+    {
+      "ticker": "UDR",
+      "rows": 3194,
+      "hash": "7a0f463d0f3d70da5467f459ca955cdd036bf1113c2b7e889896aa47e1458839",
+      "timestamp": "2026-09-16T14:59:43.891724"
+    },
+    {
+      "ticker": "UHS",
+      "rows": 3194,
+      "hash": "7a31023ad31f75ca4a6f6b8984b55b97bb0530161f03cd35aa761f0d82dafdc3",
+      "timestamp": "2026-09-16T14:59:45.600102"
+    },
+    {
+      "ticker": "ULTA",
+      "rows": 3194,
+      "hash": "b6e8750d856b2ef93d03887047e5bcfecf9963587bb5544b956250a185c15695",
+      "timestamp": "2026-09-16T14:59:47.080517"
+    },
+    {
+      "ticker": "UNH",
+      "rows": 3194,
+      "hash": "0a939b99f8ebe7fc3dba601e17f453695afa65ad237fb28732b14a44d4a8e325",
+      "timestamp": "2026-09-16T14:59:48.617135"
+    },
+    {
+      "ticker": "UNP",
+      "rows": 3194,
+      "hash": "23a551ef640421d8035d7df5ad03deaf6e96ad9f27c16f926a2a358946568ff1",
+      "timestamp": "2026-09-16T14:59:50.157619"
+    },
+    {
+      "ticker": "UPS",
+      "rows": 3194,
+      "hash": "5ab5325eab79bd5bbdd076bd5a58d6aeb607de2fc409887f8f33736741c13598",
+      "timestamp": "2026-09-16T14:59:51.685010"
+    },
+    {
+      "ticker": "URI",
+      "rows": 3194,
+      "hash": "2aa63f0bdb99973c798ab20c46a54bc1a6addac443fd61331754402b725a04a2",
+      "timestamp": "2026-09-16T14:59:53.169007"
+    },
+    {
+      "ticker": "USB",
+      "rows": 3194,
+      "hash": "72df5684cc548163e10b38aadcdc2fa6dc5fb5a64c6602532c94e7a85ca60c62",
+      "timestamp": "2026-09-16T14:59:54.678436"
+    },
+    {
+      "ticker": "V",
+      "rows": 3194,
+      "hash": "e38b013aaf85b9f8f50b71a1a87b8e291531fb68de79074ab0c0981b667ec079",
+      "timestamp": "2026-09-16T14:59:56.174414"
+    },
+    {
+      "ticker": "VICI",
+      "rows": 2187,
+      "hash": "835ec644024c837b8f41f39b8a767f9af379f0f7d6b1b6b6ec96119228779929",
+      "timestamp": "2026-09-16T14:59:57.664632"
+    },
+    {
+      "ticker": "VLO",
+      "rows": 3194,
+      "hash": "39c2bc890049c462b29c7c05232e2b784bf5378904ae7faab1992fe847f4f916",
+      "timestamp": "2026-09-16T14:59:59.201128"
+    },
+    {
+      "ticker": "VLTO",
+      "rows": 739,
+      "hash": "c81e13edfd27803477dbb662a0e1e9a6f5213e438a2c54b531007da92dcaa4e5",
+      "timestamp": "2026-09-16T15:00:00.575952"
+    },
+    {
+      "ticker": "VMC",
+      "rows": 3194,
+      "hash": "1272beb771ee920da4c3f0d6a102c6e7b10c0faf34ad90f004fffc5ba6015a89",
+      "timestamp": "2026-09-16T15:00:02.124898"
+    },
+    {
+      "ticker": "VRSK",
+      "rows": 3194,
+      "hash": "ed3d37be92002337c0d7e3acf9f2bad0e3d3c832d126ae06619589d97dba927c",
+      "timestamp": "2026-09-16T15:00:03.832594"
+    },
+    {
+      "ticker": "VRSN",
+      "rows": 3194,
+      "hash": "270898e17a8ee40250b561434c9e4d921aa4876f943580104516a1a2ef32dade",
+      "timestamp": "2026-09-16T15:00:05.383516"
+    },
+    {
+      "ticker": "VRTX",
+      "rows": 3194,
+      "hash": "b8831e7ac9301a436f6666d9b1799b35af7ff3b02e6e0d62eafe9637a954f302",
+      "timestamp": "2026-09-16T15:00:06.872495"
+    },
+    {
+      "ticker": "VST",
+      "rows": 2499,
+      "hash": "d7370a2e9f073358f2e54485b7916351c799a110ea34058935d195baf9b99079",
+      "timestamp": "2026-09-16T15:00:08.435584"
+    },
+    {
+      "ticker": "VTR",
+      "rows": 3194,
+      "hash": "c2f67c899b3a78717d7aa8ebaf1ed1391a91107b9cb61b2f8affb0204e0e15f0",
+      "timestamp": "2026-09-16T15:00:09.993615"
+    },
+    {
+      "ticker": "VTRS",
+      "rows": 3194,
+      "hash": "6262e211d5030c752abe471ccc20ce36cbe69ee47ce7f621ef8c98ff55c0a665",
+      "timestamp": "2026-09-16T15:00:11.534668"
+    },
+    {
+      "ticker": "VZ",
+      "rows": 3194,
+      "hash": "05a6035523d59ea0fdddaf905a2da9d9a3dfbe3e9a92ab0970173cbe9657a6bd",
+      "timestamp": "2026-09-16T15:00:13.106357"
+    },
+    {
+      "ticker": "WAB",
+      "rows": 3194,
+      "hash": "a32e0e88c85463144180b19ebd1aa5c64c713567f186957a15daca42c3ed4b67",
+      "timestamp": "2026-09-16T15:00:14.672815"
+    },
+    {
+      "ticker": "WAT",
+      "rows": 3194,
+      "hash": "7546bd638f9523b7d804fe6ac843f4acd9ef8e8fba174f6deee442b2bfa13be2",
+      "timestamp": "2026-09-16T15:00:17.172774"
+    },
+    {
+      "ticker": "WBD",
+      "rows": 3194,
+      "hash": "dcda9c6d547e1c77c3c572db664fc55c94978bab43b5c2c8bf90a474c3aaf737",
+      "timestamp": "2026-09-16T15:00:20.671768"
+    },
+    {
+      "ticker": "WDAY",
+      "rows": 3194,
+      "hash": "173ecc936a405f273130f20161bde71bbf41b6f5b9c1ac47fe6492610bb50e88",
+      "timestamp": "2026-09-16T15:00:22.153675"
+    },
+    {
+      "ticker": "WDC",
+      "rows": 3194,
+      "hash": "aecfa27b6a9a5f696a86aceb67a535d73b8b5ffe922636bcf9a93b001154b1ae",
+      "timestamp": "2026-09-16T15:00:23.778129"
+    },
+    {
+      "ticker": "WEC",
+      "rows": 3194,
+      "hash": "fa69260485b5c04497f35a81a80c13f8171a047c9c560aa3c75470eb8236d17d",
+      "timestamp": "2026-09-16T15:00:25.283680"
+    },
+    {
+      "ticker": "WELL",
+      "rows": 3194,
+      "hash": "751ddbb83dacfd0492905531d68c967ac44f2fe8d0bc93abc472d99ea894711b",
+      "timestamp": "2026-09-16T15:00:26.812459"
+    },
+    {
+      "ticker": "WFC",
+      "rows": 3194,
+      "hash": "5a3f48290e4c71f7e75fc9da9ad9db67998c68a57160228617055c0d9c06e992",
+      "timestamp": "2026-09-16T15:00:28.369052"
+    },
+    {
+      "ticker": "WM",
+      "rows": 3194,
+      "hash": "6d24f683c024bcc151b7995af058f070a89eb21e73342e9ad97ba3ad14c26b1c",
+      "timestamp": "2026-09-16T15:00:29.899804"
+    },
+    {
+      "ticker": "WMB",
+      "rows": 3194,
+      "hash": "a288c2bbc57d4c1703cc30864e2f9e139579514ba96d403561a7f7a2016c95f8",
+      "timestamp": "2026-09-16T15:00:31.441063"
+    },
+    {
+      "ticker": "WMT",
+      "rows": 3194,
+      "hash": "22aea68e1117fd403fc409a4bcf17110b13102c7577de819a266423f429a9e62",
+      "timestamp": "2026-09-16T15:00:33.127979"
+    },
+    {
+      "ticker": "WRB",
+      "rows": 3194,
+      "hash": "d876ead08bd80ded6a69437e2e2e2a77c0431b45388ec3eca19ad7428a08f9d4",
+      "timestamp": "2026-09-16T15:00:34.724501"
+    },
+    {
+      "ticker": "WSM",
+      "rows": 3194,
+      "hash": "75c0dd2f3064c74f028f6c9a11ae2f0e03e93c4a5087c988933f7095db4bacd8",
+      "timestamp": "2026-09-16T15:00:36.236177"
+    },
+    {
+      "ticker": "WST",
+      "rows": 3194,
+      "hash": "45fc783b98d8e892a029a3a223dfaf6ed46f99d95f9a718774c9411fb236b499",
+      "timestamp": "2026-09-16T15:00:37.803512"
+    },
+    {
+      "ticker": "WTW",
+      "rows": 3194,
+      "hash": "f5f0be16fa793f3c74c1dd6b01f14c742e1aa61b99e39b25d2129bc1be608331",
+      "timestamp": "2026-09-16T15:00:39.371748"
+    },
+    {
+      "ticker": "WY",
+      "rows": 3194,
+      "hash": "e94af92d641beca5c3084d436b4c3dd65fc18dfdd9ba1bb0f1577a0913296adb",
+      "timestamp": "2026-09-16T15:00:40.923820"
+    },
+    {
+      "ticker": "WYNN",
+      "rows": 3194,
+      "hash": "1a349b6ce78be3319f91ce3eec868c0b8d8adaa01db03e5991d69b088883bc7d",
+      "timestamp": "2026-09-16T15:00:43.160935"
+    },
+    {
+      "ticker": "XEL",
+      "rows": 3194,
+      "hash": "1ee5c8ede6971770c36aa6721b8f599aac5901c96844dc56ae2b62e0cf89ea14",
+      "timestamp": "2026-09-16T15:00:44.700878"
+    },
+    {
+      "ticker": "XOM",
+      "rows": 3194,
+      "hash": "974b2970c16b5ad11f137ed5455c7cbde1c62b7b3d0f6a2a583ac9ceca809c58",
+      "timestamp": "2026-09-16T15:00:46.240907"
+    },
+    {
+      "ticker": "XYL",
+      "rows": 3194,
+      "hash": "3fe40a7bd36878b084270d6551440f2090c443499f3a3c7a7b2f44c622909deb",
+      "timestamp": "2026-09-16T15:00:47.953901"
+    },
+    {
+      "ticker": "XYZ",
+      "rows": 2719,
+      "hash": "5f3749e6e1493901311fa3ff2b2315b1bbe7fcb7656c7c86e2afdb5e4bd6274e",
+      "timestamp": "2026-09-16T15:00:49.521288"
+    },
+    {
+      "ticker": "YUM",
+      "rows": 3194,
+      "hash": "ced10064ffd0447a133e7d8091dc3dba07009ba6fcaeff51c74d9f9e4c244dee",
+      "timestamp": "2026-09-16T15:00:51.135531"
+    },
+    {
+      "ticker": "ZBH",
+      "rows": 3194,
+      "hash": "700bd03eb055a2463fef0bb024b9ed69f309e72cb06a1184db89ed8650b7d68a",
+      "timestamp": "2026-09-16T15:00:52.702047"
+    },
+    {
+      "ticker": "ZBRA",
+      "rows": 3194,
+      "hash": "1c0fb874e1e094408dc23d8b1f7862d2aeb35381b32b5e5debaa4e6172957ea7",
+      "timestamp": "2026-09-16T15:00:54.405284"
+    },
+    {
+      "ticker": "ZTS",
+      "rows": 3194,
+      "hash": "ca58c92616697c65d56f234046b74a40cae72d30525b1b3e08866c97ae2ef9ba",
+      "timestamp": "2026-09-16T15:00:55.919954"
+    },
+    {
+      "ticker": "APP",
+      "rows": 1361,
+      "hash": "2e5b2d193080ee04d9e6e0cea0ff187bebd0f7c62edbadbeafdc8ffa64c0f4aa",
+      "timestamp": "2026-09-16T15:00:57.332031"
+    },
+    {
+      "ticker": "ARM",
+      "rows": 753,
+      "hash": "3c86c374d07bfd54cc05622e4f4dcae3a2ddf55c14bc92c79a00ce083569331d",
+      "timestamp": "2026-09-16T15:00:58.696505"
+    },
+    {
+      "ticker": "ASML",
+      "rows": 3194,
+      "hash": "ac6456f934a837916819b8c7fbe95c5d7f7f93ddd0d676063128ad37720ab72e",
+      "timestamp": "2026-09-16T15:01:00.194096"
+    },
+    {
+      "ticker": "AZN",
+      "rows": 3194,
+      "hash": "26411a124715ce9665355dec0d7f4a1c2622ab9e6ff28234b51fdece2db08081",
+      "timestamp": "2026-09-16T15:01:01.729784"
+    },
+    {
+      "ticker": "CCEP",
+      "rows": 3194,
+      "hash": "92e9151334383855bb350a526988b17adb77858a9332dfe542353ebe840a0883",
+      "timestamp": "2026-09-16T15:01:03.253326"
+    },
+    {
+      "ticker": "GFS",
+      "rows": 1224,
+      "hash": "c70439e3031f479f1667eacd913e0dbcbb843b27b3d904147b015ff14548f5e1",
+      "timestamp": "2026-09-16T15:01:04.651889"
+    },
+    {
+      "ticker": "MELI",
+      "rows": 3194,
+      "hash": "736f452e49379e39c2123603c57cba1424a41368accbecc5cd793203a79d20a1",
+      "timestamp": "2026-09-16T15:01:06.143806"
+    },
+    {
+      "ticker": "MRVL",
+      "rows": 3194,
+      "hash": "122e748668378ca2785f7dff1a912ae1ec28eed132fcec95f38f7554c7099657",
+      "timestamp": "2026-09-16T15:01:07.660337"
+    },
+    {
+      "ticker": "MSTR",
+      "rows": 3194,
+      "hash": "77d0a07f8b6cb399f5b79c93a6243f30e2c07dd7b55338e6899e2abdfc393351",
+      "timestamp": "2026-09-16T15:01:09.132302"
+    },
+    {
+      "ticker": "PDD",
+      "rows": 2045,
+      "hash": "a979920afcc9e436163e7fe7f659a6681bb66cca69c9592931dfb950ab7e566a",
+      "timestamp": "2026-09-16T15:01:10.607302"
+    },
+    {
+      "ticker": "SHOP",
+      "rows": 2847,
+      "hash": "1f1da06228716ecf8ebc72aa529b1f7f712c553914ded7621e04fd06c6d85a1c",
+      "timestamp": "2026-09-16T15:01:12.088632"
+    },
+    {
+      "ticker": "TEAM",
+      "rows": 2706,
+      "hash": "dbb8caba8bd95533673c680886dfeb79a9ecaf1f98d1556697bcc18a29d9afb4",
+      "timestamp": "2026-09-16T15:01:13.565138"
+    },
+    {
+      "ticker": "TRI",
+      "rows": 3194,
+      "hash": "a8fa589840e76f74c78878d7f7f910b115194775a3139cd99536763111011312",
+      "timestamp": "2026-09-16T15:01:15.170801"
+    },
+    {
+      "ticker": "ZS",
+      "rows": 2136,
+      "hash": "f5f5f6af6475aedb6a90a595ee06b43c7b8e6f880cd9200fe09a97b80211a2b9",
+      "timestamp": "2026-09-16T15:01:16.677485"
+    }
+  ],
+  "unavailable": [
+    {
+      "ticker": "THIS_IS_NOT_A_TICKER",
+      "timestamp": "2026-09-16T14:46:57.853044"
+    },
+    {
+      "ticker": "AVB",
+      "timestamp": "2026-09-16T15:05:05.016265"
+    },
+    {
+      "ticker": "BK",
+      "timestamp": "2026-09-16T15:05:06.612169"
+    },
+    {
+      "ticker": "CTRA",
+      "timestamp": "2026-09-16T15:05:08.519986"
+    },
+    {
+      "ticker": "DAY",
+      "timestamp": "2026-09-16T15:05:10.098483"
+    },
+    {
+      "ticker": "EA",
+      "timestamp": "2026-09-16T15:05:11.371105"
+    },
+    {
+      "ticker": "EQR",
+      "timestamp": "2026-09-16T15:05:12.678708"
+    },
+    {
+      "ticker": "FI",
+      "timestamp": "2026-09-16T15:05:14.434657"
+    },
+    {
+      "ticker": "HOLX",
+      "timestamp": "2026-09-16T15:05:16.027324"
+    },
+    {
+      "ticker": "IPG",
+      "timestamp": "2026-09-16T15:05:17.827439"
+    },
+    {
+      "ticker": "K",
+      "timestamp": "2026-09-16T15:05:19.424345"
+    },
+    {
+      "ticker": "MMC",
+      "timestamp": "2026-09-16T15:05:21.188534"
+    },
+    {
+      "ticker": "WBA",
+      "timestamp": "2026-09-16T15:05:22.738326"
+    }
+  ],
+  "failed": []
+}

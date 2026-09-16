@@ -1,0 +1,23 @@
+# Stock Data Download Agent - Requirements
+
+# Core dependencies
+pandas>=1.0.0
+yfinance>=0.1.70
+pyarrow>=1.0.0
+requests>=2.20.0
+
+# Testing dependencies
+pytest>=6.0.0
+pytest-cov>=2.12.0
+pytest-timeout>=2.1.0
+pytest-mock>=3.6.0
+
+# Development dependencies
+black>=21.0  # Code formatting
+flake8>=3.9.0  # Linting
+mypy>=0.900  # Type checking
+isort>=5.9.0  # Import sorting
+
+# Documentation dependencies
+sphinx>=4.0.0
+sphinx-rtd-theme>=1.0.0
