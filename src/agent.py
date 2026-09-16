@@ -13,11 +13,11 @@ import yfinance as yf
 # CONFIG
 # ============================================================
 
-DATA_DIR = Path("data/raw")
+DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-CHECKPOINT_FILE = Path("download_checkpoint.json")
-WATCHLIST_FILE = Path("watchlist.txt")
+CHECKPOINT_FILE = Path("config/download_checkpoint.json")
+WATCHLIST_FILE = Path("config/watchlist.txt")
 
 START_DATE = "2014-01-01"
 END_DATE = datetime.now().strftime("%Y-%m-%d")

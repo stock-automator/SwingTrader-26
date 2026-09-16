@@ -1,0 +1,13 @@
+{
+  "strategy": "supertrend_rsi",
+  "supertrend": {
+    "period": 10,
+    "multiplier": 3
+  },
+  "rsi": {
+    "period": 14,
+    "oversold_threshold": 25,
+    "overbought_threshold": 75
+  },
+  "last_optimized": "2024-01-15"
+}
