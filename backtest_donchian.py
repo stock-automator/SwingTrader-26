@@ -6,15 +6,20 @@ Uses the src.strategies / src.core.risk / src.engine.backtester pipeline
 described in AGENTS.md, instead of hand-rolled entry/exit tracking.
 """
 
+import logging
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
+from src.analytics.console import render_table
 from src.core.risk import RiskManager
 from src.engine.backtester import run_backtest
 from src.strategies.donchian_breakout import DonchianBreakout
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
+log = logging.getLogger(__name__)
 
 DATA_DIR = Path("data/raw")
 INITIAL_CAPITAL = 5000.0
@@ -40,6 +45,7 @@ def backtest_ticker(ticker: str) -> Optional[dict]:
     """Run the Donchian breakout backtest for a single ticker."""
     df = load_stock(ticker)
     if df is None or len(df) < 100:
+        log.warning("%s: skipped (insufficient cached history)", ticker)
         return None
 
     risk_manager = RiskManager(
@@ -65,49 +71,55 @@ def backtest_ticker(ticker: str) -> Optional[dict]:
 
 
 def main() -> None:
-    print("=" * 70)
-    print("DONCHIAN BREAKOUT STRATEGY BACKTEST")
-    print("=" * 70)
-    print()
-
     stocks = [f.stem for f in DATA_DIR.glob("*.parquet")][:MAX_TICKERS]
-    print(f"Testing {len(stocks)} stocks...\n")
+    log.info("Testing %d stocks", len(stocks))
 
     results = []
     for ticker in stocks:
         try:
             result = backtest_ticker(ticker)
-        except Exception as exc:
-            print(f"x {ticker}: error ({exc})")
+        except Exception:
+            log.error("%s: backtest failed", ticker, exc_info=True)
             continue
 
-        if result is None:
-            continue
+        if result is not None:
+            results.append(result)
 
-        results.append(result)
-        print(
-            f"+ {result['ticker']}: "
-            f"{result['return_pct']:+.1f}% | "
-            f"Trades: {result['trades']} | "
-            f"WinRate: {result['win_rate_pct']:.0f}% | "
-            f"Sharpe: {result['sharpe']:.2f} | "
-            f"MaxDD: {result['max_dd_pct']:.1f}%"
+    if not results:
+        log.error("No valid results - check data or strategy")
+        return
+
+    rows = [
+        [
+            r["ticker"],
+            f"{r['return_pct']:+.1f}%",
+            str(r["trades"]),
+            f"{r['win_rate_pct']:.0f}%",
+            f"{r['sharpe']:.2f}",
+            f"{r['max_dd_pct']:.1f}%",
+        ]
+        for r in sorted(results, key=lambda r: r["return_pct"], reverse=True)
+    ]
+    print()
+    print(
+        render_table(
+            ["Ticker", "Return", "Trades", "Win Rate", "Sharpe", "Max DD"],
+            rows,
+            title="DONCHIAN BREAKOUT STRATEGY BACKTEST",
         )
+    )
 
-    print("\n" + "=" * 70)
-    print("SUMMARY")
-    print("=" * 70)
-
-    if results:
-        avg_return = np.mean([r["return_pct"] for r in results])
-        win_rate = len([r for r in results if r["return_pct"] > 0]) / len(results)
-
-        print(f"\nStocks tested: {len(results)}")
-        print(f"Avg return: {avg_return:+.1f}%")
-        print(f"Win rate: {win_rate:.1%} (stocks with positive return)")
-        print(f"Total trades: {sum(r['trades'] for r in results)}")
-    else:
-        print("No valid results - check data or strategy")
+    avg_return = np.mean([r["return_pct"] for r in results])
+    win_rate = len([r for r in results if r["return_pct"] > 0]) / len(results)
+    summary_rows = [
+        ["Stocks Tested", str(len(results))],
+        ["Avg Return", f"{avg_return:+.1f}%"],
+        ["Win Rate (stocks profitable)", f"{win_rate:.1%}"],
+        ["Total Trades", str(sum(r["trades"] for r in results))],
+    ]
+    print()
+    print(render_table(["Metric", "Value"], summary_rows, title="SUMMARY"))
+    print()
 
 
 if __name__ == "__main__":

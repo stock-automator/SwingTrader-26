@@ -271,6 +271,27 @@ LLM. `provider="anthropic"`/`"openai"` are defined but raise
 `NotImplementedError` - wire up the corresponding SDK in
 `_call_anthropic`/`_call_openai` if/when needed.
 
+### `analytics/console.py` - CLI output formatting
+
+```python
+from src.analytics.console import render_table, format_metrics_table
+
+print(render_table(["Ticker", "Return"], [["AAPL", "+1.2%"]], title="RESULTS"))
+print(format_metrics_table(metrics, title="PERFORMANCE METRICS"))  # compute_metrics() dict -> table
+```
+
+Pure stdlib string formatting - no `tabulate`/`rich` dependency. Use this
+for any new CLI script's tabular output instead of hand-rolled `print`
+alignment, so terminal output stays consistent across scripts.
+
+**CLI logging convention:** root-level scripts (`backtest_donchian.py`,
+`backtest_with_exits.py`) configure `logging.basicConfig(level=logging.INFO)`
+and use `log.warning(...)`/`log.error(..., exc_info=True)` for skipped
+tickers/failures instead of silent `print`/`continue`. Keep this at the
+script layer, not inside `RiskManager` or the engines - those run per-bar
+and per-trade, so per-call logging there would be noisy and would blur the
+separation of concerns in §1.
+
 ---
 
 ## 7. Testing Conventions

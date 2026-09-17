@@ -6,7 +6,7 @@ Identifies 3-5 entry opportunities for the day
 """
 
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -119,7 +119,7 @@ def load_from_cache(ticker):
             df.columns = df.columns.droplevel(1)
 
         return df
-    except:
+    except Exception:
         return None
 
 
@@ -236,14 +236,14 @@ def scan_for_signals():
         print(f"   ⚡ Signal Quality:        {sig['signal_strength']}")
         print(f"   📈 Volume Trend:         {sig['volume_trend']}")
         print()
-        print(f"   📌 TRADE PLAN:")
+        print("   📌 TRADE PLAN:")
         print(f"      Entry:     ${sig['entry_price']}")
         print(f"      Stop Loss: ${sig['stop_loss']} (2% below entry)")
         print(f"      Target 1:  ${sig['target_1']} (2% profit)")
         print(f"      Target 2:  ${sig['target_2']} (5% profit)")
-        print(
-            f"      Risk/Reward: ~2.5x (Risk £{(sig['entry_price'] - sig['stop_loss']):.2f} for £{(sig['target_1'] - sig['entry_price']):.2f})"
-        )
+        risk = sig["entry_price"] - sig["stop_loss"]
+        reward = sig["target_1"] - sig["entry_price"]
+        print(f"      Risk/Reward: ~2.5x (Risk £{risk:.2f} for £{reward:.2f})")
         print()
 
     # ========================================================
@@ -288,7 +288,7 @@ def scan_for_signals():
     print()
     print("□ NO OVERTRADING")
     print("  → Max 5 open positions at a time")
-    print(f"  → You currently have: ? (Check Trading 212)")
+    print("  → You currently have: ? (Check Trading 212)")
     print()
     print("=" * 100)
     print()

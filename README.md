@@ -96,6 +96,36 @@ See `AGENTS.md` §3 - subclass `BaseStrategy` in `src/strategies/`, implement
 `generate_signals`, copy `tests/test_moving_average_cross.py` as your test
 template. No registry to update; strategies are passed to the engine directly.
 
+## Directory map
+
+```text
+src/
+├── strategies/       Signal generation. BaseStrategy contract + concrete
+│                      strategies (DonchianBreakout, MovingAverageCross).
+├── core/              Risk sizing. RiskManager resolves SL/TP and position
+│                      size - the only module that knows about account equity.
+├── engine/            Execution. backtester.py (full historical replay via
+│                      backtesting.py) and forward_tester.py (bar-by-bar
+│                      paper trading).
+├── analytics/         Reporting. metrics.py (Sharpe/Sortino/drawdown/CAGR +
+│                      equity chart), console.py (ASCII table rendering),
+│                      llm_reporter.py (plain-English report via Ollama).
+├── journal/           Trade journal persistence and analytics (executor.py).
+├── ml/                Signal classifier experiments (signal_classifier.py).
+├── data/              Historical data download/update/regime detection.
+└── utils/             Standalone daily trade-signal scanning script.
+
+tests/                 One test file per src/ module; test_moving_average_cross.py
+                        is the template to copy for a new strategy.
+config/                watchlist.txt (ticker universe) and trading_config.json.
+data/raw/               Cached OHLCV parquet files, one per ticker (gitignored).
+analysis/               One-off research scripts from the SuperTrend+RSI study (§9-15).
+results/                Generated CSVs/PNGs from backtests (gitignored, not tracked).
+backtest_donchian.py    CLI: Donchian summary across the cached universe.
+backtest_with_exits.py  CLI: Donchian per-trade entry/exit detail.
+AGENTS.md               Engineering contract for adding strategies - read this first.
+```
+
 The project started as a Yahoo Finance historical-data download agent and has evolved into the **data and backtesting foundation for a systematic momentum/swing-trading system**.
 
 The system is designed around:

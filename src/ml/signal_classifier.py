@@ -12,8 +12,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 
@@ -151,7 +150,6 @@ class SignalQualityClassifier:
 
         # Evaluate
         test_score = self.model.score(X_test_scaled, y_test)
-        y_pred = self.model.predict(X_test_scaled)
 
         metrics = {
             "test_accuracy": test_score,

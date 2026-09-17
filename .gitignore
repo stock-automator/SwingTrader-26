@@ -10,3 +10,6 @@ data/
 .idea/
 venv/
 download_checkpoint.json
+.coverage
+htmlcov/
+*.egg-info/

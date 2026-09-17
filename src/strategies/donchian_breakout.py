@@ -123,7 +123,7 @@ class DonchianBreakout(BaseStrategy):
 
         return out
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"DonchianBreakout(breakout={self.breakout_period}, "
             f"ema={self.ema_period}, momentum={self.momentum_period})"

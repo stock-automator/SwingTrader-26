@@ -12,9 +12,9 @@ from typing import Optional
 import matplotlib
 
 matplotlib.use("Agg")  # headless/non-interactive backend, safe for tests and cron jobs
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 
 def compute_metrics(
@@ -140,11 +140,17 @@ def save_equity_curve_chart(equity_curve: pd.Series, path: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(equity_curve.index, equity_curve.values, linewidth=1.5)
-    ax.set_title("Equity Curve")
+    ax.plot(equity_curve.index, equity_curve.values, linewidth=1.5, color="#1f6feb")
+    ax.fill_between(
+        equity_curve.index, equity_curve.values, alpha=0.08, color="#1f6feb"
+    )
+    ax.set_title("Equity Curve", fontsize=13, fontweight="bold")
     ax.set_xlabel("Date")
-    ax.set_ylabel("Equity")
-    ax.grid(True, alpha=0.3)
+    ax.set_ylabel("Equity ($)")
+    ax.yaxis.set_major_formatter(lambda value, _: f"{value:,.0f}")
+    ax.grid(True, alpha=0.3, linestyle="--")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
     fig.tight_layout()
     fig.savefig(output_path, dpi=120)
     plt.close(fig)

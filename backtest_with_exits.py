@@ -7,14 +7,19 @@ described in AGENTS.md - stop-loss and take-profit exits are handled by the
 `backtesting` library itself rather than a hand-rolled bar loop.
 """
 
+import logging
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
+from src.analytics.console import render_table
 from src.core.risk import RiskManager
 from src.engine.backtester import run_backtest
 from src.strategies.donchian_breakout import DonchianBreakout
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)-8s %(message)s")
+log = logging.getLogger(__name__)
 
 DATA_DIR = Path("data/raw")
 INITIAL_CAPITAL = 5000.0
@@ -40,6 +45,7 @@ def backtest_ticker(ticker: str) -> Optional[tuple]:
     """Run the backtest for a single ticker; returns (summary, trades_df)."""
     df = load_stock(ticker)
     if df is None or len(df) < 100:
+        log.warning("%s: skipped (insufficient cached history)", ticker)
         return None
 
     risk_manager = RiskManager(
@@ -72,18 +78,18 @@ def backtest_ticker(ticker: str) -> Optional[tuple]:
 
 
 def main() -> None:
-    print("=" * 70)
-    print("DONCHIAN BREAKOUT STRATEGY BACKTEST - WITH EXIT LOGIC")
-    print("=" * 70)
-    print()
-
     stocks = [f.stem for f in DATA_DIR.glob("*.parquet")][:MAX_TICKERS]
-    print(f"Testing {len(stocks)} stocks...\n")
+    log.info("Testing %d stocks", len(stocks))
 
     summaries = []
     all_trades = []
     for ticker in stocks:
-        outcome = backtest_ticker(ticker)
+        try:
+            outcome = backtest_ticker(ticker)
+        except Exception:
+            log.error("%s: backtest failed", ticker, exc_info=True)
+            continue
+
         if outcome is None:
             continue
 
@@ -91,41 +97,64 @@ def main() -> None:
         summaries.append(summary)
         all_trades.append(trades)
 
-        print(
-            f"+ {summary['ticker']}: "
-            f"Trades={summary['trades']} | "
-            f"W/L={summary['wins']}/{summary['losses']} | "
-            f"WR={summary['win_rate']:.0%} | "
-            f"AvgTrade={summary['avg_trade_pct']:+.2%}"
+    if not summaries:
+        log.error("No valid results - check data or strategy")
+        return
+
+    rows = [
+        [
+            s["ticker"],
+            str(s["trades"]),
+            f"{s['wins']}/{s['losses']}",
+            f"{s['win_rate']:.0%}",
+            f"{s['avg_trade_pct']:+.2%}",
+        ]
+        for s in summaries
+    ]
+    print()
+    print(
+        render_table(
+            ["Ticker", "Trades", "W/L", "Win Rate", "Avg Trade"],
+            rows,
+            title="DONCHIAN BREAKOUT - EXIT DETAIL",
         )
+    )
 
-    print("\n" + "=" * 70)
-    print("SUMMARY")
-    print("=" * 70)
+    total_trades = sum(s["trades"] for s in summaries)
+    total_wins = sum(s["wins"] for s in summaries)
+    total_losses = sum(s["losses"] for s in summaries)
+    overall_wr = total_wins / total_trades if total_trades else 0.0
 
-    if summaries:
-        total_trades = sum(s["trades"] for s in summaries)
-        total_wins = sum(s["wins"] for s in summaries)
-        total_losses = sum(s["losses"] for s in summaries)
-        overall_wr = total_wins / total_trades if total_trades else 0.0
+    summary_rows = [
+        ["Total Trades", str(total_trades)],
+        ["Wins / Losses", f"{total_wins} / {total_losses}"],
+        ["Overall Win Rate", f"{overall_wr:.1%}"],
+    ]
+    print()
+    print(render_table(["Metric", "Value"], summary_rows, title="SUMMARY"))
 
-        print(f"\nTotal trades: {total_trades}")
-        print(f"Total wins: {total_wins} | Total losses: {total_losses}")
-        print(f"Overall win rate: {overall_wr:.1%}")
-
-        combined = pd.concat(all_trades) if all_trades else pd.DataFrame()
-        if not combined.empty:
-            combined = combined.sort_values("EntryTime")
-            print("\n" + "=" * 70)
-            print("FIRST 5 TRADES")
-            print("=" * 70)
-            for i, (_, t) in enumerate(combined.head(5).iterrows()):
-                print(f"{i + 1}. {t['ticker']} ({t['EntryTime'].date()})")
-                print(f"   Entry: ${t['EntryPrice']:.2f} | Exit: ${t['ExitPrice']:.2f}")
-                print(f"   PnL: {t['ReturnPct']:+.2%}")
-                print()
-    else:
-        print("No valid results - check data or strategy")
+    combined = pd.concat(all_trades) if all_trades else pd.DataFrame()
+    if not combined.empty:
+        combined = combined.sort_values("EntryTime")
+        trade_rows = [
+            [
+                t["ticker"],
+                t["EntryTime"].date().isoformat(),
+                f"${t['EntryPrice']:.2f}",
+                f"${t['ExitPrice']:.2f}",
+                f"{t['ReturnPct']:+.2%}",
+            ]
+            for _, t in combined.head(5).iterrows()
+        ]
+        print()
+        print(
+            render_table(
+                ["Ticker", "Entry Date", "Entry", "Exit", "Return"],
+                trade_rows,
+                title="FIRST 5 TRADES",
+            )
+        )
+    print()
 
 
 if __name__ == "__main__":

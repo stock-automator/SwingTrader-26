@@ -1,8 +1,0 @@
-check,status,detail
-Final equity matches optimizer,PASS,£0.00
-Equity observations,PASS,"2,942"
-Candidate trade count,PASS,"2,048"
-Profit factor > 1,PASS,1.11
-Positive total return,PASS,95.32%
-Maximum drawdown,REVIEW,-37.07%
-Maximum position limit,PASS,5 / 10

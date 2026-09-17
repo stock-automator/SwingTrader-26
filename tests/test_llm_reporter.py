@@ -15,8 +15,11 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.analytics.llm_reporter import (LLMReporter, _extract_drawdown_periods,
-                                        _max_consecutive_losses)
+from src.analytics.llm_reporter import (
+    LLMReporter,
+    _extract_drawdown_periods,
+    _max_consecutive_losses,
+)
 
 
 @pytest.fixture
