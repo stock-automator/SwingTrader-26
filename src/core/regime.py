@@ -8,10 +8,14 @@ to size off it).
 
 Distinct from `src/data/regime_detector.py`, which classifies
 `NORMAL`/`VOLATILE`/`STRONG_TREND`/`CHOPPY` from realized volatility and
-return-based trend strength. That module is not used by anything under
-`src/` yet; this one is the regime detector for the `src/core/` pipeline
-(screener, risk sizing, UI). Don't conflate the two `RegimeDetector`
+return-based trend strength. Don't conflate the two `RegimeDetector`
 classes - they live in different layers with different taxonomies.
+
+Not yet wired into anything: as of this commit neither this module nor
+`src/data/regime_detector.py` is imported outside its own tests. The
+intended consumer is the `src/core/` pipeline (screener, risk sizing, UI),
+which is why `atr` is exposed in a form `RiskManager.volatility_parity_size`
+can take directly - but that call site does not exist yet.
 """
 
 import numpy as np
@@ -53,7 +57,20 @@ class RegimeDetector:
         self.adx_trend_threshold = adx_trend_threshold
 
     def compute_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Return a copy of `df` with `plus_di`, `minus_di`, `adx`, `atr` added."""
+        """Return a copy of `df` with `plus_di`, `minus_di`, `adx`, `atr` added.
+
+        Raises:
+            ValueError: if `df` is empty or missing `High`/`Low`/`Close`.
+                Checked explicitly so a malformed frame fails with the same
+                exception type the rest of `src/core` uses, rather than a
+                bare `KeyError` from deep inside the indicator math.
+        """
+        missing = [c for c in ("High", "Low", "Close") if c not in df.columns]
+        if missing:
+            raise ValueError(f"df is missing required column(s): {missing}")
+        if df.empty:
+            raise ValueError("df is empty")
+
         df = df.copy()
 
         high, low, close = df["High"], df["Low"], df["Close"]

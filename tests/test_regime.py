@@ -96,6 +96,50 @@ class TestComputeIndicators:
         sma = true_range.rolling(window=14, min_periods=14).mean()
         assert not np.isclose(out["atr"].iloc[-1], sma.iloc[-1])
 
+    def test_atr_period_is_independent_of_adx_period(self):
+        # With the defaults the two periods coincide, so `atr` and the ADX
+        # path's internal true-range average are the same series and a bug
+        # reading adx_period for the ATR smoothing would be invisible. Split
+        # them to pin that atr_period is the one actually used.
+        detector = RegimeDetector(adx_period=14, atr_period=30)
+        df = _trending_data(n=200)
+        out = detector.compute_indicators(df)
+
+        high, low, close = df["High"], df["Low"], df["Close"]
+        prev_close = close.shift(1)
+        true_range = pd.concat(
+            [high - low, (high - prev_close).abs(), (low - prev_close).abs()],
+            axis=1,
+        ).max(axis=1)
+
+        expected = true_range.ewm(alpha=1 / 30, adjust=False, min_periods=30).mean()
+        pd.testing.assert_series_equal(
+            out["atr"], expected, check_names=False, rtol=1e-12
+        )
+
+        # Warm-up follows atr_period, not adx_period. min_periods=30 makes
+        # bar 29 the first defined ATR; ADX is defined by bar 26 (double
+        # Wilder smoothing over 14 bars, so ~2x the period, not 14), which
+        # leaves bars 26-28 with an ADX but no ATR. Were the ATR smoothed on
+        # adx_period it would already be defined there.
+        assert out["atr"].iloc[:29].isna().all()
+        assert pd.notna(out["atr"].iloc[29])
+        assert pd.notna(out["adx"].iloc[27]) and pd.isna(out["atr"].iloc[27])
+
+        wrong_period = true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+        assert not np.isclose(out["atr"].iloc[-1], wrong_period.iloc[-1])
+
+    def test_rejects_empty_frame(self, detector):
+        with pytest.raises(ValueError, match="empty"):
+            detector.compute_indicators(_make_ohlc(np.array([])))
+
+    def test_rejects_missing_columns(self, detector):
+        # ValueError, not the bare KeyError the indicator math would raise -
+        # matching the convention used elsewhere in src/core.
+        df = _trending_data().drop(columns=["High"])
+        with pytest.raises(ValueError, match="missing required column"):
+            detector.compute_indicators(df)
+
 
 class TestDetectRegime:
     def test_uptrend_is_bull_trend(self, detector):
@@ -114,6 +158,15 @@ class TestDetectRegime:
         regime = detector.detect_regime(_trending_data())
         assert regime.iloc[0] is None
 
+    def test_flat_prices_yield_no_regime(self, detector):
+        # A dead-flat series gives +DM = -DM = 0, so +DI + -DI = 0 and DX is
+        # 0/0. The implementation replaces that zero denominator with NaN, so
+        # every bar must come back None rather than a spurious CHOPPY (or an
+        # inf that clears the trend threshold).
+        regime = detector.detect_regime(_make_ohlc(np.full(120, 100.0)))
+
+        assert regime.isna().all()
+
 
 class TestCurrentRegime:
     def test_insufficient_data_returns_unknown(self, detector):
@@ -122,6 +175,15 @@ class TestCurrentRegime:
     def test_matches_last_row_of_detect_regime(self, detector):
         df = _trending_data()
         assert detector.current_regime(df) == detector.detect_regime(df).iloc[-1]
+
+    def test_flat_prices_return_unknown(self, detector):
+        # Covers the `else REGIME_UNKNOWN` fallback: enough bars to clear the
+        # length check, but the latest bar still classifies as None because
+        # ADX is undefined on a flat series.
+        df = _make_ohlc(np.full(120, 100.0))
+
+        assert detector.detect_regime(df).iloc[-1] is None
+        assert detector.current_regime(df) == REGIME_UNKNOWN
 
 
 if __name__ == "__main__":

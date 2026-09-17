@@ -76,6 +76,32 @@ class _AlwaysBuyStrategy(BaseStrategy):
         )
 
 
+class _FixedSignalStrategy(BaseStrategy):
+    """Emits one caller-chosen signal/SL definition on every bar.
+
+    Lets the scanner's non-BUY branches be exercised directly instead of
+    hunting for real price data that happens to produce them.
+    """
+
+    def __init__(self, signal: int = 1, sl_value: float = 1.5):
+        super().__init__(name="Fixed Signal")
+        self.signal = signal
+        self.sl_value = sl_value
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "signal": self.signal,
+                "sl_type": "ATR",
+                "sl_value": self.sl_value,
+                "tp_type": "ATR",
+                "tp_value": 3.0,
+                "atr": 2.0,
+            },
+            index=df.index,
+        )
+
+
 class TestLoadWatchlist:
     def test_reads_tickers_skipping_blank_lines(self, tmp_path):
         path = tmp_path / "watchlist.txt"
@@ -100,6 +126,36 @@ class TestLoadTickerData:
         assert df is not None
         assert list(df.index) == list(df.index.sort_values())
         assert len(df) == len(trending_data)
+
+    def test_flattens_multiindex_columns(self, tmp_path, trending_data):
+        # yfinance returns ('Close', 'AAPL')-style MultiIndex columns, so this
+        # is the shape every real cached parquet in data/raw actually has -
+        # the single-level fixture above exercises the branch that production
+        # data never takes.
+        multi = trending_data.copy()
+        multi.columns = pd.MultiIndex.from_product([multi.columns, ["AAPL"]])
+        multi.to_parquet(tmp_path / "AAPL.parquet")
+
+        df = load_ticker_data("AAPL", str(tmp_path))
+
+        assert df is not None
+        assert not isinstance(df.columns, pd.MultiIndex)
+        assert list(df.columns) == list(trending_data.columns)
+        # Flattening must keep the values addressable by plain column name,
+        # since that is how every downstream strategy indexes them.
+        assert df["Close"].iloc[-1] == pytest.approx(trending_data["Close"].iloc[-1])
+
+    def test_multiindex_data_is_scannable_end_to_end(self, tmp_path, trending_data):
+        # Guards the seam: flattening is only worth anything if the result
+        # satisfies the BaseStrategy contract downstream.
+        multi = trending_data.copy()
+        multi.columns = pd.MultiIndex.from_product([multi.columns, ["AAPL"]])
+        multi.to_parquet(tmp_path / "AAPL.parquet")
+
+        signals = scan_signals(_AlwaysBuyStrategy(), ["AAPL"], data_dir=str(tmp_path))
+
+        assert list(signals["ticker"]) == ["AAPL"]
+        assert signals.iloc[0]["shares"] > 0
 
 
 class TestScanSignals:
@@ -133,6 +189,125 @@ class TestScanSignals:
         signals = scan_signals(_AlwaysBuyStrategy(), ["AAPL"], data_dir=str(tmp_path))
         assert signals.empty
 
+    def test_bearish_signal_is_an_unsized_exit_not_a_short(
+        self, tmp_path, trending_data
+    ):
+        # This repo is long-only: both engines treat signal == -1 as "close a
+        # long", never "open a short" (see engine/backtester.py and
+        # engine/forward_tester.py). Sizing a -1 row and inverting its stop
+        # would display a short position the system cannot take.
+        trending_data.to_parquet(tmp_path / "AAPL.parquet")
+
+        signals = scan_signals(
+            _FixedSignalStrategy(signal=-1), ["AAPL"], data_dir=str(tmp_path)
+        )
+        row = signals.iloc[0]
+
+        assert row["signal"] == "EXIT LONG"
+        assert row["entry_price"] == pytest.approx(
+            float(trending_data["Close"].iloc[-1])
+        )
+        # Unsized: an exit closes whatever is open, so there is no share
+        # count or bracket to compute here.
+        assert pd.isna(row["shares"])
+        assert pd.isna(row["stop_loss"])
+        assert pd.isna(row["take_profit"])
+
+    def test_no_signal_produces_no_row(self, tmp_path, trending_data):
+        trending_data.to_parquet(tmp_path / "AAPL.parquet")
+
+        signals = scan_signals(
+            _FixedSignalStrategy(signal=0), ["AAPL"], data_dir=str(tmp_path)
+        )
+
+        assert signals.empty
+
+    def test_nan_sl_value_is_skipped_not_crashed(self, tmp_path, trending_data):
+        # A gappy or halted series yields NaN ATR and so NaN sl_value on a bar
+        # still flagged active. BaseStrategy.validate_output rejects that, and
+        # the rejection has to be per-ticker: unguarded it aborts the scan and
+        # one bad symbol costs the other 500.
+        trending_data.to_parquet(tmp_path / "AAPL.parquet")
+
+        signals = scan_signals(
+            _FixedSignalStrategy(sl_value=float("nan")),
+            ["AAPL"],
+            data_dir=str(tmp_path),
+        )
+
+        assert signals.empty
+        assert signals.attrs["skipped"] == 1
+        assert any(
+            "invalid strategy output" in reason
+            for reason in signals.attrs["skip_reasons"]
+        )
+
+    def test_invalid_ticker_does_not_abort_the_remaining_scan(
+        self, tmp_path, trending_data
+    ):
+        # The ordering matters: the bad ticker is scanned *first*, so a
+        # non-per-ticker guard would mean GOOD never gets looked at.
+        trending_data.to_parquet(tmp_path / "BAD.parquet")
+        trending_data.to_parquet(tmp_path / "GOOD.parquet")
+
+        class _NanForOneTicker(BaseStrategy):
+            """NaN sl_value only for the frame it has seen fewest times -
+            i.e. the first ticker scanned."""
+
+            def __init__(self):
+                super().__init__(name="Nan For One")
+                self.calls = 0
+
+            def generate_signals(self, df):
+                self.calls += 1
+                bad = self.calls == 1
+                return pd.DataFrame(
+                    {
+                        "signal": 1,
+                        "sl_type": "ATR",
+                        "sl_value": float("nan") if bad else 1.5,
+                        "tp_type": "ATR",
+                        "tp_value": 3.0,
+                        "atr": 2.0,
+                    },
+                    index=df.index,
+                )
+
+        signals = scan_signals(
+            _NanForOneTicker(), ["BAD", "GOOD"], data_dir=str(tmp_path)
+        )
+
+        assert list(signals["ticker"]) == ["GOOD"]
+        assert signals.attrs["skipped"] == 1
+
+    def test_one_bad_ticker_does_not_block_the_others(self, tmp_path, trending_data):
+        trending_data.to_parquet(tmp_path / "GOOD.parquet")
+        trending_data.head(10).to_parquet(tmp_path / "SHORT.parquet")
+
+        signals = scan_signals(
+            _AlwaysBuyStrategy(),
+            ["SHORT", "GOOD", "MISSING"],
+            data_dir=str(tmp_path),
+        )
+
+        assert list(signals["ticker"]) == ["GOOD"]
+        assert signals.attrs["skipped"] == 2
+        assert signals.attrs["skip_reasons"] == {
+            "insufficient history": 1,
+            "no cached data": 1,
+        }
+
+    def test_skip_accounting_is_present_even_when_nothing_is_skipped(
+        self, tmp_path, trending_data
+    ):
+        # main() reads these unconditionally, so they must always exist.
+        trending_data.to_parquet(tmp_path / "AAPL.parquet")
+
+        signals = scan_signals(_AlwaysBuyStrategy(), ["AAPL"], data_dir=str(tmp_path))
+
+        assert signals.attrs["skipped"] == 0
+        assert signals.attrs["skip_reasons"] == {}
+
 
 class TestRunInteractiveBacktest:
     def test_unknown_strategy_raises(self, tmp_path):
@@ -165,11 +340,11 @@ class TestRunInteractiveBacktest:
             result["equity"], result["equity_curve"]["Equity"]
         )
 
-    def test_date_range_filters_data(self, tmp_path, trending_data):
+    def test_window_too_narrow_to_backtest_raises(self, tmp_path, trending_data):
         trending_data.to_parquet(tmp_path / "AAPL.parquet")
 
-        with pytest.raises(ValueError):
-            # A narrow window leaves too few bars to backtest.
+        with pytest.raises(ValueError, match="need at least"):
+            # 10 bars is under MIN_BARS, so there is no usable history.
             run_interactive_backtest(
                 "MovingAverageCross",
                 "AAPL",
@@ -177,6 +352,37 @@ class TestRunInteractiveBacktest:
                 end="2023-01-10",
                 data_dir=str(tmp_path),
             )
+
+    def test_date_range_filters_data(self, tmp_path, trending_data):
+        # The previous version of this test only asserted that a too-narrow
+        # window raised - which says nothing about whether start/end are
+        # applied at all. These two windows are both wide enough to run, so
+        # the results have to actually differ.
+        trending_data.to_parquet(tmp_path / "AAPL.parquet")
+
+        first_half = run_interactive_backtest(
+            "MovingAverageCross",
+            "AAPL",
+            start="2023-01-01",
+            end="2023-06-30",
+            data_dir=str(tmp_path),
+        )
+        full = run_interactive_backtest(
+            "MovingAverageCross", "AAPL", data_dir=str(tmp_path)
+        )
+
+        assert len(first_half["equity_curve"]) < len(full["equity_curve"])
+        assert first_half["equity_curve"].index.max() <= pd.Timestamp("2023-06-30")
+        assert full["equity_curve"].index.max() > pd.Timestamp("2023-06-30")
+
+    def test_start_without_end_is_honored(self, tmp_path, trending_data):
+        trending_data.to_parquet(tmp_path / "AAPL.parquet")
+
+        result = run_interactive_backtest(
+            "MovingAverageCross", "AAPL", start="2023-04-01", data_dir=str(tmp_path)
+        )
+
+        assert result["equity_curve"].index.min() >= pd.Timestamp("2023-04-01")
 
 
 class TestLoadTradeJournal:

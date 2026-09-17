@@ -3,7 +3,8 @@ Streamlit dashboard for SwingTrader-26.
 
 Three tabs backed by the existing `src/core` / `src/engine` / `src/journal`
 pipeline - no strategy, risk, or metrics logic is reimplemented here:
-  - Daily Signal Scanner: today's BUY/SELL signals across the watchlist.
+  - Daily Signal Scanner: today's BUY and EXIT LONG signals across the
+    watchlist. Long-only, matching the engines - see `scan_signals`.
   - Interactive Backtester: run any registered strategy over a cached
     ticker and date range, view the equity curve and Sharpe/drawdown.
   - Trade Journal & Analytics: the live trade journal and profit-by-exit-
@@ -15,8 +16,9 @@ into `st.*` widgets, so the underlying logic is testable without a running
 Streamlit session.
 """
 
+from collections import Counter
 from pathlib import Path
-from typing import Optional
+from typing import TypedDict
 
 import pandas as pd
 
@@ -37,6 +39,22 @@ STRATEGIES = {
 DEFAULT_ACCOUNT_EQUITY = 5000.0
 DEFAULT_RISK_PER_TRADE_PCT = 0.02
 
+#: Minimum bars of cached history required before a ticker is scanned or
+#: backtested. Set comfortably above the warm-up of every strategy in
+#: `STRATEGIES` (currently MovingAverageCross's 50-bar slow SMA); a strategy
+#: with a longer window would need this raised.
+MIN_BARS = 100
+
+
+class BacktestRun(TypedDict):
+    """Return contract of `run_interactive_backtest`."""
+
+    stats: pd.Series
+    trades: pd.DataFrame
+    equity_curve: pd.DataFrame
+    equity: pd.Series | None
+    metrics: dict
+
 
 def load_watchlist(path: str = "config/watchlist.txt") -> list[str]:
     """Read one ticker per line from `path`, skipping blank lines."""
@@ -48,7 +66,7 @@ def load_watchlist(path: str = "config/watchlist.txt") -> list[str]:
     ]
 
 
-def load_ticker_data(ticker: str, data_dir: str = "data/raw") -> Optional[pd.DataFrame]:
+def load_ticker_data(ticker: str, data_dir: str = "data/raw") -> pd.DataFrame | None:
     """Load a cached ticker's OHLCV parquet, flattening a MultiIndex if present.
 
     Returns `None` if no cached data exists for `ticker`.
@@ -71,32 +89,75 @@ def scan_signals(
     risk_per_trade_pct: float = DEFAULT_RISK_PER_TRADE_PCT,
 ) -> pd.DataFrame:
     """Run `strategy` over each ticker's cached history and collect the
-    latest-bar BUY/SELL signals with resolved entry/stop/target prices.
+    latest-bar signals with resolved entry/stop/target prices.
+
+    `signal == 1` is reported as a sized `'BUY'` entry. `signal == -1` is
+    reported as an unsized `'EXIT LONG'`: the engines are long-only
+    (`signal == -1` closes an open long - see `engine/backtester.py`, and
+    `engine/forward_tester.py` hardcodes `direction=1`), so a bearish
+    crossover is an exit for holders, *not* a short entry. Sizing it as a
+    short would print share counts for positions no engine in this repo
+    can open, model, or journal.
 
     Tickers with no cached data, insufficient history, or whose signal
-    can't be resolved into a sized order are silently skipped - a scanner
-    is expected to run over a heterogeneous universe.
+    can't be resolved into a sized order are skipped - a scanner is
+    expected to run over a heterogeneous universe. Skips are counted in
+    the result's `.attrs` (`skipped`, `skip_reasons`) rather than being
+    discarded, so a systemic misconfiguration is distinguishable from a
+    genuinely quiet market.
 
     Returns:
-        DataFrame with columns `ticker`, `signal` ('BUY'/'SELL'),
-        `entry_price`, `stop_loss`, `take_profit`, `shares`.
+        DataFrame with columns `ticker`, `signal` ('BUY'/'EXIT LONG'),
+        `entry_price`, `stop_loss`, `take_profit`, `shares`. `EXIT LONG`
+        rows carry the current close as `entry_price` and NaN for
+        `stop_loss`/`take_profit`/`shares`.
     """
     risk_manager = RiskManager(account_equity, risk_per_trade_pct)
     rows = []
+    skip_reasons: Counter[str] = Counter()
 
     for ticker in tickers:
         df = load_ticker_data(ticker, data_dir)
-        if df is None or len(df) < 100:
+        if df is None:
+            skip_reasons["no cached data"] += 1
+            continue
+        if len(df) < MIN_BARS:
+            skip_reasons["insufficient history"] += 1
             continue
 
-        signals_df = strategy.generate_signals(df)
-        BaseStrategy.validate_output(signals_df)
+        try:
+            signals_df = strategy.generate_signals(df)
+            BaseStrategy.validate_output(signals_df)
+        except ValueError as exc:
+            # Per-ticker, not fatal. A contract violation here is usually
+            # data-driven rather than a strategy bug - a gappy or halted
+            # series yields NaN ATR, hence NaN sl_value on an active row -
+            # and unguarded it would abort the remaining tickers mid-scan.
+            # Recorded under its own reason so a genuinely systemic bug still
+            # shows up, as a skip count equal to the whole watchlist.
+            skip_reasons[f"invalid strategy output: {exc}"] += 1
+            continue
 
         latest = signals_df.iloc[-1]
-        if latest["signal"] == 0:
+        signal = int(latest["signal"])
+        if signal == 0:
             continue
 
-        direction = int(latest["signal"])
+        close = float(df["Close"].iloc[-1])
+
+        if signal == -1:
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "signal": "EXIT LONG",
+                    "entry_price": close,
+                    "stop_loss": float("nan"),
+                    "take_profit": float("nan"),
+                    "shares": float("nan"),
+                }
+            )
+            continue
+
         atr = (
             float(latest["atr"])
             if "atr" in signals_df.columns and pd.notna(latest["atr"])
@@ -105,21 +166,22 @@ def scan_signals(
 
         try:
             order = risk_manager.build_order(
-                entry_price=float(df["Close"].iloc[-1]),
+                entry_price=close,
                 sl_type=latest["sl_type"],
                 sl_value=float(latest["sl_value"]),
                 tp_type=latest["tp_type"],
                 tp_value=float(latest["tp_value"]),
-                direction=direction,
+                direction=1,
                 atr=atr,
             )
-        except ValueError:
+        except ValueError as exc:
+            skip_reasons[f"unsizable: {exc}"] += 1
             continue
 
         rows.append(
             {
                 "ticker": ticker,
-                "signal": "BUY" if direction == 1 else "SELL",
+                "signal": "BUY",
                 "entry_price": order.entry_price,
                 "stop_loss": order.stop_loss,
                 "take_profit": order.take_profit,
@@ -127,7 +189,7 @@ def scan_signals(
             }
         )
 
-    return pd.DataFrame(
+    result = pd.DataFrame(
         rows,
         columns=[
             "ticker",
@@ -138,17 +200,20 @@ def scan_signals(
             "shares",
         ],
     )
+    result.attrs["skipped"] = sum(skip_reasons.values())
+    result.attrs["skip_reasons"] = dict(skip_reasons)
+    return result
 
 
 def run_interactive_backtest(
     strategy_name: str,
     ticker: str,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
+    start: str | None = None,
+    end: str | None = None,
     account_equity: float = DEFAULT_ACCOUNT_EQUITY,
     risk_per_trade_pct: float = DEFAULT_RISK_PER_TRADE_PCT,
     data_dir: str = "data/raw",
-) -> dict:
+) -> BacktestRun:
     """Load `ticker`'s cached data, slice to `[start, end]`, and run a
     full backtest for `strategy_name`.
 
@@ -181,9 +246,10 @@ def run_interactive_backtest(
     if end is not None:
         df = df[df.index <= pd.Timestamp(end)]
 
-    if len(df) < 100:
+    if len(df) < MIN_BARS:
         raise ValueError(
-            f"{ticker!r} has only {len(df)} bars in the selected range, need at least 100"
+            f"{ticker!r} has only {len(df)} bars in the selected range, "
+            f"need at least {MIN_BARS}"
         )
 
     strategy = STRATEGIES[strategy_name]()
@@ -239,12 +305,25 @@ def main() -> None:
         st.caption(f"Scanning {len(watchlist)} watchlist tickers")
 
         if st.button("Run Scan"):
-            with st.spinner("Scanning..."):
-                signals = scan_signals(STRATEGIES[strategy_name](), watchlist)
-            if signals.empty:
-                st.info("No BUY/SELL signals on the latest bar.")
+            try:
+                with st.spinner("Scanning..."):
+                    signals = scan_signals(STRATEGIES[strategy_name](), watchlist)
+            except (ValueError, KeyError) as exc:
+                st.error(f"Scan failed: {exc}")
             else:
-                st.dataframe(signals, use_container_width=True)
+                skipped = signals.attrs.get("skipped", 0)
+                if signals.empty:
+                    st.info("No entry or exit signals on the latest bar.")
+                else:
+                    st.dataframe(signals, use_container_width=True)
+                    st.caption(
+                        "EXIT LONG rows are unsized - this repo's engines are "
+                        "long-only, so a bearish signal closes a long rather "
+                        "than opening a short."
+                    )
+                if skipped:
+                    with st.expander(f"{skipped} of {len(watchlist)} tickers skipped"):
+                        st.write(signals.attrs.get("skip_reasons", {}))
 
     with backtest_tab:
         st.subheader("Interactive Backtester")

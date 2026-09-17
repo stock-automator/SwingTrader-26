@@ -322,9 +322,17 @@ git diff main...HEAD
 
 Pass that diff to the subagent (in Claude Code: the `Agent` tool with
 `subagent_type: "code-reviewer"`, or `claude --agent code-reviewer` from the
-CLI). It has read-only access (`Read`, `Grep`, `Glob`, `Bash`) - its job is to
-report findings, not apply them, keeping review strictly separate from
-mutation. It checks typing/contract compliance against `BaseStrategy` and
+CLI). Its brief is to report findings, not apply them, keeping review
+separate from mutation.
+
+Note that this separation is a convention, not a sandbox: the reviewer's
+toolset is `Read`, `Grep`, `Glob`, `Bash`, and `Bash` can write. It may
+legitimately mutate the tree while probing - e.g. flipping an index to check
+whether a test actually fails - so after a review run, confirm the working
+tree is clean (`git status --porcelain src/ tests/`) before trusting the
+diff you are about to merge.
+
+It checks typing/contract compliance against `BaseStrategy` and
 `RiskManager`, test coverage for new/changed logic, edge-case math (division
 by zero, ATR = 0, empty DataFrames, NaN propagation through indicator
 warm-up windows), and performance red flags (row-wise `.apply()`/`.iterrows()`

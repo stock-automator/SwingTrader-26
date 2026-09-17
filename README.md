@@ -100,7 +100,12 @@ Three tabs, all backed by the existing `src/core` / `src/engine` / `src/journal`
 pipeline (no logic is duplicated between the CLI scripts and the dashboard):
 
 - **Daily Signal Scanner** - pick a strategy, scan `config/watchlist.txt` for
-  the latest-bar BUY/SELL signals with resolved entry/stop-loss/take-profit.
+  the latest-bar signals. `BUY` rows carry a resolved
+  entry/stop-loss/take-profit and share count; `EXIT LONG` rows are unsized,
+  because the engines are long-only and a bearish signal closes an open long
+  rather than opening a short. Tickers that can't be scanned (no cached data,
+  short history, unsizable signal) are counted in an expander instead of
+  being dropped silently.
 - **Interactive Backtester** - pick a strategy, symbol, and date range; view
   the equity curve plus Sharpe/drawdown/win-rate metrics.
 - **Trade Journal & Analytics** - view `data/trades_live.csv` and profit
