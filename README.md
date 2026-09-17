@@ -2,6 +2,100 @@
 
 A Python-based stock market data and quantitative research system for building, testing, and validating systematic swing-trading strategies across a large stock universe.
 
+---
+
+# How to Use This Repository
+
+This section is the practical quick-start. For the underlying engineering
+contracts (strategy signal schema, risk sizing, engine internals) see
+`AGENTS.md` - that's the reference future strategies and AI coding agents
+should follow.
+
+## Setup
+
+```bash
+pip install -r requirements.txt
+```
+
+## Run the test suite
+
+```bash
+pytest tests/ -v --cov=src
+```
+
+## Run a backtest (full historical replay)
+
+```python
+import pandas as pd
+from src.core.risk import RiskManager
+from src.engine.backtester import run_backtest
+from src.strategies.donchian_breakout import DonchianBreakout
+from src.analytics.metrics import compute_metrics, export_trades_csv, save_equity_curve_chart
+
+df = pd.read_parquet("data/raw/AAPL.parquet")
+if isinstance(df.columns, pd.MultiIndex):
+    df.columns = df.columns.droplevel(1)   # cached files store (field, ticker) columns
+df = df.sort_index()
+
+risk_manager = RiskManager(account_equity=5000, risk_per_trade_pct=0.02)
+result = run_backtest(DonchianBreakout(), df, risk_manager, commission=0.001, slippage_pct=0.0005)
+
+print(result.stats)                                          # Sharpe, Return %, # Trades, ...
+metrics = compute_metrics(result.trades, result.equity_curve["Equity"])
+print(metrics)                                                # win_rate, expectancy, cagr_pct, ...
+
+export_trades_csv(result.trades, "results/trades.csv")
+save_equity_curve_chart(result.equity_curve["Equity"], "results/equity_curve.png")
+```
+
+Two ready-to-run CLI scripts wrap this for the cached ticker universe:
+
+```bash
+python backtest_donchian.py       # summary return/Sharpe/drawdown across 20 cached tickers
+python backtest_with_exits.py     # per-trade entry/exit detail across 10 cached tickers
+```
+
+## Run a forward test (bar-by-bar paper trading)
+
+```python
+from src.engine.forward_tester import ForwardTester
+from src.core.risk import RiskManager
+from src.strategies.moving_average_cross import MovingAverageCross
+
+tester = ForwardTester(
+    strategy=MovingAverageCross(),
+    risk_manager=RiskManager(account_equity=5000),
+    symbol="AAPL",
+    lookback=252,
+)
+
+for _, bar in df.iterrows():
+    event = tester.step(bar)      # {'timestamp', 'action': 'ENTRY'|'EXIT'|'HOLD', ...}
+
+print(tester.get_trade_log())     # closed trades
+print(tester.get_open_positions())
+print(tester.equity_curve)
+```
+
+## Generate a plain-English performance report
+
+Requires a local Ollama server (`ollama serve`) with a model pulled (default `phi`).
+If Ollama isn't reachable, this returns a friendly "unavailable" string instead of raising.
+
+```python
+from src.analytics.llm_reporter import LLMReporter
+
+reporter = LLMReporter()  # provider="ollama" by default
+report = reporter.generate_report(metrics, result.trades, result.equity_curve["Equity"])
+print(report)
+```
+
+## Adding a new strategy
+
+See `AGENTS.md` §3 - subclass `BaseStrategy` in `src/strategies/`, implement
+`generate_signals`, copy `tests/test_moving_average_cross.py` as your test
+template. No registry to update; strategies are passed to the engine directly.
+
 The project started as a Yahoo Finance historical-data download agent and has evolved into the **data and backtesting foundation for a systematic momentum/swing-trading system**.
 
 The system is designed around:
@@ -981,8 +1075,16 @@ pytest tests/ -v
 Coverage:
 
 ```bash
-pytest tests/ --cov=agent --cov-report=html
+pytest tests/ -v --cov=src --cov-report=html
 ```
+
+This covers the data agent (`tests/test_agent.py`, `tests/test_journal.py`)
+as well as the strategy/risk/engine/analytics layer added in `src/`
+(`tests/test_donchian.py`, `tests/test_moving_average_cross.py`,
+`tests/test_risk.py`, `tests/test_backtester.py`,
+`tests/test_forward_tester.py`, `tests/test_metrics.py`,
+`tests/test_llm_reporter.py`). See `AGENTS.md` §7 for testing conventions
+when adding new modules.
 
 ---
 
