@@ -1,0 +1,13 @@
+# Tooling configuration. Note that flake8 deliberately lives in `.flake8`
+# instead of here - it has no native pyproject.toml support.
+
+[tool.isort]
+# Without this, isort defaults to grid-style wrapping and fights black over
+# every multi-line import. The profile switches it to black's
+# vertical-hanging-indent style and inherits black's line length.
+profile = "black"
+
+[tool.black]
+# Black's own default, pinned so the isort profile above stays in agreement
+# if that default ever changes upstream.
+line-length = 88

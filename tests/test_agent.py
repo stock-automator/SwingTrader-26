@@ -18,7 +18,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
@@ -696,10 +696,7 @@ class TestDataRecording:
             "failed": [],
         }
 
-        # Cached result - should not record
-        result = "cached"
-
-        # Should not add anything
+        # A "cached" result should not be recorded into any bucket.
         assert len(checkpoint["downloaded"]) == 0
 
     def test_record_result_unavailable(self, mock_config):
@@ -711,7 +708,6 @@ class TestDataRecording:
         }
 
         ticker = "INVALID"
-        result = "unavailable"
 
         checkpoint["unavailable"].append(
             {
@@ -732,7 +728,6 @@ class TestDataRecording:
         }
 
         ticker = "FAILED"
-        result = "failed"
 
         checkpoint["failed"].append(
             {
