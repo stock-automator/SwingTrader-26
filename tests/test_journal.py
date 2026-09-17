@@ -5,10 +5,9 @@ Tests for Trade Journal
 import shutil
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))

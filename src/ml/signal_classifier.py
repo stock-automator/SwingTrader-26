@@ -7,7 +7,7 @@ Trains on closed trades, ranks new signals by predicted quality
 import json
 import pickle
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd

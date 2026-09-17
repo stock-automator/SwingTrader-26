@@ -6,3 +6,4 @@ pyarrow>=5.0.0
 requests>=2.27.0
 backtesting>=0.3.3
 matplotlib>=3.5.0
+streamlit>=1.30.0

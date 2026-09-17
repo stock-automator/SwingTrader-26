@@ -1,0 +1,19 @@
+[flake8]
+# 120 rather than the 79 default: black wraps code at 88, so this only needs
+# to be loose enough for what black cannot wrap (long strings, URLs, inline
+# comments) without licensing genuinely unreadable lines.
+max-line-length = 120
+
+extend-exclude =
+    venv,
+    .venv,
+    __pycache__,
+    .pytest_cache,
+    htmlcov,
+    build,
+    dist
+
+per-file-ignores =
+    # Every test module prepends the repo root to sys.path before importing
+    # from src/, so its imports are intentionally not at the top of the file.
+    tests/*: E402
