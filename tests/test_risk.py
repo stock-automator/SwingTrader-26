@@ -128,6 +128,85 @@ class TestBuildOrder:
         assert order.stop_loss > 100
         assert order.take_profit < 100
 
+    def test_rejects_unknown_sizing_method(self, rm):
+        with pytest.raises(ValueError):
+            rm.build_order(
+                entry_price=100,
+                sl_type="PERCENTAGE",
+                sl_value=0.02,
+                tp_type="PERCENTAGE",
+                tp_value=0.05,
+                sizing_method="bogus",
+            )
+
+    def test_vol_parity_requires_atr(self, rm):
+        with pytest.raises(ValueError):
+            rm.build_order(
+                entry_price=100,
+                sl_type="PERCENTAGE",
+                sl_value=0.02,
+                tp_type="PERCENTAGE",
+                tp_value=0.05,
+                sizing_method="vol_parity",
+            )
+
+    def test_vol_parity_differs_from_fixed_risk(self, rm):
+        # fixed_risk sizes off the resolved stop distance (0.02 * 100 = 2.0/share);
+        # vol_parity sizes off atr_multiple * atr (2.0 * 3.0 = 6.0/share) instead.
+        fixed = rm.build_order(
+            entry_price=100,
+            sl_type="PERCENTAGE",
+            sl_value=0.02,
+            tp_type="PERCENTAGE",
+            tp_value=0.05,
+            atr=3.0,
+            sizing_method="fixed_risk",
+        )
+        vol_parity = rm.build_order(
+            entry_price=100,
+            sl_type="PERCENTAGE",
+            sl_value=0.02,
+            tp_type="PERCENTAGE",
+            tp_value=0.05,
+            atr=3.0,
+            sizing_method="vol_parity",
+        )
+        assert fixed.shares != vol_parity.shares
+        assert vol_parity.shares == int((5000 * 0.02) // (2.0 * 3.0))
+        # SL/TP resolution is unaffected by sizing_method.
+        assert fixed.stop_loss == vol_parity.stop_loss
+        assert fixed.take_profit == vol_parity.take_profit
+
+
+class TestVolatilityParitySize:
+    @pytest.mark.parametrize(
+        "atr,atr_multiple,expected",
+        [
+            (2.0, 2.0, int((5000 * 0.02) // 4.0)),
+            (1.0, 2.0, int((5000 * 0.02) // 2.0)),
+            (5.0, 1.0, int((5000 * 0.02) // 5.0)),
+        ],
+    )
+    def test_table_driven_sizing(self, rm, atr, atr_multiple, expected):
+        assert rm.volatility_parity_size(atr, atr_multiple) == expected
+
+    def test_rejects_zero_atr(self, rm):
+        with pytest.raises(ValueError):
+            rm.volatility_parity_size(atr=0)
+
+    def test_rejects_negative_atr(self, rm):
+        with pytest.raises(ValueError):
+            rm.volatility_parity_size(atr=-1.0)
+
+    def test_rejects_non_positive_atr_multiple(self, rm):
+        with pytest.raises(ValueError):
+            rm.volatility_parity_size(atr=2.0, atr_multiple=0)
+
+    def test_smaller_atr_yields_more_shares(self, rm):
+        low_vol_shares = rm.volatility_parity_size(atr=1.0)
+        high_vol_shares = rm.volatility_parity_size(atr=5.0)
+        assert low_vol_shares > high_vol_shares
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

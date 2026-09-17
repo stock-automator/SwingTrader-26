@@ -90,6 +90,22 @@ report = reporter.generate_report(metrics, result.trades, result.equity_curve["E
 print(report)
 ```
 
+## Run the dashboard
+
+```
+streamlit run run_ui.py
+```
+
+Three tabs, all backed by the existing `src/core` / `src/engine` / `src/journal`
+pipeline (no logic is duplicated between the CLI scripts and the dashboard):
+
+- **Daily Signal Scanner** - pick a strategy, scan `config/watchlist.txt` for
+  the latest-bar BUY/SELL signals with resolved entry/stop-loss/take-profit.
+- **Interactive Backtester** - pick a strategy, symbol, and date range; view
+  the equity curve plus Sharpe/drawdown/win-rate metrics.
+- **Trade Journal & Analytics** - view `data/trades_live.csv` and profit
+  attribution by exit reason (SL/TP1/TP2/TIMEOUT/MANUAL).
+
 ## Adding a new strategy
 
 See `AGENTS.md` §3 - subclass `BaseStrategy` in `src/strategies/`, implement

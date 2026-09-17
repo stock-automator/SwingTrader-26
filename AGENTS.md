@@ -309,3 +309,29 @@ separation of concerns in §1.
   require a live Ollama server.
 - Run the full suite with `pytest tests/ -v --cov=src` before considering
   work complete.
+
+## 8. Code Review Workflow
+
+Before merging any change into `main` - whether written by a human or an AI
+agent - invoke the `code-reviewer` subagent (`.claude/agents/code_reviewer.md`)
+on the diff:
+
+```
+git diff main...HEAD
+```
+
+Pass that diff to the subagent (in Claude Code: the `Agent` tool with
+`subagent_type: "code-reviewer"`, or `claude --agent code-reviewer` from the
+CLI). It has read-only access (`Read`, `Grep`, `Glob`, `Bash`) - its job is to
+report findings, not apply them, keeping review strictly separate from
+mutation. It checks typing/contract compliance against `BaseStrategy` and
+`RiskManager`, test coverage for new/changed logic, edge-case math (division
+by zero, ATR = 0, empty DataFrames, NaN propagation through indicator
+warm-up windows), and performance red flags (row-wise `.apply()`/`.iterrows()`
+on OHLCV data instead of vectorized ops).
+
+Address every `BLOCKER` and `WARNING` finding it reports, or leave a comment
+in the PR/commit explaining why a finding is being consciously dismissed.
+`NOTE` findings are informational and don't block a merge. This applies to
+both human and AI-driven contributions - it's the expected step between
+"tests pass" and "push to `main`," not a replacement for §7's test suite.
