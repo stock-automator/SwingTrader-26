@@ -452,6 +452,8 @@ def run_comparison(
     slippage_pct: float = 0.0005,
     risk_free_rate: float = 0.0,
     include_buy_and_hold: bool = True,
+    fee_per_share: float = 0.0,
+    atr_slippage_multiple: float = 0.0,
 ) -> BenchmarkComparison:
     """Run `strategy` over `frames` and compare it to buy & hold and SPY.
 
@@ -467,10 +469,16 @@ def run_comparison(
             still returns, with a warning, rather than failing outright.
         initial_capital: Baseline every curve starts at. Defaults to $1,000.
         risk_per_trade_pct: Fraction of sleeve equity risked per trade.
-        commission: Round-trip commission rate.
-        slippage_pct: Spread applied to fills.
+        commission: Round-trip commission rate. Superseded by
+            `fee_per_share` (not stacked) if that's set.
+        slippage_pct: Spread applied to fills. Superseded by
+            `atr_slippage_multiple` (not stacked) if that's set.
         risk_free_rate: Annualised risk-free rate for Sharpe and alpha.
         include_buy_and_hold: Emit the buy & hold curve for `frames`.
+        fee_per_share: See `engine.run_backtest`. `0.0` keeps the flat-rate
+            `commission` model.
+        atr_slippage_multiple: See `engine.run_backtest`. `0.0` keeps the
+            flat-rate `slippage_pct` model.
 
     Raises:
         ValueError: if `frames` is empty, or a frame is too short to produce
@@ -496,6 +504,8 @@ def run_comparison(
             risk_manager,
             commission=commission,
             slippage_pct=slippage_pct,
+            fee_per_share=fee_per_share,
+            atr_slippage_multiple=atr_slippage_multiple,
         )
 
         sleeve_curves.append(extract_strategy_equity(result, sleeve_capital))

@@ -12,7 +12,10 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator
 
 from ..quant.backtest import DEFAULT_INITIAL_CAPITAL
+from ..quant.engine import DEFAULT_ACCOUNT_TIERS, DEFAULT_FEE_PER_SHARE
+from ..quant.risk import MIN_REWARD_RISK_RATIO
 from ..quant.strategies import REGISTRY
+from ..quant.strategies.base import VALID_LEVEL_TYPES
 
 
 class BacktestRequest(BaseModel):
@@ -39,6 +42,31 @@ class BacktestRequest(BaseModel):
     include_buy_and_hold: bool = True
     benchmark: str = Field(
         default="SPY", description="Ticker for the second benchmark curve."
+    )
+    fee_per_share: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Fixed $/share maker/taker fee, charged on both legs of a round "
+            f"trip (e.g. {DEFAULT_FEE_PER_SHARE} for IBKR-style pricing). "
+            "0 (the default) keeps the flat-rate `commission` model."
+        ),
+    )
+    atr_slippage_multiple: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "When > 0, replaces `slippage_pct` with a spread scaled off the "
+            "traded ticker's own mean ATR/Close ratio."
+        ),
+    )
+    earnings_blackout: bool = Field(
+        default=False,
+        description="Suppress long entries within 5 trading days of a known earnings date.",
+    )
+    regime_gating: bool = Field(
+        default=False,
+        description="Suppress long entries while the SPY macro regime is BEAR_TRENDING or HIGH_VOLATILITY_CHOP.",
     )
 
     @field_validator("tickers")
@@ -115,6 +143,8 @@ class SetupResponse(BaseModel):
     relative_strength: float | None
     rank: int | None
     note: str | None
+    reward_risk_ratio: float | None = None
+    notional_value: float | None = None
 
 
 class ScreenerResponse(BaseModel):
@@ -122,9 +152,72 @@ class ScreenerResponse(BaseModel):
     scanned: int
     skipped: int
     skip_reasons: dict[str, int]
+    macro_regime: str = "UNKNOWN"
+    circuit_breaker_active: bool = False
 
 
 class HealthResponse(BaseModel):
     status: str
     finnhub_configured: bool
     allow_downloads: bool
+
+
+class OrderTicketRequest(BaseModel):
+    """`POST /api/v1/order-ticket` body - turns one resolved setup into
+    broker-ready tickets across the $1k/$5k/$10k comparison tiers."""
+
+    ticker: str = Field(min_length=1)
+    entry_price: float = Field(gt=0)
+    sl_type: str
+    sl_value: float = Field(gt=0)
+    tp_type: str
+    tp_value: float = Field(gt=0)
+    atr: float | None = Field(default=None, gt=0)
+    direction: int = Field(default=1)
+    order_type: str = Field(default="MARKET")
+    account_tiers: list[float] = Field(
+        default_factory=lambda: list(DEFAULT_ACCOUNT_TIERS)
+    )
+
+    @field_validator("sl_type", "tp_type")
+    @classmethod
+    def _known_level_type(cls, value: str) -> str:
+        if value not in VALID_LEVEL_TYPES:
+            raise ValueError(
+                f"Unknown level type {value!r}. Available: {sorted(VALID_LEVEL_TYPES)}"
+            )
+        return value
+
+    @field_validator("direction")
+    @classmethod
+    def _known_direction(cls, value: int) -> int:
+        if value not in (1, -1):
+            raise ValueError("direction must be 1 (long) or -1 (short)")
+        return value
+
+    @field_validator("account_tiers")
+    @classmethod
+    def _non_empty_positive_tiers(cls, value: list[float]) -> list[float]:
+        if not value or any(v <= 0 for v in value):
+            raise ValueError("account_tiers must be non-empty and all positive")
+        return value
+
+
+class OrderTicketResponse(BaseModel):
+    ticker: str
+    account_equity: float
+    order_type: str
+    entry_price: float
+    stop_loss: float
+    take_profit: float
+    quantity: int
+    notional_value: float
+    risk_amount: float
+    reward_risk_ratio: float
+    tradable: bool
+    note: str | None
+
+
+class OrderTicketsResponse(BaseModel):
+    tickets: list[OrderTicketResponse]
+    min_reward_risk_ratio: float = MIN_REWARD_RISK_RATIO

@@ -5,13 +5,22 @@ it becomes available to the API, the screener and the demo script at once."""
 from .base import BaseStrategy
 from .donchian_breakout import DonchianBreakout
 from .moving_average_cross import MovingAverageCross
+from .relative_strength import RelativeStrengthStrategy
+from .vcp_breakout import VCPBreakoutStrategy
 
 #: Wire-format strategy id -> class. Keys are what `/api/v1/backtest`
 #: accepts in its `strategy` field.
 REGISTRY: dict[str, type[BaseStrategy]] = {
     "donchian_breakout": DonchianBreakout,
     "moving_average_cross": MovingAverageCross,
+    "vcp_breakout": VCPBreakoutStrategy,
+    "relative_strength": RelativeStrengthStrategy,
 }
+
+#: Strategy ids that require a benchmark frame wired in via `set_benchmark`
+#: before `generate_signals` can run - `build_strategy`'s generic,
+#: JSON-params-only instantiation has no way to supply one itself.
+REQUIRES_BENCHMARK: frozenset[str] = frozenset({"relative_strength"})
 
 
 def build_strategy(name: str, params: dict | None = None) -> BaseStrategy:
@@ -41,6 +50,9 @@ __all__ = [
     "BaseStrategy",
     "DonchianBreakout",
     "MovingAverageCross",
+    "RelativeStrengthStrategy",
+    "VCPBreakoutStrategy",
     "REGISTRY",
+    "REQUIRES_BENCHMARK",
     "build_strategy",
 ]

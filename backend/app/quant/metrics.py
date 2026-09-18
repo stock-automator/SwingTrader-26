@@ -37,7 +37,8 @@ def compute_metrics(
 
     Returns:
         Dict with: total_trades, win_rate, expectancy, profit_factor,
-        sharpe_ratio, sortino_ratio, max_drawdown_pct, cagr_pct.
+        sharpe_ratio, sortino_ratio, max_drawdown_pct, cagr_pct,
+        max_r_multiple.
     """
     metrics: dict = {}
 
@@ -48,6 +49,7 @@ def compute_metrics(
                 "win_rate": 0.0,
                 "expectancy": 0.0,
                 "profit_factor": 0.0,
+                "max_r_multiple": None,
             }
         )
     else:
@@ -65,6 +67,7 @@ def compute_metrics(
             metrics["profit_factor"] = float(gross_win / gross_loss)
         else:
             metrics["profit_factor"] = float("inf") if gross_win > 0 else 0.0
+        metrics["max_r_multiple"] = _max_r_multiple(trades_df)
 
     if equity_curve is not None and len(equity_curve) > 1:
         metrics.update(
@@ -81,6 +84,35 @@ def compute_metrics(
         )
 
     return metrics
+
+
+def _max_r_multiple(trades_df: pd.DataFrame) -> float | None:
+    """Best realised reward:risk ratio across `trades_df`'s closed trades,
+    or `None` if the frame doesn't carry the columns needed to compute it.
+
+    `engine.py`'s `run_backtest` produces `EntryPrice`/`ExitPrice`/`SL` (the
+    `backtesting` library's native trade-record columns); other trade
+    sources in this codebase (e.g. `forward_tester.py`) don't, and this is
+    an optional enrichment, not a required stat - a missing column set
+    returns `None` rather than raising.
+    """
+    required = {"EntryPrice", "ExitPrice", "SL"}
+    if not required.issubset(trades_df.columns):
+        return None
+
+    valid = trades_df.dropna(subset=list(required))
+    if valid.empty:
+        return None
+
+    risk_per_share = (valid["EntryPrice"] - valid["SL"]).abs()
+    reward_per_share = valid["ExitPrice"] - valid["EntryPrice"]
+
+    sized = risk_per_share > 0
+    if not sized.any():
+        return None
+
+    r_multiples = reward_per_share[sized] / risk_per_share[sized]
+    return float(r_multiples.max())
 
 
 def _equity_curve_metrics(

@@ -7,9 +7,15 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..config import Settings, get_settings
-from ..data.loader import SPY_TICKER, DataUnavailableError, load_prices
+from ..data.loader import (
+    SPY_TICKER,
+    DataUnavailableError,
+    fetch_earnings_dates,
+    load_prices,
+)
 from ..quant.backtest import comparison_to_payload, run_comparison
-from ..quant.strategies import build_strategy
+from ..quant.gating import EarningsGatedStrategy, RegimeGatedStrategy
+from ..quant.strategies import REQUIRES_BENCHMARK, build_strategy
 from .deps import load_frames
 from .schemas import BacktestRequest, BacktestResponse
 
@@ -39,6 +45,12 @@ def run_backtest_endpoint(
             detail=f"No usable price history for any of {tickers}. "
             + "; ".join(warnings),
         )
+    # Tag each frame with its own ticker so a strategy shared across every
+    # sleeve (`run_comparison`'s design) can still tell them apart -
+    # `EarningsGatedStrategy` reads this to block each sleeve on its own
+    # earnings calendar.
+    for ticker, df in frames.items():
+        df.attrs["ticker"] = ticker
 
     spy_frame = None
     try:
@@ -53,6 +65,33 @@ def run_backtest_endpoint(
         log.warning("SPY benchmark unavailable: %s", exc)
         warnings.append(f"Benchmark {request.benchmark}: {exc}")
 
+    if request.strategy in REQUIRES_BENCHMARK:
+        if spy_frame is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"{request.strategy!r} requires a benchmark, but "
+                f"{request.benchmark} bars are unavailable.",
+            )
+        strategy.set_benchmark(spy_frame)
+
+    if request.regime_gating:
+        if spy_frame is None:
+            warnings.append("Regime gating requested but no benchmark bars - skipped.")
+        else:
+            strategy = RegimeGatedStrategy(strategy, benchmark_df=spy_frame)
+
+    if request.earnings_blackout:
+        earnings_by_ticker = {}
+        for ticker in frames:
+            try:
+                earnings_by_ticker[ticker] = fetch_earnings_dates(ticker)
+            except DataUnavailableError as exc:
+                log.warning("earnings calendar unavailable for %s: %s", ticker, exc)
+                warnings.append(f"Earnings calendar unavailable for {ticker}: {exc}")
+        strategy = EarningsGatedStrategy(
+            strategy, earnings_by_ticker=earnings_by_ticker
+        )
+
     try:
         comparison = run_comparison(
             strategy,
@@ -64,6 +103,8 @@ def run_backtest_endpoint(
             slippage_pct=request.slippage_pct,
             risk_free_rate=request.risk_free_rate,
             include_buy_and_hold=request.include_buy_and_hold,
+            fee_per_share=request.fee_per_share,
+            atr_slippage_multiple=request.atr_slippage_multiple,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

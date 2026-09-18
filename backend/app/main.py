@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.backtest import router as backtest_router
+from .api.order_ticket import router as order_ticket_router
 from .api.schemas import HealthResponse
 from .api.screener import router as screener_router
 from .config import get_settings
@@ -40,6 +41,7 @@ app.add_middleware(
 
 app.include_router(backtest_router)
 app.include_router(screener_router)
+app.include_router(order_ticket_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)

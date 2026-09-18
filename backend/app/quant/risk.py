@@ -5,17 +5,56 @@ Converts the abstract, relative SL/TP definitions produced by a
 `BaseStrategy` (`sl_type`/`sl_value`/`tp_type`/`tp_value`) into absolute
 stop-loss and take-profit prices, and sizes the position so a stopped-out
 trade loses no more than a fixed percentage of account equity.
+
+Also carries the portfolio-level risk controls layered on top of that
+per-trade sizing (`build_risk_managed_order`, `CircuitBreaker`): a minimum
+reward:risk ratio, a sliding 1%-2% risk budget scaled by setup quality, a
+cap on total risk open across every position at once, and a rolling
+drawdown kill-switch. These are additive - `build_order` (used by
+`engine.py` and every existing strategy/test) is untouched, so the new gate
+is opt-in for callers that want it, e.g. the live screener's Trading
+212/IBKR entry path.
 """
 
 import math
 from dataclasses import dataclass
 
+import pandas as pd
+
 from backend.app.quant.strategies.base import VALID_LEVEL_TYPES
+
+#: Minimum acceptable reward:risk ratio for `build_risk_managed_order` to
+#: accept an entry signal at all. Below this, the setup is rejected outright
+#: regardless of sizing - no position size fixes a bad trade structure.
+MIN_REWARD_RISK_RATIO = 2.5
+
+#: Dynamic per-trade risk budget scales linearly with reward:risk between
+#: these bounds: a setup right at the minimum acceptable R gets the floor,
+#: one at or above `DYNAMIC_RISK_R_CAP` gets the ceiling.
+MIN_RISK_PER_TRADE_PCT = 0.01
+MAX_RISK_PER_TRADE_PCT = 0.02
+DYNAMIC_RISK_R_CAP = 4.0
+
+#: Hard ceiling on risk committed across every open position at once, so a
+#: string of independently-sized 2% setups can't stack into an account-wide
+#: exposure nothing here individually would allow.
+MAX_PORTFOLIO_RISK_PCT = 0.06
+
+#: Circuit-breaker: rolling peak-to-trough equity drawdown over this many
+#: trading bars that exceeds this fraction halts new long setups.
+DRAWDOWN_KILL_SWITCH_PCT = 0.10
+DRAWDOWN_LOOKBACK_DAYS = 30
 
 
 @dataclass(frozen=True)
 class Order:
-    """Fully resolved, actionable order parameters for a single trade."""
+    """Fully resolved, actionable order parameters for a single trade.
+
+    `reward_risk_ratio`/`rejected`/`rejection_reason` are only meaningful
+    for orders built via `build_risk_managed_order` - `build_order` leaves
+    them at their defaults since it has no minimum-R or portfolio-cap
+    concept to reject against.
+    """
 
     shares: int
     entry_price: float
@@ -23,6 +62,9 @@ class Order:
     take_profit: float
     risk_amount: float
     risk_per_share: float
+    reward_risk_ratio: float = 0.0
+    rejected: bool = False
+    rejection_reason: str | None = None
 
 
 class RiskManager:
@@ -219,3 +261,184 @@ class RiskManager:
             risk_amount=shares * risk_per_share,
             risk_per_share=risk_per_share,
         )
+
+    @staticmethod
+    def reward_to_risk(
+        entry_price: float, stop_loss: float, take_profit: float
+    ) -> float:
+        """The `R` in "a 3R setup": reward distance over risk distance.
+
+        Returns `0.0`, not inf, when the stop sits at the entry price - a
+        zero-risk-distance order has no defined R and the caller (`build_
+        risk_managed_order`) must treat that as a reject, not as an
+        infinitely good trade.
+        """
+        risk = abs(entry_price - stop_loss)
+        if risk <= 0:
+            return 0.0
+        reward = abs(take_profit - entry_price)
+        return reward / risk
+
+    @staticmethod
+    def dynamic_risk_pct(
+        reward_risk_ratio: float,
+        min_r: float = MIN_REWARD_RISK_RATIO,
+        r_cap: float = DYNAMIC_RISK_R_CAP,
+        min_pct: float = MIN_RISK_PER_TRADE_PCT,
+        max_pct: float = MAX_RISK_PER_TRADE_PCT,
+    ) -> float:
+        """Risk-per-trade fraction scaled by setup quality.
+
+        Linear between `(min_r, min_pct)` and `(r_cap, max_pct)`; clamped to
+        `min_pct` below `min_r` and `max_pct` at or above `r_cap`. A 2.5R
+        setup risks 1% of equity, a 4R-or-better setup risks the full 2%,
+        and everything between scales in proportion - so the account is
+        risking more only where the trade structure justifies it.
+        """
+        if reward_risk_ratio <= min_r:
+            return min_pct
+        if reward_risk_ratio >= r_cap:
+            return max_pct
+        frac = (reward_risk_ratio - min_r) / (r_cap - min_r)
+        return min_pct + frac * (max_pct - min_pct)
+
+    def build_risk_managed_order(
+        self,
+        entry_price: float,
+        sl_type: str,
+        sl_value: float,
+        tp_type: str,
+        tp_value: float,
+        direction: int = 1,
+        atr: float | None = None,
+        min_reward_risk_ratio: float = MIN_REWARD_RISK_RATIO,
+        portfolio_open_risk_pct: float = 0.0,
+        max_portfolio_risk_pct: float = MAX_PORTFOLIO_RISK_PCT,
+    ) -> Order:
+        """Resolve, gate, and size an entry signal under the full risk engine.
+
+        Unlike `build_order`, this can refuse the trade outright: a returned
+        `Order` with `rejected=True` and `shares=0` means "do not take this
+        setup", not "size rounded to zero". Three independent gates, any one
+        of which rejects:
+
+        1. Reward:risk below `min_reward_risk_ratio` - a structurally bad
+           trade no amount of sizing fixes.
+        2. The account is already carrying `>= max_portfolio_risk_pct` of
+           equity at risk across other open positions (`portfolio_open_
+           risk_pct`), leaving no budget for another one.
+        3. Sizing (dynamic risk pct, then the portfolio's remaining budget
+           if that's tighter) still rounds to zero whole shares.
+
+        Args:
+            portfolio_open_risk_pct: Fraction of equity already at risk
+                across every other currently-open position, e.g. `0.045` for
+                4.5%. The caller (not this method) is responsible for
+                tracking open positions and summing their `risk_amount` /
+                `account_equity`.
+
+        Raises:
+            ValueError: via `resolve_stop_loss`/`resolve_take_profit` for a
+                malformed sl/tp definition - the same failure mode as
+                `build_order`.
+        """
+        stop_loss = self.resolve_stop_loss(
+            entry_price, sl_type, sl_value, atr, direction
+        )
+        take_profit = self.resolve_take_profit(
+            entry_price, tp_type, tp_value, atr, direction
+        )
+        risk_per_share = abs(entry_price - stop_loss)
+        rr = self.reward_to_risk(entry_price, stop_loss, take_profit)
+
+        def _rejected(reason: str) -> Order:
+            return Order(
+                shares=0,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_amount=0.0,
+                risk_per_share=risk_per_share,
+                reward_risk_ratio=rr,
+                rejected=True,
+                rejection_reason=reason,
+            )
+
+        if rr < min_reward_risk_ratio:
+            return _rejected(
+                f"Reward:risk {rr:.2f}R is below the {min_reward_risk_ratio:.1f}R minimum"
+            )
+
+        remaining_budget_pct = max_portfolio_risk_pct - portfolio_open_risk_pct
+        if remaining_budget_pct <= 0:
+            return _rejected(
+                f"Portfolio risk cap reached: {portfolio_open_risk_pct * 100:.1f}% "
+                f"of equity already at risk against a {max_portfolio_risk_pct * 100:.1f}% cap"
+            )
+
+        risk_pct = min(self.dynamic_risk_pct(rr), remaining_budget_pct)
+        shares = int((self.account_equity * risk_pct) // risk_per_share)
+
+        if shares <= 0:
+            return _rejected(
+                "Stop distance exceeds the available risk budget at this "
+                "account size - sizing rounds to zero shares"
+            )
+
+        return Order(
+            shares=shares,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            risk_amount=shares * risk_per_share,
+            risk_per_share=risk_per_share,
+            reward_risk_ratio=rr,
+            rejected=False,
+            rejection_reason=None,
+        )
+
+
+class CircuitBreaker:
+    """Rolling drawdown kill-switch: halts new long setups after a sharp
+    equity slide, independent of any single trade's own risk math.
+
+    Args:
+        max_drawdown_pct: Trip threshold, e.g. `0.10` for 10%.
+        lookback_days: Rolling window (in bars) the peak is measured over -
+            a slide that happened further back than this has already been
+            "recovered from" as far as the breaker is concerned.
+    """
+
+    def __init__(
+        self,
+        max_drawdown_pct: float = DRAWDOWN_KILL_SWITCH_PCT,
+        lookback_days: int = DRAWDOWN_LOOKBACK_DAYS,
+    ):
+        if not 0 < max_drawdown_pct < 1:
+            raise ValueError("max_drawdown_pct must be in (0, 1)")
+        if lookback_days < 2:
+            raise ValueError("lookback_days must be at least 2")
+
+        self.max_drawdown_pct = max_drawdown_pct
+        self.lookback_days = lookback_days
+
+    def rolling_drawdown(self, equity_curve: pd.Series) -> pd.Series:
+        """Peak-to-trough drawdown at each bar, measured against the
+        trailing `lookback_days`' own running peak (not the all-time peak) -
+        a fraction, e.g. `-0.12` for a 12% pullback from the recent high.
+
+        Raises:
+            ValueError: if `equity_curve` is empty.
+        """
+        if equity_curve.empty:
+            raise ValueError("equity_curve is empty")
+
+        equity = equity_curve.astype("float64")
+        peak = equity.rolling(window=self.lookback_days, min_periods=1).max()
+        return (equity - peak) / peak
+
+    def is_triggered(self, equity_curve: pd.Series) -> bool:
+        """Whether the latest bar's rolling drawdown breaches the threshold."""
+        drawdown = self.rolling_drawdown(equity_curve)
+        latest = float(drawdown.iloc[-1])
+        return math.isfinite(latest) and latest <= -self.max_drawdown_pct

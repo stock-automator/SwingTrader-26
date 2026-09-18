@@ -1,19 +1,27 @@
 """
-Relative-strength factor screener.
+Relative-strength factor screener, plus the earnings-catalyst blackout
+filter.
 
-Ranks a universe of tickers by their price return over a lookback window
-relative to a benchmark's return over the same window (e.g. each stock vs.
-SPY) - a simple, standard relative-strength momentum factor for narrowing
-a large universe down to the names actually outperforming the market.
+`relative_strength`/`RelativeStrengthScreener` rank a universe of tickers by
+their price return over a lookback window relative to a benchmark's return
+over the same window (e.g. each stock vs. SPY) - a simple, standard
+relative-strength momentum factor for narrowing a large universe down to
+the names actually outperforming the market.
 
-Not yet wired into anything: as of this commit this module is imported only
-by its own tests. The intended consumer is the UI's watchlist scan, which
-currently iterates the full watchlist unranked.
+`CatalystFilter` suppresses a setup going into an unknown-outcome event: a
+long entered the day before an earnings print is a bet on the print, not on
+the technical setup, so it is blocked within a trading-day window of the
+next known earnings date (`data.loader.fetch_earnings_dates` supplies the
+dates; this module never touches the network itself).
 """
 
 import math
 
 import pandas as pd
+
+#: Default trading-day window before an earnings print during which a new
+#: long setup is suppressed.
+DEFAULT_EARNINGS_BLACKOUT_DAYS = 5
 
 
 def _pct_return(df: pd.DataFrame, lookback: int) -> float:
@@ -149,3 +157,56 @@ class RelativeStrengthScreener:
         )
         result["rank"] = result.index + 1
         return result
+
+
+class CatalystFilter:
+    """Blocks new long setups within a trading-day window of a known
+    earnings date.
+
+    Trading-day distance is approximated with a Mon-Fri business-day count
+    (`pandas.bdate_range`) rather than a real market-holiday calendar - close
+    enough for a 5-day blackout window, and it keeps this filter runnable
+    with no external calendar dependency or network access.
+
+    Args:
+        blackout_days: Trading days before (and including) an earnings date
+            during which a new long setup is suppressed, e.g. `5`.
+
+    Raises:
+        ValueError: if `blackout_days` is negative.
+    """
+
+    def __init__(self, blackout_days: int = DEFAULT_EARNINGS_BLACKOUT_DAYS):
+        if blackout_days < 0:
+            raise ValueError("blackout_days must be non-negative")
+        self.blackout_days = blackout_days
+
+    def trading_days_to_next_earnings(
+        self, as_of: pd.Timestamp, earnings_dates: list[pd.Timestamp]
+    ) -> int | None:
+        """Business-day distance from `as_of` to the next earnings date on
+        or after it, or `None` if none of `earnings_dates` is upcoming.
+
+        `0` means earnings is today/`as_of` itself.
+        """
+        as_of = pd.Timestamp(as_of).normalize()
+        upcoming = sorted(
+            d
+            for d in (pd.Timestamp(x).normalize() for x in earnings_dates)
+            if d >= as_of
+        )
+        if not upcoming:
+            return None
+
+        next_date = upcoming[0]
+        if next_date == as_of:
+            return 0
+        return len(pd.bdate_range(start=as_of, end=next_date)) - 1
+
+    def is_blocked(
+        self, as_of: pd.Timestamp, earnings_dates: list[pd.Timestamp]
+    ) -> bool:
+        """Whether a long entered at `as_of` falls inside the blackout
+        window of any date in `earnings_dates`."""
+        distance = self.trading_days_to_next_earnings(as_of, earnings_dates)
+        return distance is not None and distance <= self.blackout_days

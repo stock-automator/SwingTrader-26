@@ -97,7 +97,11 @@ export function EquityChart({ data }: EquityChartProps) {
           </div>
         ))}
       </div>
-      <div ref={containerRef} data-testid="equity-chart" className="h-80 w-full" />
+      <div
+        ref={containerRef}
+        data-testid="equity-chart"
+        className="h-80 w-full"
+      />
     </div>
   );
 }

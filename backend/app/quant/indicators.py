@@ -83,3 +83,45 @@ def wilder_atr(
         )
         .mean()
     )
+
+
+def weekly_ema(df: pd.DataFrame, span: int = 20, rule: str = "W-FRI") -> pd.Series:
+    """Weekly EMA of `Close`, reindexed onto `df`'s daily index - the
+    multi-timeframe confluence check new strategies gate breakouts on
+    (`Close > weekly_ema(df)`).
+
+    Look-ahead safety is the entire point of this function, not an
+    afterthought: a weekly bar under `rule` (Friday-ending weeks by default)
+    is only "revealed" once its resample bin is complete, so a Monday
+    through Thursday bar sees the *prior* completed week's EMA via
+    forward-fill - never the still-forming current week's. Computing a
+    weekly EMA some other way (e.g. a naive 100-day EMA as a "weekly"
+    proxy, or resampling with a label that includes the in-progress week)
+    is exactly the kind of subtle look-ahead bug this indicator exists to
+    avoid.
+
+    Args:
+        span: EMA span in *weeks*, e.g. 20 for a 20-week EMA.
+        rule: Pandas resample rule defining a week's boundary.
+
+    Raises:
+        ValueError: if `df` is empty or missing `Close`.
+    """
+    if "Close" not in df.columns:
+        raise ValueError("df is missing required column: 'Close'")
+    if df.empty:
+        raise ValueError("df is empty")
+    if span < 2:
+        raise ValueError("span must be at least 2")
+
+    weekly_close = df["Close"].resample(rule).last().dropna()
+    weekly_ema_values = weekly_close.ewm(
+        adjust=False, span=span, min_periods=span
+    ).mean()
+
+    return (
+        weekly_ema_values.reindex(df.index.union(weekly_ema_values.index))
+        .ffill()
+        .reindex(df.index)
+        .rename("weekly_ema")
+    )

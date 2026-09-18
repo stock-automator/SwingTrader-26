@@ -171,6 +171,95 @@ class TestBacktestEndpoint:
         assert body["vs_spy"] is None
         assert any("SPY" in w for w in body["warnings"])
 
+    def test_relative_strength_strategy_runs_end_to_end(self, client, fake_prices):
+        # Needs a benchmark to be wired in via REQUIRES_BENCHMARK - exercises
+        # that the API route does so before running the backtest.
+        response = client.post(
+            "/api/v1/backtest",
+            json={"strategy": "relative_strength", "tickers": ["AAPL"]},
+        )
+        assert response.status_code == 200
+        assert response.json()["strategy"] == "Relative Strength Pullback"
+
+    def test_relative_strength_without_benchmark_is_503(self, client, monkeypatch):
+        universe = {"AAPL": _trending_ohlcv(seed=1)}
+
+        def _load_prices(
+            ticker, start=None, end=None, data_dir=None, allow_download=True
+        ):
+            ticker = ticker.upper()
+            if ticker not in universe:
+                raise DataUnavailableError(f"{ticker} unavailable")
+            return universe[ticker]
+
+        import backend.app.api.backtest as backtest_module
+        import backend.app.api.deps as deps_module
+
+        monkeypatch.setattr(deps_module, "load_prices", _load_prices)
+        monkeypatch.setattr(backtest_module, "load_prices", _load_prices)
+
+        response = client.post(
+            "/api/v1/backtest",
+            json={"strategy": "relative_strength", "tickers": ["AAPL"]},
+        )
+        assert response.status_code == 503
+
+    def test_regime_gating_toggle_runs_without_error(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/backtest",
+            json={
+                "strategy": "donchian_breakout",
+                "tickers": ["AAPL"],
+                "regime_gating": True,
+            },
+        )
+        assert response.status_code == 200
+
+    def test_earnings_blackout_toggle_runs_without_error(
+        self, client, fake_prices, monkeypatch
+    ):
+        import backend.app.api.backtest as backtest_module
+
+        monkeypatch.setattr(
+            backtest_module,
+            "fetch_earnings_dates",
+            lambda ticker, limit=8: [pd.Timestamp("2022-06-15")],
+        )
+
+        response = client.post(
+            "/api/v1/backtest",
+            json={
+                "strategy": "donchian_breakout",
+                "tickers": ["AAPL"],
+                "earnings_blackout": True,
+            },
+        )
+        assert response.status_code == 200
+
+    def test_fee_per_share_and_atr_slippage_are_accepted(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/backtest",
+            json={
+                "strategy": "donchian_breakout",
+                "tickers": ["AAPL"],
+                "fee_per_share": 0.005,
+                "atr_slippage_multiple": 0.1,
+            },
+        )
+        assert response.status_code == 200
+        assert "max_r_multiple" in response.json()["trade_metrics"]
+
+    def test_negative_fee_per_share_is_422(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/backtest",
+            json={
+                "strategy": "donchian_breakout",
+                "tickers": ["AAPL"],
+                "fee_per_share": -0.01,
+            },
+        )
+        assert response.status_code == 422
+
 
 class TestScreenerLiveEndpoint:
     def test_scans_requested_tickers(self, client, fake_prices):
@@ -203,6 +292,183 @@ class TestScreenerLiveEndpoint:
         for setup in body["setups"]:
             assert setup["direction"] in {"LONG", "SHORT", "EXIT_LONG", "FLAT"}
             assert setup["ticker"] in {"AAPL", "MSFT"}
+
+    def test_response_carries_macro_regime_and_circuit_breaker(
+        self, client, fake_prices
+    ):
+        response = client.get(
+            "/api/v1/screener/live",
+            params={"strategy": "donchian_breakout", "tickers": "AAPL,MSFT"},
+        )
+        body = response.json()
+        assert body["macro_regime"] in {
+            "BULL_TRENDING",
+            "BEAR_TRENDING",
+            "HIGH_VOLATILITY_CHOP",
+            "NEUTRAL",
+            "UNKNOWN",
+        }
+        assert isinstance(body["circuit_breaker_active"], bool)
+
+    def test_bear_trending_spy_suppresses_long_setups(self, client, monkeypatch):
+        def _smooth_bear_spy(n: int = 260, seed: int = 99) -> pd.DataFrame:
+            # Deterministic, low-noise downtrend - `_trending_ohlcv`'s random
+            # walk is noisy enough to read as HIGH_VOLATILITY_CHOP instead,
+            # which isn't the case this test is isolating.
+            rng = np.random.default_rng(seed)
+            index = pd.date_range("2022-01-03", periods=n, freq="B")
+            close = pd.Series(
+                200 - 0.3 * np.arange(n) + rng.normal(0, 0.05, n), index=index
+            )
+            return pd.DataFrame(
+                {
+                    "Open": close,
+                    "High": close * 1.002,
+                    "Low": close * 0.998,
+                    "Close": close,
+                    "Volume": 1_000_000.0,
+                },
+                index=index,
+            )
+
+        universe = {
+            "AAPL": _trending_ohlcv(seed=1, n=400),
+            "SPY": _smooth_bear_spy(),
+        }
+
+        def _load_prices(
+            ticker, start=None, end=None, data_dir=None, allow_download=True
+        ):
+            ticker = ticker.upper()
+            if ticker not in universe:
+                raise DataUnavailableError(f"{ticker} unavailable")
+            return universe[ticker]
+
+        import backend.app.api.deps as deps_module
+        import backend.app.api.screener as screener_module
+
+        monkeypatch.setattr(deps_module, "load_prices", _load_prices)
+        monkeypatch.setattr(screener_module, "load_prices", _load_prices)
+
+        response = client.get(
+            "/api/v1/screener/live",
+            params={"strategy": "donchian_breakout", "tickers": "AAPL"},
+        )
+        body = response.json()
+        assert body["macro_regime"] == "BEAR_TRENDING"
+        for setup in body["setups"]:
+            if setup["direction"] == "LONG":
+                assert setup["tradable"] is False
+
+    def test_earnings_blackout_query_param_is_accepted(
+        self, client, fake_prices, monkeypatch
+    ):
+        import backend.app.api.screener as screener_module
+
+        monkeypatch.setattr(
+            screener_module,
+            "fetch_earnings_dates",
+            lambda ticker, limit=8: [],
+        )
+        response = client.get(
+            "/api/v1/screener/live",
+            params={
+                "strategy": "donchian_breakout",
+                "tickers": "AAPL",
+                "earnings_blackout": True,
+            },
+        )
+        assert response.status_code == 200
+
+
+class TestOrderTicketEndpoint:
+    def test_returns_one_ticket_per_default_tier(self, client):
+        response = client.post(
+            "/api/v1/order-ticket",
+            json={
+                "ticker": "aapl",
+                "entry_price": 100.0,
+                "sl_type": "ATR",
+                "sl_value": 2.0,
+                "tp_type": "ATR",
+                "tp_value": 5.0,
+                "atr": 1.0,
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["tickets"]) == 3
+        assert [t["account_equity"] for t in body["tickets"]] == [
+            1000.0,
+            5000.0,
+            10000.0,
+        ]
+        assert body["tickets"][0]["ticker"] == "AAPL"
+
+    def test_custom_tiers_are_honored(self, client):
+        response = client.post(
+            "/api/v1/order-ticket",
+            json={
+                "ticker": "AAPL",
+                "entry_price": 100.0,
+                "sl_type": "ATR",
+                "sl_value": 2.0,
+                "tp_type": "ATR",
+                "tp_value": 5.0,
+                "atr": 1.0,
+                "account_tiers": [2500.0],
+            },
+        )
+        body = response.json()
+        assert len(body["tickets"]) == 1
+        assert body["tickets"][0]["account_equity"] == 2500.0
+
+    def test_sub_minimum_r_ticket_is_not_tradable(self, client):
+        response = client.post(
+            "/api/v1/order-ticket",
+            json={
+                "ticker": "AAPL",
+                "entry_price": 100.0,
+                "sl_type": "ATR",
+                "sl_value": 2.0,
+                "tp_type": "ATR",
+                "tp_value": 3.0,  # R = 1.5
+                "atr": 1.0,
+            },
+        )
+        body = response.json()
+        assert all(t["tradable"] is False for t in body["tickets"])
+
+    def test_unknown_level_type_is_422(self, client):
+        response = client.post(
+            "/api/v1/order-ticket",
+            json={
+                "ticker": "AAPL",
+                "entry_price": 100.0,
+                "sl_type": "BOGUS",
+                "sl_value": 2.0,
+                "tp_type": "ATR",
+                "tp_value": 5.0,
+                "atr": 1.0,
+            },
+        )
+        assert response.status_code == 422
+
+    def test_invalid_direction_is_422(self, client):
+        response = client.post(
+            "/api/v1/order-ticket",
+            json={
+                "ticker": "AAPL",
+                "entry_price": 100.0,
+                "sl_type": "ATR",
+                "sl_value": 2.0,
+                "tp_type": "ATR",
+                "tp_value": 5.0,
+                "atr": 1.0,
+                "direction": 0,
+            },
+        )
+        assert response.status_code == 422
 
 
 class TestScreenerWebSocket:

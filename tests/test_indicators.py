@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from backend.app.quant.indicators import true_range, wilder_atr
+from backend.app.quant.indicators import true_range, weekly_ema, wilder_atr
 
 
 @pytest.fixture
@@ -87,3 +87,85 @@ class TestWilderATR:
     def test_atr_is_always_non_negative(self, ohlc):
         atr = wilder_atr(ohlc, period=3)
         assert (atr.dropna() >= 0).all()
+
+
+def _daily_ohlc(close: np.ndarray, start: str = "2020-01-01") -> pd.DataFrame:
+    close = pd.Series(close, dtype=float)
+    idx = pd.date_range(start, periods=len(close), freq="D")
+    return pd.DataFrame(
+        {
+            "Open": close.values,
+            "High": close.values + 0.2,
+            "Low": close.values - 0.2,
+            "Close": close.values,
+            "Volume": 1_000_000,
+        },
+        index=idx,
+    )
+
+
+class TestWeeklyEMA:
+    def test_rejects_empty_frame(self):
+        with pytest.raises(ValueError, match="empty"):
+            weekly_ema(_daily_ohlc(np.array([])))
+
+    def test_rejects_missing_close(self):
+        df = _daily_ohlc(np.arange(200, dtype=float)).drop(columns=["Close"])
+        with pytest.raises(ValueError, match="missing required column"):
+            weekly_ema(df)
+
+    def test_rejects_short_span(self):
+        with pytest.raises(ValueError, match="at least 2"):
+            weekly_ema(_daily_ohlc(np.arange(200, dtype=float)), span=1)
+
+    def test_warmup_is_nan_until_enough_weeks(self):
+        df = _daily_ohlc(100 + np.arange(250, dtype=float) * 0.1)
+        ema = weekly_ema(df, span=20)
+        assert ema.iloc[0] is None or pd.isna(ema.iloc[0])
+        assert ema.notna().any()
+
+    def test_is_indexed_like_input(self):
+        df = _daily_ohlc(100 + np.arange(250, dtype=float) * 0.1)
+        ema = weekly_ema(df, span=10)
+        pd.testing.assert_index_equal(ema.index, df.index)
+
+    def test_uptrend_stays_below_price(self):
+        # A lagging trend-following average sits below price throughout a
+        # sustained uptrend, once past warm-up.
+        df = _daily_ohlc(100 + np.arange(300, dtype=float) * 0.2)
+        ema = weekly_ema(df, span=10)
+        valid = ema.dropna()
+        assert (df.loc[valid.index, "Close"] > valid).all()
+
+    def test_does_not_use_the_current_forming_week(self):
+        # A single, isolated future spike inside the *current* (still
+        # forming) week must not change any weekly EMA value dated before
+        # that week started - it hasn't "closed" yet, so it must not have
+        # been read yet either.
+        close = 100 + np.arange(250, dtype=float) * 0.1
+        baseline = weekly_ema(_daily_ohlc(close), span=10)
+
+        spiked = close.copy()
+        spiked[-1] *= 3  # blow up the very last (current, incomplete) week
+        spiked_ema = weekly_ema(_daily_ohlc(spiked), span=10)
+
+        # Every date before the final calendar week is unaffected.
+        last_week_start = spiked_ema.index[-1] - pd.Timedelta(days=6)
+        unaffected = baseline.index < last_week_start
+        pd.testing.assert_series_equal(baseline[unaffected], spiked_ema[unaffected])
+
+    def test_no_lookahead_truncation_invariance(self):
+        # Signals/values computed on a prefix of the data must match the
+        # same prefix computed from the full series, with a small buffer
+        # before the cut to absorb in-progress-week edge effects.
+        close = 100 + np.arange(300, dtype=float) * 0.15
+        df = _daily_ohlc(close)
+        cut = len(df) - 20
+
+        full = weekly_ema(df, span=15)
+        truncated = weekly_ema(df.iloc[:cut], span=15)
+
+        buffer = 10
+        pd.testing.assert_series_equal(
+            full.iloc[: cut - buffer], truncated.iloc[: cut - buffer]
+        )

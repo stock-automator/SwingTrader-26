@@ -5,7 +5,11 @@ Tests for the relative-strength screener.
 import pandas as pd
 import pytest
 
-from backend.app.quant.screener import RelativeStrengthScreener, relative_strength
+from backend.app.quant.screener import (
+    CatalystFilter,
+    RelativeStrengthScreener,
+    relative_strength,
+)
 
 
 def _ohlc_from_closes(closes: list[float]) -> pd.DataFrame:
@@ -206,6 +210,60 @@ class TestRelativeStrengthScreener:
             "relative_strength",
             "rank",
         ]
+
+
+class TestCatalystFilter:
+    def test_rejects_negative_blackout_days(self):
+        with pytest.raises(ValueError):
+            CatalystFilter(blackout_days=-1)
+
+    def test_no_upcoming_earnings_returns_none_distance(self):
+        cf = CatalystFilter(blackout_days=5)
+        as_of = pd.Timestamp("2024-06-10")  # a Monday
+        past_earnings = [pd.Timestamp("2024-05-01")]
+        assert cf.trading_days_to_next_earnings(as_of, past_earnings) is None
+        assert cf.is_blocked(as_of, past_earnings) is False
+
+    def test_earnings_today_is_zero_distance_and_blocked(self):
+        cf = CatalystFilter(blackout_days=5)
+        as_of = pd.Timestamp("2024-06-10")
+        assert cf.trading_days_to_next_earnings(as_of, [as_of]) == 0
+        assert cf.is_blocked(as_of, [as_of]) is True
+
+    def test_one_week_out_five_business_days_is_blocked(self):
+        # Monday -> next Monday is 5 business days (Tue,Wed,Thu,Fri,Mon).
+        cf = CatalystFilter(blackout_days=5)
+        as_of = pd.Timestamp("2024-06-10")  # Monday
+        earnings = pd.Timestamp("2024-06-17")  # following Monday
+        assert cf.trading_days_to_next_earnings(as_of, [earnings]) == 5
+        assert cf.is_blocked(as_of, [earnings]) is True
+
+    def test_six_business_days_out_is_not_blocked(self):
+        cf = CatalystFilter(blackout_days=5)
+        as_of = pd.Timestamp("2024-06-10")  # Monday
+        earnings = pd.Timestamp("2024-06-18")  # Tuesday, 6 business days out
+        assert cf.trading_days_to_next_earnings(as_of, [earnings]) == 6
+        assert cf.is_blocked(as_of, [earnings]) is False
+
+    def test_picks_the_nearest_upcoming_date_among_several(self):
+        cf = CatalystFilter(blackout_days=5)
+        as_of = pd.Timestamp("2024-06-10")
+        earnings = [
+            pd.Timestamp("2024-01-01"),  # past, ignored
+            pd.Timestamp("2024-09-01"),  # far future
+            pd.Timestamp("2024-06-12"),  # nearest upcoming
+        ]
+        assert cf.trading_days_to_next_earnings(as_of, earnings) == 2
+
+    def test_empty_earnings_list_is_never_blocked(self):
+        cf = CatalystFilter(blackout_days=5)
+        assert cf.is_blocked(pd.Timestamp("2024-06-10"), []) is False
+
+    def test_zero_blackout_days_only_blocks_earnings_day_itself(self):
+        cf = CatalystFilter(blackout_days=0)
+        as_of = pd.Timestamp("2024-06-10")
+        assert cf.is_blocked(as_of, [as_of]) is True
+        assert cf.is_blocked(as_of, [pd.Timestamp("2024-06-11")]) is False
 
 
 if __name__ == "__main__":

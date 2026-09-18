@@ -2,9 +2,17 @@
 Tests for RiskManager: SL/TP resolution and position sizing.
 """
 
+import pandas as pd
 import pytest
 
-from backend.app.quant.risk import RiskManager
+from backend.app.quant.risk import (
+    MAX_PORTFOLIO_RISK_PCT,
+    MAX_RISK_PER_TRADE_PCT,
+    MIN_REWARD_RISK_RATIO,
+    MIN_RISK_PER_TRADE_PCT,
+    CircuitBreaker,
+    RiskManager,
+)
 
 
 @pytest.fixture
@@ -301,6 +309,210 @@ class TestVolatilityParitySize:
         low_vol_shares = rm.volatility_parity_size(atr=1.0)
         high_vol_shares = rm.volatility_parity_size(atr=5.0)
         assert low_vol_shares > high_vol_shares
+
+
+class TestRewardToRisk:
+    def test_basic_ratio(self, rm):
+        rr = rm.reward_to_risk(entry_price=100, stop_loss=98, take_profit=106)
+        assert rr == pytest.approx(3.0)
+
+    def test_zero_risk_distance_is_zero_not_inf(self, rm):
+        assert rm.reward_to_risk(entry_price=100, stop_loss=100, take_profit=110) == 0.0
+
+    def test_direction_agnostic_via_abs(self, rm):
+        # Short-style levels (stop above entry, target below) still resolve
+        # to a positive R.
+        rr = rm.reward_to_risk(entry_price=100, stop_loss=102, take_profit=94)
+        assert rr == pytest.approx(3.0)
+
+
+class TestDynamicRiskPct:
+    def test_floor_below_minimum_r(self):
+        assert RiskManager.dynamic_risk_pct(2.0) == pytest.approx(
+            MIN_RISK_PER_TRADE_PCT
+        )
+
+    def test_at_minimum_r_is_floor(self):
+        assert RiskManager.dynamic_risk_pct(MIN_REWARD_RISK_RATIO) == pytest.approx(
+            MIN_RISK_PER_TRADE_PCT
+        )
+
+    def test_ceiling_at_or_above_r_cap(self):
+        assert RiskManager.dynamic_risk_pct(4.0) == pytest.approx(
+            MAX_RISK_PER_TRADE_PCT
+        )
+        assert RiskManager.dynamic_risk_pct(10.0) == pytest.approx(
+            MAX_RISK_PER_TRADE_PCT
+        )
+
+    def test_scales_linearly_between_bounds(self):
+        # Halfway between 2.5R and 4.0R -> halfway between 1% and 2%.
+        midpoint_r = (MIN_REWARD_RISK_RATIO + 4.0) / 2
+        assert RiskManager.dynamic_risk_pct(midpoint_r) == pytest.approx(
+            (MIN_RISK_PER_TRADE_PCT + MAX_RISK_PER_TRADE_PCT) / 2
+        )
+
+    def test_monotonically_increasing(self):
+        values = [
+            RiskManager.dynamic_risk_pct(r) for r in [2.0, 2.5, 3.0, 3.5, 4.0, 5.0]
+        ]
+        assert values == sorted(values)
+
+
+class TestBuildRiskManagedOrder:
+    def test_rejects_below_minimum_r(self, rm):
+        # 1.5 ATR stop, 3.0 ATR target -> R = 2.0, below the 2.5 minimum.
+        order = rm.build_risk_managed_order(
+            entry_price=100,
+            sl_type="ATR",
+            sl_value=1.5,
+            tp_type="ATR",
+            tp_value=3.0,
+            atr=2.0,
+        )
+        assert order.rejected is True
+        assert order.shares == 0
+        assert order.reward_risk_ratio == pytest.approx(2.0)
+        assert "2.0" in order.rejection_reason or "below" in order.rejection_reason
+
+    def test_accepts_at_exactly_the_minimum_r(self, rm):
+        # 2.0 ATR stop, 5.0 ATR target -> R = 2.5, exactly the floor.
+        order = rm.build_risk_managed_order(
+            entry_price=100,
+            sl_type="ATR",
+            sl_value=2.0,
+            tp_type="ATR",
+            tp_value=5.0,
+            atr=1.0,
+        )
+        assert order.rejected is False
+        assert order.reward_risk_ratio == pytest.approx(2.5)
+        assert order.shares > 0
+
+    def test_higher_r_setup_risks_more_of_equity(self, rm):
+        # Same stop distance, bigger target -> bigger R -> bigger risk pct ->
+        # bigger share count for the same account.
+        low_r = rm.build_risk_managed_order(
+            entry_price=100,
+            sl_type="PERCENTAGE",
+            sl_value=0.02,
+            tp_type="PERCENTAGE",
+            tp_value=0.05,  # R = 2.5
+        )
+        high_r = rm.build_risk_managed_order(
+            entry_price=100,
+            sl_type="PERCENTAGE",
+            sl_value=0.02,
+            tp_type="PERCENTAGE",
+            tp_value=0.08,  # R = 4.0
+        )
+        assert low_r.reward_risk_ratio < high_r.reward_risk_ratio
+        assert low_r.shares < high_r.shares
+        assert high_r.risk_amount <= rm.account_equity * MAX_RISK_PER_TRADE_PCT + 1e-9
+
+    def test_rejects_when_portfolio_risk_cap_already_reached(self, rm):
+        order = rm.build_risk_managed_order(
+            entry_price=100,
+            sl_type="PERCENTAGE",
+            sl_value=0.02,
+            tp_type="PERCENTAGE",
+            tp_value=0.10,
+            portfolio_open_risk_pct=MAX_PORTFOLIO_RISK_PCT,
+        )
+        assert order.rejected is True
+        assert order.shares == 0
+        assert "cap" in order.rejection_reason.lower()
+
+    def test_caps_size_to_remaining_portfolio_budget(self, rm):
+        # Dynamic risk pct alone would use 2% (R=4.0), but only 0.5% of
+        # portfolio budget remains - sizing must respect the tighter cap.
+        unconstrained = rm.build_risk_managed_order(
+            entry_price=100,
+            sl_type="PERCENTAGE",
+            sl_value=0.02,
+            tp_type="PERCENTAGE",
+            tp_value=0.08,
+        )
+        constrained = rm.build_risk_managed_order(
+            entry_price=100,
+            sl_type="PERCENTAGE",
+            sl_value=0.02,
+            tp_type="PERCENTAGE",
+            tp_value=0.08,
+            portfolio_open_risk_pct=MAX_PORTFOLIO_RISK_PCT - 0.005,
+        )
+        assert constrained.shares < unconstrained.shares
+        assert constrained.rejected is False
+
+    def test_rejects_when_sizing_rounds_to_zero(self, rm):
+        # A tiny account against a wide stop rounds to zero shares even
+        # though the R passes.
+        tiny = RiskManager(account_equity=50.0, risk_per_trade_pct=0.02)
+        order = tiny.build_risk_managed_order(
+            entry_price=1000,
+            sl_type="PERCENTAGE",
+            sl_value=0.10,
+            tp_type="PERCENTAGE",
+            tp_value=0.30,
+        )
+        assert order.rejected is True
+        assert order.shares == 0
+
+    def test_risk_amount_never_exceeds_dynamic_budget(self, rm):
+        order = rm.build_risk_managed_order(
+            entry_price=100,
+            sl_type="PERCENTAGE",
+            sl_value=0.02,
+            tp_type="PERCENTAGE",
+            tp_value=0.06,
+        )
+        budget = rm.account_equity * MAX_RISK_PER_TRADE_PCT
+        assert order.risk_amount <= budget + 1e-9
+
+
+class TestCircuitBreaker:
+    def test_rejects_invalid_thresholds(self):
+        with pytest.raises(ValueError):
+            CircuitBreaker(max_drawdown_pct=0)
+        with pytest.raises(ValueError):
+            CircuitBreaker(max_drawdown_pct=1.5)
+        with pytest.raises(ValueError):
+            CircuitBreaker(lookback_days=1)
+
+    def test_rejects_empty_curve(self):
+        breaker = CircuitBreaker()
+        with pytest.raises(ValueError, match="empty"):
+            breaker.rolling_drawdown(pd.Series([], dtype=float))
+
+    def test_not_triggered_on_flat_equity(self):
+        breaker = CircuitBreaker(max_drawdown_pct=0.10, lookback_days=30)
+        curve = pd.Series([10_000.0] * 40)
+        assert breaker.is_triggered(curve) is False
+
+    def test_not_triggered_below_threshold(self):
+        breaker = CircuitBreaker(max_drawdown_pct=0.10, lookback_days=30)
+        # 5% pullback from a recent peak - under the 10% threshold.
+        curve = pd.Series([10_000.0] * 10 + [9_500.0] * 10)
+        assert breaker.is_triggered(curve) is False
+
+    def test_triggered_above_threshold(self):
+        breaker = CircuitBreaker(max_drawdown_pct=0.10, lookback_days=30)
+        # 12% pullback from a recent peak within the lookback window.
+        curve = pd.Series([10_000.0] * 10 + [8_800.0] * 5)
+        assert breaker.is_triggered(curve) is True
+
+    def test_recovery_outside_lookback_window_untriggers(self):
+        breaker = CircuitBreaker(max_drawdown_pct=0.10, lookback_days=5)
+        # The 12% drawdown happened, but it is more than `lookback_days` bars
+        # back, and equity has since recovered above the rolling peak - the
+        # rolling window no longer sees the old peak, so it should not trip.
+        curve = pd.Series([10_000.0] * 10 + [8_800.0] * 5 + [11_000.0] * 10)
+        assert breaker.is_triggered(curve) is False
+
+    def test_exactly_at_threshold_triggers(self):
+        breaker = CircuitBreaker(max_drawdown_pct=0.10, lookback_days=30)
+        curve = pd.Series([10_000.0] * 10 + [9_000.0] * 5)
+        assert breaker.is_triggered(curve) is True
 
 
 if __name__ == "__main__":

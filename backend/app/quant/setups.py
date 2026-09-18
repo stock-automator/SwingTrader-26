@@ -30,6 +30,7 @@ import pandas as pd
 
 from .regime import REGIME_BEAR_TREND, REGIME_UNKNOWN, RegimeDetector
 from .risk import RiskManager
+from .screener import CatalystFilter
 from .strategies.base import BaseStrategy
 
 DIRECTION_LONG = "LONG"
@@ -63,6 +64,8 @@ class Setup:
     relative_strength: float | None = None
     rank: int | None = None
     note: str | None = None
+    reward_risk_ratio: float | None = None
+    notional_value: float | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -82,6 +85,8 @@ class Setup:
             "relative_strength": _round(self.relative_strength, 4),
             "rank": self.rank,
             "note": self.note,
+            "reward_risk_ratio": _round(self.reward_risk_ratio, 2),
+            "notional_value": _round(self.notional_value, 2),
         }
 
 
@@ -99,8 +104,20 @@ def scan_ticker(
     strategy: BaseStrategy,
     risk_manager: RiskManager,
     regime_detector: RegimeDetector | None = None,
+    catalyst_filter: CatalystFilter | None = None,
+    earnings_dates: list[pd.Timestamp] | None = None,
 ) -> Setup:
     """Resolve `ticker`'s latest bar into a `Setup`.
+
+    Args:
+        catalyst_filter: When supplied together with `earnings_dates`, a
+            LONG setup falling inside the filter's blackout window of the
+            next earnings date is downgraded to non-tradable with an
+            explanatory note, rather than sized normally. Off (`None`) by
+            default so callers that don't have an earnings calendar handy
+            get the same behavior as before this filter existed.
+        earnings_dates: The ticker's known/estimated earnings report dates.
+            Ignored if `catalyst_filter` is `None`.
 
     Raises:
         ValueError: if `df` has fewer than `MIN_BARS` rows, or the strategy
@@ -142,6 +159,35 @@ def scan_ticker(
             direction=1,
             atr=atr,
         )
+        reward_risk_ratio = RiskManager.reward_to_risk(
+            order.entry_price, order.stop_loss, order.take_profit
+        )
+        notional_value = order.shares * order.entry_price
+
+        blocked_by_earnings = bool(
+            catalyst_filter is not None
+            and earnings_dates
+            and catalyst_filter.is_blocked(signals.index[-1], earnings_dates)
+        )
+        if blocked_by_earnings:
+            return Setup(
+                direction=DIRECTION_LONG,
+                tradable=False,
+                entry_price=order.entry_price,
+                stop_loss=order.stop_loss,
+                take_profit=order.take_profit,
+                shares=0,
+                risk_amount=0.0,
+                reward_risk_ratio=reward_risk_ratio,
+                notional_value=None,
+                note=(
+                    f"Earnings blackout: next print within "
+                    f"{catalyst_filter.blackout_days} trading days - setup "
+                    "suppressed."
+                ),
+                **common,
+            )
+
         return Setup(
             direction=DIRECTION_LONG,
             tradable=order.shares > 0,
@@ -150,6 +196,8 @@ def scan_ticker(
             take_profit=order.take_profit,
             shares=order.shares,
             risk_amount=order.risk_amount,
+            reward_risk_ratio=reward_risk_ratio,
+            notional_value=notional_value if order.shares > 0 else None,
             note=(
                 None
                 if order.shares > 0
@@ -208,19 +256,35 @@ def scan_universe(
     risk_manager: RiskManager,
     regime_detector: RegimeDetector | None = None,
     include_flat: bool = False,
+    catalyst_filter: CatalystFilter | None = None,
+    earnings_by_ticker: dict[str, list[pd.Timestamp]] | None = None,
 ) -> ScanReport:
     """Scan every ticker in `frames`, tolerating per-ticker failures.
 
     Args:
         include_flat: Keep `FLAT` rows. Off by default - the screener grid
             wants setups, not the whole universe.
+        catalyst_filter: Forwarded to `scan_ticker` for every ticker. `None`
+            (the default) disables earnings-blackout suppression entirely.
+        earnings_by_ticker: `{ticker: [earnings dates]}`. A ticker missing
+            from this map is scanned with no earnings dates, i.e. never
+            blocked - the same as an unscoreable/uncovered symbol.
     """
     detector = regime_detector or RegimeDetector()
+    earnings_by_ticker = earnings_by_ticker or {}
     report = ScanReport()
 
     for ticker, df in frames.items():
         try:
-            setup = scan_ticker(ticker, df, strategy, risk_manager, detector)
+            setup = scan_ticker(
+                ticker,
+                df,
+                strategy,
+                risk_manager,
+                detector,
+                catalyst_filter=catalyst_filter,
+                earnings_dates=earnings_by_ticker.get(ticker),
+            )
         except (ValueError, KeyError) as exc:
             report.skipped += 1
             report.skip_reasons[type(exc).__name__] += 1

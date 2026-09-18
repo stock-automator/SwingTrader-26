@@ -1,7 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { ApiError, runBacktest } from "../lib/api";
 import { fmtCurrency, fmtNum, fmtPct, signClass } from "../lib/format";
-import { STRATEGIES, type BacktestRequest, type BacktestResponse, type Strategy } from "../types";
+import {
+  STRATEGIES,
+  type BacktestRequest,
+  type BacktestResponse,
+  type Strategy,
+} from "../types";
 import { StatCard } from "./StatCard";
 import { EquityChart } from "./EquityChart";
 import { TradesTable } from "./TradesTable";
@@ -19,6 +24,9 @@ interface FormState {
   risk_free_rate: number;
   include_buy_and_hold: boolean;
   benchmark: string;
+  realistic_costs: boolean;
+  earnings_blackout: boolean;
+  regime_gating: boolean;
 }
 
 const DEFAULT_FORM: FormState = {
@@ -33,7 +41,15 @@ const DEFAULT_FORM: FormState = {
   risk_free_rate: 0.0,
   include_buy_and_hold: true,
   benchmark: "SPY",
+  realistic_costs: false,
+  earnings_blackout: false,
+  regime_gating: false,
 };
+
+//: $0.005/share (IBKR-style) and 10% of a ticker's own mean ATR/Close ratio
+//: - applied when "Realistic Fees & Slippage" is toggled on.
+const REALISTIC_FEE_PER_SHARE = 0.005;
+const REALISTIC_ATR_SLIPPAGE_MULTIPLE = 0.1;
 
 function NumField({
   label,
@@ -92,13 +108,23 @@ export function BacktestStudio() {
       risk_free_rate: form.risk_free_rate,
       include_buy_and_hold: form.include_buy_and_hold,
       benchmark: form.benchmark,
+      fee_per_share: form.realistic_costs ? REALISTIC_FEE_PER_SHARE : 0,
+      atr_slippage_multiple: form.realistic_costs
+        ? REALISTIC_ATR_SLIPPAGE_MULTIPLE
+        : 0,
+      earnings_blackout: form.earnings_blackout,
+      regime_gating: form.regime_gating,
     };
     try {
       const res = await runBacktest(body);
       setResult(res);
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err),
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : String(err),
       );
       setResult(null);
     } finally {
@@ -164,7 +190,9 @@ export function BacktestStudio() {
             <input
               type="text"
               value={form.benchmark}
-              onChange={(e) => update("benchmark", e.target.value.toUpperCase())}
+              onChange={(e) =>
+                update("benchmark", e.target.value.toUpperCase())
+              }
               className="rounded border border-border bg-panel-alt px-2 py-1 text-sm text-text"
             />
           </label>
@@ -176,6 +204,39 @@ export function BacktestStudio() {
               className="accent-accent"
             />
             Buy &amp; hold
+          </label>
+        </div>
+
+        <div className="flex flex-wrap gap-4 border-t border-border pt-3">
+          <label className="flex items-center gap-2 text-xs text-text-dim">
+            <input
+              type="checkbox"
+              checked={form.realistic_costs}
+              onChange={(e) => update("realistic_costs", e.target.checked)}
+              data-testid="backtest-toggle-realistic-costs"
+              className="accent-accent"
+            />
+            Realistic Fees &amp; Slippage ($0.005/share + ATR spread)
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text-dim">
+            <input
+              type="checkbox"
+              checked={form.earnings_blackout}
+              onChange={(e) => update("earnings_blackout", e.target.checked)}
+              data-testid="backtest-toggle-earnings-blackout"
+              className="accent-accent"
+            />
+            Earnings Blackout (5-day)
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text-dim">
+            <input
+              type="checkbox"
+              checked={form.regime_gating}
+              onChange={(e) => update("regime_gating", e.target.checked)}
+              data-testid="backtest-toggle-regime-gating"
+              className="accent-accent"
+            />
+            Regime Gating (suppress longs in bear/high-vol regimes)
           </label>
         </div>
 
@@ -233,7 +294,9 @@ export function BacktestStudio() {
 
       {result && (
         <div className="flex flex-col gap-5">
-          {result.warnings.length > 0 && <WarningsBanner warnings={result.warnings} />}
+          {result.warnings.length > 0 && (
+            <WarningsBanner warnings={result.warnings} />
+          )}
 
           <div className="rounded border border-border bg-panel-alt px-4 py-3 text-base font-medium text-text">
             {result.headline}
@@ -243,7 +306,9 @@ export function BacktestStudio() {
             <StatCard
               label="Total Return"
               value={fmtPct(result.summaries.strategy.total_return_pct)}
-              valueClassName={signClass(result.summaries.strategy.total_return_pct)}
+              valueClassName={signClass(
+                result.summaries.strategy.total_return_pct,
+              )}
             />
             <StatCard
               label="CAGR"
@@ -266,7 +331,10 @@ export function BacktestStudio() {
               const s = result.summaries[key];
               if (!s) return null;
               return (
-                <div key={key} className="rounded border border-border bg-panel p-3">
+                <div
+                  key={key}
+                  className="rounded border border-border bg-panel p-3"
+                >
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-text-dim">
                     {s.label}
                   </div>
@@ -274,15 +342,21 @@ export function BacktestStudio() {
                     <dt className="text-text-faint">Final Value</dt>
                     <dd className="text-right">{fmtCurrency(s.final_value)}</dd>
                     <dt className="text-text-faint">Return</dt>
-                    <dd className={`text-right ${signClass(s.total_return_pct)}`}>
+                    <dd
+                      className={`text-right ${signClass(s.total_return_pct)}`}
+                    >
                       {fmtPct(s.total_return_pct)}
                     </dd>
                     <dt className="text-text-faint">CAGR</dt>
-                    <dd className={`text-right ${signClass(s.cagr_pct)}`}>{fmtPct(s.cagr_pct)}</dd>
+                    <dd className={`text-right ${signClass(s.cagr_pct)}`}>
+                      {fmtPct(s.cagr_pct)}
+                    </dd>
                     <dt className="text-text-faint">Sharpe</dt>
                     <dd className="text-right">{fmtNum(s.sharpe_ratio)}</dd>
                     <dt className="text-text-faint">Max DD</dt>
-                    <dd className="text-right text-short">{fmtPct(s.max_drawdown_pct)}</dd>
+                    <dd className="text-right text-short">
+                      {fmtPct(s.max_drawdown_pct)}
+                    </dd>
                     <dt className="text-text-faint">Volatility</dt>
                     <dd className="text-right">{fmtPct(s.volatility_pct)}</dd>
                   </dl>
@@ -300,31 +374,48 @@ export function BacktestStudio() {
               </div>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
                 <dt className="text-text-faint">Alpha (ann.)</dt>
-                <dd className={`text-right ${signClass(result.vs_spy.alpha_annual_pct)}`}>
+                <dd
+                  className={`text-right ${signClass(result.vs_spy.alpha_annual_pct)}`}
+                >
                   {fmtPct(result.vs_spy.alpha_annual_pct)}
                 </dd>
                 <dt className="text-text-faint">Beta</dt>
                 <dd className="text-right">{fmtNum(result.vs_spy.beta)}</dd>
                 <dt className="text-text-faint">Information Ratio</dt>
-                <dd className="text-right">{fmtNum(result.vs_spy.information_ratio)}</dd>
+                <dd className="text-right">
+                  {fmtNum(result.vs_spy.information_ratio)}
+                </dd>
                 <dt className="text-text-faint">Excess Return</dt>
-                <dd className={`text-right ${signClass(result.vs_spy.excess_return_pct)}`}>
+                <dd
+                  className={`text-right ${signClass(result.vs_spy.excess_return_pct)}`}
+                >
                   {fmtPct(result.vs_spy.excess_return_pct)}
                 </dd>
                 <dt className="text-text-faint">Correlation</dt>
-                <dd className="text-right">{fmtNum(result.vs_spy.correlation)}</dd>
+                <dd className="text-right">
+                  {fmtNum(result.vs_spy.correlation)}
+                </dd>
                 <dt className="text-text-faint">Tracking Error</dt>
-                <dd className="text-right">{fmtPct(result.vs_spy.tracking_error_pct)}</dd>
+                <dd className="text-right">
+                  {fmtPct(result.vs_spy.tracking_error_pct)}
+                </dd>
                 <dt className="text-text-faint">R²</dt>
-                <dd className="text-right">{fmtNum(result.vs_spy.r_squared)}</dd>
+                <dd className="text-right">
+                  {fmtNum(result.vs_spy.r_squared)}
+                </dd>
                 <dt className="text-text-faint">Benchmark Sharpe</dt>
-                <dd className="text-right">{fmtNum(result.vs_spy.benchmark_sharpe_ratio)}</dd>
+                <dd className="text-right">
+                  {fmtNum(result.vs_spy.benchmark_sharpe_ratio)}
+                </dd>
               </dl>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="Total Trades" value={fmtNum(result.trade_metrics.total_trades, 0)} />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <StatCard
+              label="Total Trades"
+              value={fmtNum(result.trade_metrics.total_trades, 0)}
+            />
             <StatCard
               label="Win Rate"
               value={
@@ -333,8 +424,23 @@ export function BacktestStudio() {
                   : fmtPct(result.trade_metrics.win_rate * 100, 1)
               }
             />
-            <StatCard label="Profit Factor" value={fmtNum(result.trade_metrics.profit_factor)} />
-            <StatCard label="Expectancy" value={fmtCurrency(result.trade_metrics.expectancy, 2)} />
+            <StatCard
+              label="Profit Factor"
+              value={fmtNum(result.trade_metrics.profit_factor)}
+            />
+            <StatCard
+              label="Expectancy (E)"
+              value={fmtCurrency(result.trade_metrics.expectancy, 2)}
+              valueClassName={signClass(result.trade_metrics.expectancy)}
+            />
+            <StatCard
+              label="Max R-Multiple"
+              value={
+                result.trade_metrics.max_r_multiple === null
+                  ? "—"
+                  : `${fmtNum(result.trade_metrics.max_r_multiple, 1)}R`
+              }
+            />
           </div>
 
           <TradesTable trades={result.trades} />
