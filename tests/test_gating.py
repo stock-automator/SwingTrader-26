@@ -22,8 +22,9 @@ class _AlwaysBuyStrategy(BaseStrategy):
         self.warm_up = warm_up
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        warm_up = self.warm_up
         signal = pd.Series(0, index=df.index, dtype=int)
-        signal.iloc[self.warm_up :] = 1
+        signal.iloc[warm_up:] = 1
 
         out = df.copy()
         out["signal"] = signal

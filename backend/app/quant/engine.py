@@ -20,7 +20,7 @@ import pandas as pd
 from backtesting import Backtest, Strategy
 
 from backend.app.quant.indicators import wilder_atr
-from backend.app.quant.risk import Order, RiskManager
+from backend.app.quant.risk import RiskManager
 from backend.app.quant.strategies.base import BaseStrategy
 
 REQUIRED_OHLCV_COLUMNS = ("Open", "High", "Low", "Close", "Volume")

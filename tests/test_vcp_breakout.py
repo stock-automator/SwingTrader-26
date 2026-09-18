@@ -128,8 +128,6 @@ class TestGenerateSignals:
 
     def test_no_signal_when_waves_are_expanding_not_contracting(self, strategy):
         # Reverse the amplitude ordering: waves get *wider*, not tighter.
-        data = _vcp_setup_data()
-        # Rebuild with expanding waves by swapping wave1/wave3 amplitudes.
         n_pre = 160
         wave_period = 15
         pre_close = np.linspace(50, 100, n_pre)
