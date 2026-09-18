@@ -22,6 +22,7 @@ from ..quant.engine import (
 )
 from ..quant.monte_carlo import DEFAULT_N_SIMULATIONS, DEFAULT_RUIN_THRESHOLD_PCT
 from ..quant.risk import MIN_REWARD_RISK_RATIO
+from ..quant.slippage_model import DEFAULT_LOOKBACK as DEFAULT_SLIPPAGE_LOOKBACK
 from ..quant.strategies import REGISTRY
 from ..quant.strategies.base import VALID_LEVEL_TYPES
 
@@ -542,11 +543,40 @@ class SignalMatrixRow(BaseModel):
     win_probability: float | None = Field(
         default=None,
         description=(
-            "Deliberately always null: no model-backed win-probability "
-            "estimate exists yet, and fabricating one for a real trading "
-            "decision would be actively misleading. Reserved for a future "
-            "backtest- or ML-derived estimate."
+            "Historical win-rate estimate from `analytics.expectancy."
+            "estimate_win_probability`: a regime-matched backtest win rate "
+            "when enough same-regime trades exist, else a block-bootstrap "
+            "Monte Carlo percentile over all historical trades, else `null` "
+            "when there isn't enough trade history to support either - "
+            "never a fabricated number. Always `null` for SHORT rows (the "
+            "backtest engine is long-only, so there is nothing to estimate "
+            "from). See the sibling `win_probability_*` fields for how a "
+            "non-null value was derived."
         ),
+    )
+    win_probability_method: str | None = Field(
+        default=None,
+        description=(
+            "'regime_matched_backtest', 'block_bootstrap', or "
+            "'insufficient_data' - which of `estimate_win_probability`'s "
+            "methods produced `win_probability`."
+        ),
+    )
+    win_probability_sample_size: int | None = Field(
+        default=None,
+        description="Number of historical closed trades backing the estimate.",
+    )
+    win_probability_confidence_low: float | None = Field(
+        default=None,
+        description="5th percentile of the block-bootstrap win-rate distribution.",
+    )
+    win_probability_confidence_high: float | None = Field(
+        default=None,
+        description="95th percentile of the block-bootstrap win-rate distribution.",
+    )
+    win_probability_note: str | None = Field(
+        default=None,
+        description="Human-readable explanation of how win_probability was derived.",
     )
 
 
@@ -618,6 +648,21 @@ class SimulateTradeExecutionRequest(BaseModel):
     commission: float = Field(default=0.001, ge=0)
     fee_per_share: float = Field(default=0.0, ge=0)
     atr_slippage_multiple: float = Field(default=0.0, ge=0)
+    impact_coefficient: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Scales `slippage_model.estimate_market_impact_pct`'s square-root "
+            "participation model. `0.0` (the default) disables market-impact "
+            "modelling entirely - existing callers see no behavior change "
+            "unless they opt in."
+        ),
+    )
+    avg_volume_lookback: int = Field(
+        default=DEFAULT_SLIPPAGE_LOOKBACK,
+        ge=1,
+        description="Trailing bar count averaged for the market-impact volume denominator.",
+    )
 
     @field_validator("ticker")
     @classmethod
@@ -712,6 +757,15 @@ class SimulateTradeExecutionResponse(BaseModel):
     fill_price: float
     reference_price: float
     slippage_pct_applied: float
+    spread_pct: float = Field(
+        description="This bar's ATR-implied bid/ask spread, from slippage_model.estimate_dynamic_spread_pct."
+    )
+    market_impact_pct: float = Field(
+        description="Added cost from order size vs. trailing volume, from slippage_model.estimate_market_impact_pct."
+    )
+    spread_variance_pct: float = Field(
+        description="Std-dev of the ATR-implied spread over the trailing window - confidence band on spread_pct."
+    )
     slippage_cost: float
     commission_cost: float
     total_cost: float

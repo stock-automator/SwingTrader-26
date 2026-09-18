@@ -113,6 +113,17 @@ class Settings:
         alpaca_api_key: Alpaca paper-trading API key. Unset means the
             execution endpoints return 503 rather than silently no-opping.
         alpaca_api_secret: Alpaca paper-trading API secret.
+        execution_guards_enabled: Whether `POST /api/v1/execution/orders`
+            runs `execution.guards.check_order_guards` before dispatching.
+            Off only for local/paper testing outside market hours - leave
+            on in any deployment a real decision is made from.
+        execution_allow_extended_hours: Whether the session guard treats
+            pre-market/after-hours as dispatchable (still noisy/illiquid) or
+            blocks them like a closed market. See `execution.guards.
+            MarketSessionGuard`.
+        earnings_lockout_hours: Hours before/after a scheduled earnings
+            release or stock split during which new entries are blocked.
+            See `execution.guards.EarningsLockoutGuard`.
     """
 
     finnhub_api_key: str | None = None
@@ -134,6 +145,9 @@ class Settings:
     generic_webhook_url: str | None = None
     alpaca_api_key: str | None = None
     alpaca_api_secret: str | None = None
+    execution_guards_enabled: bool = True
+    execution_allow_extended_hours: bool = False
+    earnings_lockout_hours: int = 48
 
     @property
     def has_finnhub(self) -> bool:
@@ -174,4 +188,9 @@ def get_settings() -> Settings:
         generic_webhook_url=os.environ.get("GENERIC_WEBHOOK_URL") or None,
         alpaca_api_key=os.environ.get("ALPACA_API_KEY") or None,
         alpaca_api_secret=os.environ.get("ALPACA_API_SECRET") or None,
+        execution_guards_enabled=_env_bool("EXECUTION_GUARDS_ENABLED", True),
+        execution_allow_extended_hours=_env_bool(
+            "EXECUTION_ALLOW_EXTENDED_HOURS", False
+        ),
+        earnings_lockout_hours=_env_int("EARNINGS_LOCKOUT_HOURS", 48),
     )

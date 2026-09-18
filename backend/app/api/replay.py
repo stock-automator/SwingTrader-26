@@ -13,6 +13,14 @@ row - simply cannot see a bar after `target_date`.
 actually filled at" - the realistic-cost question `engine.run_backtest`
 answers in aggregate over a whole backtest, here for one trade in isolation
 so the point-in-time scan above can be chained into "and if I'd taken it."
+
+Its fill price is priced in two passes rather than one, because market
+impact depends on order size and order size depends on fill price: pass one
+sizes the order off a spread-only fill price, pass two re-sizes off that
+order's own share count run through `slippage_model.
+estimate_market_impact_pct`, so the stop-loss/take-profit/shares the
+response reports are all consistent with the *final* fill price rather than
+an intermediate one that ignored impact.
 """
 
 from __future__ import annotations
@@ -25,11 +33,18 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..config import Settings, get_settings
 from ..data.loader import DataUnavailableError, fetch_earnings_dates, load_prices
-from ..quant.engine import EXECUTION_MODE_NEXT_OPEN, estimate_atr_spread_pct
+from ..quant.engine import EXECUTION_MODE_NEXT_OPEN
 from ..quant.indicators import wilder_atr
 from ..quant.risk import RiskManager
 from ..quant.screener import CatalystFilter
 from ..quant.setups import scan_universe
+from ..quant.slippage_model import (
+    SlippageBreakdown,
+    estimate_dynamic_spread_pct,
+    estimate_market_impact_pct,
+    spread_variance_pct,
+    trailing_avg_volume,
+)
 from ..quant.strategies import build_strategy
 from .deps import load_frames, load_watchlist
 from .schemas import (
@@ -162,23 +177,56 @@ def simulate_trade_execution(
         reference_price = float(df["Close"].iloc[idx])
 
     spread = (
-        estimate_atr_spread_pct(df, request.atr_slippage_multiple)
+        estimate_dynamic_spread_pct(df, fill_bar_index, request.atr_slippage_multiple)
         if request.atr_slippage_multiple > 0
         else request.slippage_pct
     )
-    # Spread always moves the fill against the trader: worse (higher) for a
-    # long entry, worse (lower) for a short entry - the same "you don't get
-    # the quoted mid" cost `engine.run_backtest` prices in via `spread`.
-    fill_price = (
-        reference_price * (1 + spread)
-        if request.direction == 1
-        else reference_price * (1 - spread)
-    )
 
-    order = RiskManager(
+    def _apply(price: float, pct: float) -> float:
+        # Spread/impact always move the fill against the trader: worse
+        # (higher) for a long entry, worse (lower) for a short entry - the
+        # same "you don't get the quoted mid" cost `engine.run_backtest`
+        # prices in via its own (whole-run, constant) `spread` parameter.
+        return price * (1 + pct) if request.direction == 1 else price * (1 - pct)
+
+    risk_manager = RiskManager(
         account_equity=request.account_equity,
         risk_per_trade_pct=request.risk_per_trade_pct,
-    ).build_risk_managed_order(
+    )
+
+    # Pass 1: size off a spread-only fill price, to get a share count market
+    # impact can be computed from.
+    spread_only_fill_price = _apply(reference_price, spread)
+    provisional_order = risk_manager.build_risk_managed_order(
+        entry_price=spread_only_fill_price,
+        sl_type=request.sl_type,
+        sl_value=request.sl_value,
+        tp_type=request.tp_type,
+        tp_value=request.tp_value,
+        direction=request.direction,
+        atr=atr_value,
+    )
+
+    avg_volume = trailing_avg_volume(df, fill_bar_index, request.avg_volume_lookback)
+    market_impact_pct = estimate_market_impact_pct(
+        provisional_order.shares, avg_volume, request.impact_coefficient
+    )
+    breakdown = SlippageBreakdown(
+        spread_pct=spread,
+        market_impact_pct=market_impact_pct,
+        spread_variance_pct=spread_variance_pct(
+            df,
+            fill_bar_index,
+            request.atr_slippage_multiple,
+            request.avg_volume_lookback,
+        ),
+    )
+
+    # Pass 2: re-size off the final fill price (spread + impact), so
+    # stop-loss/take-profit/shares in the response are all consistent with
+    # the price the response actually reports as `fill_price`.
+    fill_price = _apply(reference_price, breakdown.total_slippage_pct)
+    order = risk_manager.build_risk_managed_order(
         entry_price=fill_price,
         sl_type=request.sl_type,
         sl_value=request.sl_value,
@@ -202,7 +250,10 @@ def simulate_trade_execution(
         "fill_date": df.index[fill_bar_index].strftime("%Y-%m-%d"),
         "fill_price": round(order.entry_price, 4),
         "reference_price": round(reference_price, 4),
-        "slippage_pct_applied": spread,
+        "slippage_pct_applied": breakdown.total_slippage_pct,
+        "spread_pct": breakdown.spread_pct,
+        "market_impact_pct": breakdown.market_impact_pct,
+        "spread_variance_pct": breakdown.spread_variance_pct,
         "slippage_cost": round(slippage_cost, 2),
         "commission_cost": round(commission_cost, 2),
         "total_cost": round(notional_value + commission_cost, 2),

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ..analytics.expectancy import estimate_win_probability
 from ..config import Settings, get_settings
 from ..data.loader import (
     SPY_TICKER,
@@ -154,7 +155,18 @@ def live_today(
                 continue
             row = setup.as_dict()
             row["strategy"] = name
-            row["win_probability"] = None
+            if setup.direction == DIRECTION_LONG:
+                estimate = estimate_win_probability(
+                    strategy,
+                    frames[setup.ticker],
+                    risk_manager,
+                    current_regime=setup.regime,
+                )
+                row.update(estimate.as_dict())
+            else:
+                # Short setups are screening-only (the backtest engine is
+                # long-only) - no historical fills exist to estimate from.
+                row["win_probability"] = None
             rows.append(row)
 
     return {

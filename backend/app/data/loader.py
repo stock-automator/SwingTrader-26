@@ -202,6 +202,41 @@ def fetch_earnings_dates(ticker: str, limit: int = 8) -> list[pd.Timestamp]:
     return sorted(pd.Timestamp(d).normalize() for d in dates.unique())
 
 
+def fetch_stock_splits(ticker: str) -> list[pd.Timestamp]:
+    """Historical stock-split ex-dates for `ticker`, via yfinance.
+
+    Used by `execution.guards.EarningsLockoutGuard` to suppress new swing
+    entries around a split, the same corporate-action-risk reasoning as the
+    earnings blackout above (a split doesn't change fundamentals, but it can
+    move the tape in ways this project's strategies weren't fit to price
+    in). Only past/announced splits yfinance already has ex-dates for are
+    returned - there is no forward-looking "next split" calendar the way
+    `fetch_earnings_dates` has one for earnings.
+
+    Returns:
+        Empty list if the provider has no split history for this ticker -
+        a "nothing to filter on" result, not an error.
+
+    Raises:
+        DataUnavailableError: on a provider failure (network, rate limit,
+            schema change). A missing/empty split history is not this.
+    """
+    import yfinance as yf
+
+    try:
+        raw = yf.Ticker(ticker.upper()).splits
+    except Exception as exc:  # network, rate limit, schema change
+        raise DataUnavailableError(
+            f"split history fetch failed for {ticker}: {exc}"
+        ) from exc
+
+    if raw is None or raw.empty:
+        return []
+
+    dates = pd.DatetimeIndex(raw.index).tz_localize(None)
+    return sorted(pd.Timestamp(d).normalize() for d in dates.unique())
+
+
 def load_prices(
     ticker: str,
     start: str | None = None,
