@@ -718,6 +718,12 @@ class TestWalkForwardEndpoint:
 
 class TestFactorExposureEndpoint:
     def test_valid_request_returns_full_payload(self, client, fake_prices):
+        # quantstats is an optional dependency (backend/requirements-report.txt,
+        # not installed by CI's base requirements.txt) - the endpoint's own
+        # 503-on-RuntimeError handling is what a quantstats-less environment
+        # actually hits, so skip the 200 assertion rather than fail on it.
+        pytest.importorskip("quantstats")
+
         response = client.post(
             "/api/v1/analytics/factor-exposure",
             json={
