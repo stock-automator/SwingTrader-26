@@ -4,13 +4,25 @@ export type Strategy =
   | "donchian_breakout"
   | "moving_average_cross"
   | "vcp_breakout"
-  | "relative_strength";
+  | "relative_strength"
+  | "bollinger_keltner_squeeze"
+  | "kama_trend"
+  | "zscore_mean_reversion"
+  | "supertrend_psar"
+  | "obv_divergence"
+  | "dual_momentum";
 
 export const STRATEGIES: { value: Strategy; label: string }[] = [
   { value: "donchian_breakout", label: "Donchian Breakout" },
   { value: "moving_average_cross", label: "Moving Average Cross" },
   { value: "vcp_breakout", label: "VCP Breakout" },
   { value: "relative_strength", label: "Relative Strength Pullback" },
+  { value: "bollinger_keltner_squeeze", label: "Bollinger-Keltner Squeeze" },
+  { value: "kama_trend", label: "KAMA Dynamic Trend" },
+  { value: "zscore_mean_reversion", label: "Z-Score Mean Reversion (Hurst)" },
+  { value: "supertrend_psar", label: "Supertrend + Parabolic SAR" },
+  { value: "obv_divergence", label: "OBV Bullish Divergence" },
+  { value: "dual_momentum", label: "Dual Momentum Engine" },
 ];
 
 // ---- Macro regime / circuit breaker ----
@@ -193,4 +205,84 @@ export interface OrderTicket {
 export interface OrderTicketsResponse {
   tickets: OrderTicket[];
   min_reward_risk_ratio: number;
+}
+
+// ---- Data sync ----
+
+export interface CorporateActionAdjustment {
+  anchor_date: string;
+  old_factor: number;
+  new_factor: number;
+  ratio: number;
+}
+
+export interface SyncResult {
+  ticker: string;
+  status: string;
+  rows_added: number;
+  corporate_action: CorporateActionAdjustment | null;
+  error: string | null;
+}
+
+export interface DataSyncStatusResponse {
+  in_progress: boolean;
+  started_at: string | null;
+  results: SyncResult[];
+}
+
+export interface DataSyncResponse {
+  status: string;
+  tickers: string[];
+}
+
+// ---- Signal matrix ----
+
+export interface SignalMatrixRow {
+  ticker: string;
+  strategy: string;
+  direction: Direction;
+  tradable: boolean;
+  as_of: string;
+  close: number;
+  entry_price: number | null;
+  stop_loss: number | null;
+  take_profit: number | null;
+  shares: number | null;
+  risk_amount: number | null;
+  reward_risk_ratio: number | null;
+  notional_value: number | null;
+  note: string | null;
+  // Always null today - no model-backed estimate exists yet. Never render a
+  // synthesized number here; see backend/app/api/signals.py.
+  win_probability: number | null;
+}
+
+export interface SignalMatrixResponse {
+  generated_at: string;
+  rows: SignalMatrixRow[];
+  scanned: number;
+  warnings: string[];
+}
+
+// ---- Execution (Alpaca paper trading) ----
+
+export interface ExecutionOrderRequest {
+  ticker: string;
+  side: "buy" | "sell";
+  qty: number;
+  order_type?: "MARKET" | "LIMIT" | "BRACKET";
+  limit_price?: number | null;
+  stop_loss?: number | null;
+  take_profit?: number | null;
+}
+
+export interface ExecutionOrderResponse {
+  id: string;
+  symbol: string;
+  qty: string | null;
+  side: string | null;
+  type: string | null;
+  order_class: string | null;
+  status: string | null;
+  submitted_at: string | null;
 }

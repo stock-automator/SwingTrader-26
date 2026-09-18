@@ -177,9 +177,18 @@ cp .env.example .env
 | `DATA_DIR` | `data/raw` | Folder where downloaded price data is cached, so repeat requests don't re-download. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Which frontend URLs the backend will accept requests from. Only change this if you're hosting the frontend somewhere other than your own machine. |
 | `WATCHLIST_PATH` | `config/watchlist.txt` | The list of tickers the live screener scans (one per line — already comes with ~500 S&P 500-ish names). |
-| `SCREENER_MAX_TICKERS` | `60` | Caps how many tickers one screener scan checks, so a request can't hang for minutes. |
+| `SCREENER_MAX_TICKERS` | `750` | Caps how many tickers one screener scan checks — a safety valve against an accidentally enormous watchlist, not a throttle (loading is parallelized, see below). |
+| `SCREENER_MAX_WORKERS` | `16` | Thread-pool size used to fetch tickers concurrently; also the de facto rate limit against the data provider. |
+| `SCREENER_MIN_AVG_VOLUME` | `100000` | Tickers below this trailing average daily volume are skipped as `VOLUME_FILTER_FAILED` rather than scanned. |
+| `SCREENER_VOLUME_LOOKBACK` | `20` | Trailing bar count `SCREENER_MIN_AVG_VOLUME` is averaged over. |
+| `SCREENER_STALE_AFTER_DAYS` | *(unset)* | Skip a ticker as `DATA_STALE` if its most recent cached bar is older than this many days. Unset disables the check. |
 | `WS_POLL_SECONDS` | `15` | How often the live screener pushes a fresh scan over its live connection. |
 | `MAX_BACKTEST_TICKERS` | `10` | Caps how many tickers one backtest request can run at once. |
+| `JOURNAL_PATH` | `data/trades_live.csv` | Where the trade journal (entries/exits/MAE-MFE/decay analytics) reads and writes its CSV. |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(unset)* | Telegram alert channel for `POST /api/v1/alerts/dispatch`; both must be set to activate it. |
+| `DISCORD_WEBHOOK_URL` | *(unset)* | Discord alert channel (incoming webhook). |
+| `GENERIC_WEBHOOK_URL` | *(unset)* | Generic HTTP alert channel — setups are POSTed here as flat JSON. |
+| `ALPACA_API_KEY` / `ALPACA_API_SECRET` | *(unset)* | Alpaca **paper-trading** credentials for `/api/v1/execution/*`. The SDK always points at Alpaca's paper endpoint regardless of these values — there is no setting that makes this platform place live orders. |
 
 > **Never commit a real `.env` file.** It's already excluded via
 > `.gitignore` — only `.env.example` (with no real keys in it) is tracked.
@@ -275,6 +284,30 @@ Full reference with request/response shapes and curl examples:
   notional account.
 - **`WS /ws/screener`** — the same scan, pushed on an interval, for the live
   dashboard.
+- **`GET /api/v1/signals/live-today`** — the same idea across *every*
+  registered strategy at once, flattened into one cross-strategy "what to
+  look at today" grid (the frontend's Signal Matrix tab).
+- **`POST /api/v1/backtest/historical-date-scan`** — the live screener's
+  logic, but frozen at a `target_date` in the past with the frame sliced to
+  `<= target_date` first, so it's structurally impossible for it to see data
+  that wasn't available yet (zero lookahead bias).
+- **`POST /api/v1/backtest/simulate-trade-execution`** — prices a single
+  simulated fill (`NEXT_OPEN` or `SAME_CLOSE_SLIPPAGE`) with configurable
+  slippage/commission/fee, for sanity-checking a signal's realistic entry.
+- **`POST /api/v1/alerts/dispatch`** — sends a message to whichever of
+  Telegram / Discord / a generic webhook are configured; on-demand only,
+  nothing auto-fires from a scan.
+- **`POST /api/v1/execution/orders`**, **`/close-all`**, **`GET
+  /api/v1/execution/account`** — Alpaca **paper-trading** order placement
+  (market/limit/bracket) and an emergency flatten-everything switch. 503 if
+  no Alpaca credentials are configured.
+- **`GET /api/v1/journal/summary`**, **`/decay`**, **`POST
+  /api/v1/journal/mae-mfe`** — trade-journal analytics: win rate/expectancy,
+  30/60/90-day performance decay, and per-trade max adverse/favorable
+  excursion.
+- **`GET /api/v1/data/sync/status`** / **`POST /api/v1/data/sync`** — kicks
+  off (and reports progress on) a background Parquet cache refresh; the
+  frontend's header sync banner polls this.
 - **`GET /api/v1/health`** — liveness + which optional data providers are
   configured.
 
@@ -285,15 +318,23 @@ backend/
   app/
     main.py              FastAPI app, CORS, health check
     config.py             Environment-driven Settings (.env aware)
-    api/                  Routes: backtest.py, screener.py, schemas.py, deps.py
-    quant/                Strategy engine: strategies/, engine.py, risk.py,
-                           regime.py, indicators.py, setups.py, screener.py,
-                           backtest.py (the $1,000 benchmark), metrics.py
+    api/                  Routes: backtest.py, screener.py, signals.py,
+                           replay.py, alerts.py, execution.py, journal.py,
+                           data_sync.py, schemas.py, deps.py
+    quant/                Strategy engine: strategies/ (10 registered),
+                           engine.py, risk.py, regime.py, indicators.py,
+                           setups.py, screener.py, backtest.py (the $1,000
+                           benchmark), metrics.py
+    alerts/                Telegram/Discord/webhook dispatch (dispatcher.py)
+    execution/             Alpaca paper-trading client wrapper
     data/                 Price loading/caching (loader.py, agent.py)
-    journal/              Trade journal persistence
+    journal/              Trade journal persistence + decay/MAE-MFE analytics
     analytics/             Console/report rendering
 frontend/
   src/                    React + Vite + Tailwind + lightweight-charts UI
+                           (Signal Matrix grid, sync status banner, toasts,
+                           Framer Motion tab transitions)
+  e2e/                    Playwright smoke test
 docs/
   architecture.md          Data-flow diagram, backend/frontend separation
   api.md                   Full endpoint reference
@@ -328,3 +369,51 @@ a FastAPI + React application on top of all of it. The target account size
 for eventual live deployment is small (low four figures); risk management
 takes priority over raw historical return, and a backtest is treated as
 evidence for further investigation, not proof of anything.
+
+**Where this stands today**, roughly in the order it was built:
+
+1. Historical data pipeline, modular strategy framework, risk manager,
+   backtest/forward-test engines, analytics (original CLI-era foundation).
+2. Risk engine & position sizing, market-regime detection, first strategy
+   set (`donchian_breakout`, `moving_average_cross`, `vcp_breakout`,
+   `relative_strength`).
+3. Full-stack refactor onto FastAPI + React, the $1,000-vs-buy&hold-vs-SPY
+   benchmark backtester, and the live setup screener (REST + WebSocket).
+4. **Scanner reliability + strategy library expansion**: the live screener
+   silently truncated a full watchlist to 60 tickers and loaded them one at
+   a time; fixed with a raised, transparent cap, concurrent thread-pooled
+   loading with retry/backoff, and explicit skip-reason categorization
+   (`INSUFFICIENT_HISTORY` / `DATA_STALE` / `VOLUME_FILTER_FAILED` /
+   `ZERO_LIQUIDITY`). Strategy count went from 4 to 10, adding volatility
+   (`bollinger_keltner_squeeze`, `kama_trend`), mean-reversion
+   (`zscore_mean_reversion`, Hurst-filtered), momentum
+   (`supertrend_psar`, `dual_momentum`), and market-structure
+   (`obv_divergence`) coverage.
+5. **This round** — cross-strategy signal matrix, point-in-time historical
+   replay (zero lookahead by construction), trade execution simulation,
+   multichannel alerts (Telegram/Discord/generic webhook), Alpaca
+   paper-trading order placement + emergency close-all, trade-journal decay
+   analytics (MAE/MFE, 30/60/90-day win-rate/expectancy windows), and the
+   matching frontend surface: a real-time data-sync banner, the Signal
+   Matrix grid (sortable/filterable, one-click paper-trade action), toast
+   notifications, and animated tab transitions.
+
+**Deliberately not done yet** (so the next session doesn't have to rediscover
+this by reading code):
+
+- `win_probability` on the signal matrix is hard-coded `null` everywhere —
+  no model-backed estimate exists, and a fabricated number would be
+  actively misleading for a real trading decision.
+- No UI yet for configuring alert channels, viewing the Alpaca account /
+  positions, or the journal's decay analytics — the backend endpoints exist
+  and are tested, the frontend panels don't yet.
+- Only one Playwright smoke test exists (app loads, all tabs render, no
+  thrown errors against a mocked backend) — the full
+  success/failure/network-degradation/edge-case e2e matrix from the original
+  spec is still a fast-follow.
+- Statistical-arbitrage pairs trading (cointegration/Johansen) and the
+  macro/cross-asset strategies (yield curve, VIX term structure, COT
+  positioning, intermarket lead-lag, seasonality) were scoped out of the
+  strategy library expansion — they need a multi-symbol architecture and new
+  data sources (COT reports, yield curves) beyond the current single-ticker
+  `BaseStrategy` interface and Parquet/yfinance pipeline.
