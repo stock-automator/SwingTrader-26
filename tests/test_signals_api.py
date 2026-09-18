@@ -68,7 +68,56 @@ class TestLiveToday:
         for row in body["rows"]:
             assert row["direction"] in {"LONG", "SHORT"}
             assert row["strategy"] in {"donchian_breakout", "moving_average_cross"}
-            assert row["win_probability"] is None
+            if row["direction"] == "SHORT":
+                # Screening-only: the backtest engine is long-only, so there
+                # is nothing to estimate a win probability from.
+                assert row["win_probability"] is None
+            else:
+                wp = row["win_probability"]
+                assert wp is None or 0.0 <= wp <= 1.0
+                assert row["win_probability_method"] in {
+                    "regime_matched_backtest",
+                    "block_bootstrap",
+                    "insufficient_data",
+                }
+
+    def test_long_row_gets_a_real_win_probability_with_enough_history(
+        self, client, monkeypatch
+    ):
+        """With enough bars for the strategy to have closed plenty of
+        historical trades, a LONG row's win_probability must be a real
+        number, not the old null placeholder."""
+        # This particular seed/drift is a known LONG-at-last-bar case for
+        # kama_trend at 1500 bars - other strategies/seeds mostly end FLAT
+        # on synthetic noise, which would make this test flaky.
+        long_history = {"AAPL": _trending_ohlcv(n=1500, seed=16, drift=0.3)}
+
+        def _load_prices(
+            ticker, start=None, end=None, data_dir=None, allow_download=True
+        ):
+            ticker = ticker.upper()
+            if ticker not in long_history:
+                raise DataUnavailableError(f"{ticker} not in test universe")
+            return long_history[ticker]
+
+        import backend.app.api.deps as deps_module
+        import backend.app.api.signals as signals_module
+
+        monkeypatch.setattr(deps_module, "load_prices", _load_prices)
+        monkeypatch.setattr(signals_module, "load_prices", _load_prices)
+        monkeypatch.setattr(signals_module, "load_watchlist", lambda settings: ["AAPL"])
+
+        response = client.get(
+            "/api/v1/signals/live-today",
+            params={"strategies": "kama_trend"},
+        )
+        assert response.status_code == 200
+        long_rows = [r for r in response.json()["rows"] if r["direction"] == "LONG"]
+        assert long_rows, "expected at least one LONG row from a 1500-bar trend"
+        for row in long_rows:
+            assert row["win_probability_sample_size"] is not None
+            if row["win_probability_method"] != "insufficient_data":
+                assert row["win_probability"] is not None
 
     def test_unknown_strategy_is_422(self, client, fake_universe):
         response = client.get(

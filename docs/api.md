@@ -281,7 +281,13 @@ curl "http://localhost:8000/api/v1/signals/live-today?strategies=donchian_breako
       "tradable": true, "as_of": "2026-09-17", "close": 231.42,
       "entry_price": 231.42, "stop_loss": 225.1, "take_profit": 240.0,
       "shares": 3, "risk_amount": 20.0, "reward_risk_ratio": 2.9,
-      "notional_value": 694.26, "note": null, "win_probability": null
+      "notional_value": 694.26, "note": null,
+      "win_probability": 0.58,
+      "win_probability_method": "regime_matched_backtest",
+      "win_probability_sample_size": 17,
+      "win_probability_confidence_low": null,
+      "win_probability_confidence_high": null,
+      "win_probability_note": "17 historical trades entered in BULL_TREND regime."
     }
   ],
   "scanned": 120,
@@ -289,10 +295,24 @@ curl "http://localhost:8000/api/v1/signals/live-today?strategies=donchian_breako
 }
 ```
 
-`win_probability` is always `null` — no model-backed win-probability
-estimate exists yet, and fabricating one for a real trading decision would
-be actively misleading. It's reserved for a future backtest- or ML-derived
-estimate.
+`win_probability` (`analytics/expectancy.py`) is a real historical estimate,
+computed one of two ways depending on how much trade history backs it - see
+`win_probability_method`:
+
+- `"regime_matched_backtest"` - the win rate of the strategy's own
+  historical closed trades entered in the *same* market regime
+  (`quant/regime.py`) as this setup, once at least 12 such trades exist.
+- `"block_bootstrap"` - a block-bootstrap Monte Carlo percentile (median of
+  2,000 resampled win rates) over *all* the strategy's historical trades on
+  this ticker, used when there aren't enough regime-matched trades.
+  `win_probability_confidence_low`/`_high` are that resample's 5th/95th
+  percentile band.
+- `"insufficient_data"` - fewer than 8 total closed trades exist for this
+  ticker/strategy; `win_probability` is `null` rather than a number with no
+  real support behind it.
+
+Always `null` (method `"insufficient_data"`) for `SHORT` rows: the backtest
+engine is long-only, so there is no historical fill to estimate from.
 
 A single strategy failing (bad params, no benchmark available for a
 benchmark-dependent strategy) is recorded in `warnings` and skipped, not a
@@ -366,12 +386,17 @@ chained into "and if I'd taken it."
 | `slippage_pct` | float | `0.0005` | Flat spread applied against the trader; ignored if `atr_slippage_multiple > 0` |
 | `commission` | float | `0.001` | Round-trip commission rate, applied to notional |
 | `fee_per_share` | float | `0.0` | Overrides `commission` with a fixed $/share fee when `> 0` |
-| `atr_slippage_multiple` | float | `0.0` | When `> 0`, spread scales with the ticker's own ATR/Close ratio instead of `slippage_pct` |
+| `atr_slippage_multiple` | float | `0.0` | When `> 0`, spread is priced per-bar off *this bar's* ATR/Close ratio (`quant/slippage_model.estimate_dynamic_spread_pct`) instead of the flat `slippage_pct` |
+| `impact_coefficient` | float | `0.0` | When `> 0`, adds a square-root volume-based market-impact cost (`quant/slippage_model.estimate_market_impact_pct`) on top of spread. `0.0` disables market-impact modelling entirely |
+| `avg_volume_lookback` | int | `20` | Trailing bar count averaged for the market-impact volume denominator |
 
 Sizing goes through `RiskManager.build_risk_managed_order` — the same
 minimum-2.5R and portfolio-risk gate every trader-facing order ticket in
 this repo uses, so a structurally bad trade comes back `tradable: false`
-with a `note`, not a share count.
+with a `note`, not a share count. It runs twice: once off a spread-only fill
+price to get a share count market impact can be computed from, then again
+off the final (spread + impact) fill price, so the response's stop-loss/
+take-profit/shares are all consistent with the `fill_price` it reports.
 
 ### Response body
 
@@ -383,6 +408,9 @@ with a `note`, not a share count.
   "fill_price": 187.34,
   "reference_price": 187.20,
   "slippage_pct_applied": 0.0005,
+  "spread_pct": 0.0005,
+  "market_impact_pct": 0.0,
+  "spread_variance_pct": 0.00012,
   "slippage_cost": 0.42,
   "commission_cost": 0.19,
   "total_cost": 562.21,
@@ -396,6 +424,12 @@ with a `note`, not a share count.
   "note": null
 }
 ```
+
+`slippage_pct_applied` is `spread_pct + market_impact_pct` - the total
+fraction actually applied to `reference_price` to produce `fill_price`.
+`spread_variance_pct` is the ATR-implied spread's own trailing standard
+deviation - a confidence read on `spread_pct` as a point estimate, not
+another cost component.
 
 ### Errors
 
@@ -453,6 +487,23 @@ a live order.
 | `limit_price` | float \| null | `null` | Required for `LIMIT`; optional entry price for a `BRACKET` (omit for a market-entry bracket) |
 | `stop_loss` / `take_profit` | float \| null | `null` | Required for `BRACKET` |
 
+Before dispatching to Alpaca, this route runs `execution/guards.py`'s
+`check_order_guards` (unless `EXECUTION_GUARDS_ENABLED=false`):
+
+- **Session guard** — refuses to dispatch while the US market is closed,
+  and by default refuses pre-market/after-hours too
+  (`EXECUTION_ALLOW_EXTENDED_HOURS=true` opts into dispatching there, still
+  flagged as illiquid).
+- **Earnings/split lockout guard** — refuses a new entry within
+  `EARNINGS_LOCKOUT_HOURS` (default 48) of a scheduled earnings release or
+  stock split, on either side of it. Fails *open* (does not block) if the
+  earnings/split calendar can't be fetched for the ticker — a data-provider
+  gap is not treated as a clean bill of health, but it also must not brick
+  order dispatch.
+
+A rejected order never reaches Alpaca: guard failures come back as a `422`
+with every reason that applied, not just the first one hit.
+
 ### `POST /api/v1/execution/close-all`
 
 Emergency kill-switch: liquidates every open position and cancels every
@@ -469,7 +520,7 @@ Returns `account_number`, `status`, `equity`, `cash`, `buying_power`,
 
 | Status | Cause |
 |---|---|
-| `422` | Alpaca isn't reached yet but the request is malformed: missing `limit_price`/`stop_loss`/`take_profit` for the chosen `order_type`, or `close-all` without `confirm: true` |
+| `422` | Alpaca isn't reached yet but the request is malformed: missing `limit_price`/`stop_loss`/`take_profit` for the chosen `order_type`, `close-all` without `confirm: true`, or (`/orders` only) a session/earnings-lockout guard rejected dispatch |
 | `503` | Alpaca credentials aren't configured |
 
 ---

@@ -189,6 +189,9 @@ cp .env.example .env
 | `DISCORD_WEBHOOK_URL` | *(unset)* | Discord alert channel (incoming webhook). |
 | `GENERIC_WEBHOOK_URL` | *(unset)* | Generic HTTP alert channel — setups are POSTed here as flat JSON. |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | *(unset)* | Alpaca **paper-trading** credentials for `/api/v1/execution/*`. The SDK always points at Alpaca's paper endpoint regardless of these values — there is no setting that makes this platform place live orders. |
+| `EXECUTION_GUARDS_ENABLED` | `true` | Whether `POST /api/v1/execution/orders` runs the session-clock and earnings/split lockout guards before dispatching (see `execution/guards.py`). Only turn off for local/paper testing outside market hours. |
+| `EXECUTION_ALLOW_EXTENDED_HOURS` | `false` | Whether pre-market/after-hours count as dispatchable sessions (still illiquid) instead of being blocked like a closed market. |
+| `EARNINGS_LOCKOUT_HOURS` | `48` | Hours before/after a scheduled earnings release or stock split during which `POST /api/v1/execution/orders` refuses a new entry. |
 
 > **Never commit a real `.env` file.** It's already excluded via
 > `.gitignore` — only `.env.example` (with no real keys in it) is tracked.
@@ -286,7 +289,12 @@ Full reference with request/response shapes and curl examples:
   dashboard.
 - **`GET /api/v1/signals/live-today`** — the same idea across *every*
   registered strategy at once, flattened into one cross-strategy "what to
-  look at today" grid (the frontend's Signal Matrix tab).
+  look at today" grid (the frontend's Signal Matrix tab). Each LONG row
+  carries a real `win_probability` from `analytics/expectancy.py` — a
+  regime-matched historical backtest win rate, or a block-bootstrap Monte
+  Carlo percentile when there aren't enough same-regime trades, or `null`
+  when there isn't enough trade history for either. See
+  [Win probability, briefly](#win-probability-briefly) below.
 - **`POST /api/v1/backtest/historical-date-scan`** — the live screener's
   logic, but frozen at a `target_date` in the past with the frame sliced to
   `<= target_date` first, so it's structurally impossible for it to see data
@@ -294,13 +302,19 @@ Full reference with request/response shapes and curl examples:
 - **`POST /api/v1/backtest/simulate-trade-execution`** — prices a single
   simulated fill (`NEXT_OPEN` or `SAME_CLOSE_SLIPPAGE`) with configurable
   slippage/commission/fee, for sanity-checking a signal's realistic entry.
+  Also reports a per-bar ATR-implied `spread_pct`, an opt-in volume-based
+  `market_impact_pct`, and `spread_variance_pct` (see
+  [Execution drag, briefly](#execution-drag-briefly)).
 - **`POST /api/v1/alerts/dispatch`** — sends a message to whichever of
   Telegram / Discord / a generic webhook are configured; on-demand only,
   nothing auto-fires from a scan.
 - **`POST /api/v1/execution/orders`**, **`/close-all`**, **`GET
   /api/v1/execution/account`** — Alpaca **paper-trading** order placement
   (market/limit/bracket) and an emergency flatten-everything switch. 503 if
-  no Alpaca credentials are configured.
+  no Alpaca credentials are configured. `/orders` also runs the session-clock
+  and earnings/split lockout guards first (`execution/guards.py`) — a 422
+  means the order was never sent to Alpaca at all. `/close-all` is
+  deliberately never guarded: an emergency flatten must always be reachable.
 - **`GET /api/v1/journal/summary`**, **`/decay`**, **`POST
   /api/v1/journal/mae-mfe`** — trade-journal analytics: win rate/expectancy,
   30/60/90-day performance decay, and per-trade max adverse/favorable
@@ -310,6 +324,46 @@ Full reference with request/response shapes and curl examples:
   frontend's header sync banner polls this.
 - **`GET /api/v1/health`** — liveness + which optional data providers are
   configured.
+
+### Win probability, briefly
+
+`analytics/expectancy.py` answers "how often has this actually worked,"
+computed two ways depending on how much history backs it, and never a
+fabricated number:
+
+1. **Regime-matched historical backtest** — run the same strategy over the
+   ticker's own full price history, tag each closed trade with the market
+   regime (`quant/regime.py`) active when it was entered, and take the win
+   rate of trades entered in the *same* regime as today's setup. Used once
+   at least 12 same-regime trades exist.
+2. **Block-bootstrap Monte Carlo percentile** — below that, resample the
+   *whole* trade history's win/loss sequence in contiguous blocks (so
+   win/loss streaks survive the resample) many times and report the
+   resampled distribution's median win rate plus a 5th/95th percentile band.
+   Used once at least 8 total closed trades exist.
+3. **`null`** — below 8 trades total, there isn't enough history for either
+   method to mean anything, so `win_probability` stays `null` — the same
+   honesty the old always-`null` placeholder had, just reserved for when
+   it's actually true. Also always `null` for SHORT rows: the backtest
+   engine is long-only, so there is nothing to estimate from.
+
+Every row's `win_probability_method`, `win_probability_sample_size`, and
+(for the bootstrap case) `win_probability_confidence_low`/`_high` explain
+exactly which of the above produced the number.
+
+### Execution drag, briefly
+
+`quant/slippage_model.py` prices a single simulated fill more precisely than
+a whole-backtest-run average can: `spread_pct` is this specific bar's
+ATR-implied bid/ask spread (a volatile stretch of a ticker's history gets a
+wider spread than a quiet stretch of the *same* ticker), `market_impact_pct`
+is an opt-in (`impact_coefficient > 0`) square-root participation-rate cost
+for orders that are large relative to the ticker's trailing volume, and
+`spread_variance_pct` is how much the spread estimate itself has moved
+recently — a confidence read on `spread_pct`, not just a point estimate.
+`fill_price` reflects both `spread_pct` and `market_impact_pct` together;
+`slippage_cost` is the resulting dollar drag against the ideal (spread- and
+impact-free) reference price.
 
 ## Project layout
 
@@ -324,12 +378,15 @@ backend/
     quant/                Strategy engine: strategies/ (10 registered),
                            engine.py, risk.py, regime.py, indicators.py,
                            setups.py, screener.py, backtest.py (the $1,000
-                           benchmark), metrics.py
+                           benchmark), metrics.py, slippage_model.py
+                           (per-bar spread + market impact)
     alerts/                Telegram/Discord/webhook dispatch (dispatcher.py)
-    execution/             Alpaca paper-trading client wrapper
+    execution/             Alpaca paper-trading client wrapper, guards.py
+                           (session clock + earnings/split lockout)
     data/                 Price loading/caching (loader.py, agent.py)
     journal/              Trade journal persistence + decay/MAE-MFE analytics
-    analytics/             Console/report rendering
+    analytics/             Console/report rendering, expectancy.py
+                           (win-probability engine)
 frontend/
   src/                    React + Vite + Tailwind + lightweight-charts UI
                            (Signal Matrix grid, sync status banner, toasts,

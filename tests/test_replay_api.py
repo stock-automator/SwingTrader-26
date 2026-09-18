@@ -247,3 +247,82 @@ class TestSimulateTradeExecution:
         body = response.json()
         assert body["tradable"] is False
         assert body["note"] is not None
+
+    def test_atr_slippage_multiple_reports_dynamic_spread(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/backtest/simulate-trade-execution",
+            json={
+                "ticker": "AAPL",
+                "entry_date": "2022-06-15",
+                "sl_type": "PERCENTAGE",
+                "sl_value": 0.05,
+                "tp_type": "PERCENTAGE",
+                "tp_value": 0.20,
+                "atr_slippage_multiple": 0.1,
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["spread_pct"] > 0
+        assert body["slippage_pct_applied"] == pytest.approx(
+            body["spread_pct"] + body["market_impact_pct"]
+        )
+
+    def test_zero_impact_coefficient_reports_no_market_impact(
+        self, client, fake_prices
+    ):
+        response = client.post(
+            "/api/v1/backtest/simulate-trade-execution",
+            json={
+                "ticker": "AAPL",
+                "entry_date": "2022-06-15",
+                "sl_type": "PERCENTAGE",
+                "sl_value": 0.05,
+                "tp_type": "PERCENTAGE",
+                "tp_value": 0.20,
+                "atr_slippage_multiple": 0.1,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["market_impact_pct"] == 0.0
+
+    def test_positive_impact_coefficient_widens_fill_and_cost(
+        self, client, fake_prices
+    ):
+        base_payload = {
+            "ticker": "AAPL",
+            "entry_date": "2022-06-15",
+            "sl_type": "PERCENTAGE",
+            "sl_value": 0.05,
+            "tp_type": "PERCENTAGE",
+            "tp_value": 0.20,
+            "atr_slippage_multiple": 0.1,
+            "account_equity": 1_000_000.0,
+        }
+        no_impact = client.post(
+            "/api/v1/backtest/simulate-trade-execution", json=base_payload
+        ).json()
+        with_impact = client.post(
+            "/api/v1/backtest/simulate-trade-execution",
+            json={**base_payload, "impact_coefficient": 0.5},
+        ).json()
+
+        assert with_impact["market_impact_pct"] > 0
+        assert with_impact["fill_price"] > no_impact["fill_price"]
+        assert with_impact["slippage_cost"] > no_impact["slippage_cost"]
+
+    def test_spread_variance_present_and_non_negative(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/backtest/simulate-trade-execution",
+            json={
+                "ticker": "AAPL",
+                "entry_date": "2022-06-15",
+                "sl_type": "PERCENTAGE",
+                "sl_value": 0.05,
+                "tp_type": "PERCENTAGE",
+                "tp_value": 0.20,
+                "atr_slippage_multiple": 0.1,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["spread_variance_pct"] >= 0.0
