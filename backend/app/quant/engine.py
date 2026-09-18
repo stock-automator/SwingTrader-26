@@ -32,6 +32,23 @@ REQUIRED_OHLCV_COLUMNS = ("Open", "High", "Low", "Close", "Volume")
 #: legs of a round trip when `fee_per_share` is set.
 DEFAULT_FEE_PER_SHARE = 0.005
 
+#: A signal on bar `t` fills at bar `t+1`'s open - the realistic default:
+#: nothing here trades on information that bar's own close hasn't fully
+#: revealed the consequences of yet (the next bar's open is the first
+#: price the market offers *after* that close is known).
+EXECUTION_MODE_NEXT_OPEN = "NEXT_OPEN"
+
+#: A signal on bar `t` fills at bar `t`'s own close - a faster-executing
+#: approximation (e.g. an intraday alert acted on before the close prints)
+#: that trades slightly ahead of `NEXT_OPEN`'s realism, hence the paired
+#: name: pair this with non-zero `slippage_pct`/`atr_slippage_multiple` to
+#: compensate for the fill being optimistic.
+EXECUTION_MODE_SAME_CLOSE_SLIPPAGE = "SAME_CLOSE_SLIPPAGE"
+
+VALID_EXECUTION_MODES = frozenset(
+    {EXECUTION_MODE_NEXT_OPEN, EXECUTION_MODE_SAME_CLOSE_SLIPPAGE}
+)
+
 
 @dataclass
 class BacktestResult:
@@ -90,6 +107,7 @@ def run_backtest(
     slippage_pct: float = 0.0005,
     fee_per_share: float = 0.0,
     atr_slippage_multiple: float = 0.0,
+    execution_mode: str = EXECUTION_MODE_NEXT_OPEN,
 ) -> BacktestResult:
     """Simulate `strategy` over historical `df` with realistic costs.
 
@@ -111,6 +129,14 @@ def run_backtest(
             `estimate_atr_spread_pct(df, atr_slippage_multiple)` - a spread
             that scales with the traded ticker's own volatility rather than
             one flat rate applied to every ticker alike.
+        execution_mode: `NEXT_OPEN` (the default, and the prior behavior of
+            this function - fills at the bar *after* the signal) or
+            `SAME_CLOSE_SLIPPAGE` (fills at the signal's own bar close, via
+            `backtesting.py`'s `trade_on_close`).
+
+    Raises:
+        ValueError: if `df` is missing a required OHLCV column, or
+            `execution_mode` isn't one of `VALID_EXECUTION_MODES`.
 
     Returns:
         BacktestResult with the summary `stats`, a `trades` DataFrame (the
@@ -121,6 +147,11 @@ def run_backtest(
     missing = [c for c in REQUIRED_OHLCV_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"df is missing required OHLCV columns: {missing}")
+    if execution_mode not in VALID_EXECUTION_MODES:
+        raise ValueError(
+            f"Unknown execution_mode {execution_mode!r}. "
+            f"Available: {sorted(VALID_EXECUTION_MODES)}"
+        )
 
     signals_df = strategy.generate_signals(df)
     BaseStrategy.validate_output(signals_df)
@@ -184,6 +215,7 @@ def run_backtest(
         commission=commission_param,
         spread=spread_param,
         exclusive_orders=True,
+        trade_on_close=execution_mode == EXECUTION_MODE_SAME_CLOSE_SLIPPAGE,
     )
     stats = bt.run()
 

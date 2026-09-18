@@ -7,6 +7,8 @@ import pandas as pd
 import pytest
 
 from backend.app.quant.engine import (
+    EXECUTION_MODE_NEXT_OPEN,
+    EXECUTION_MODE_SAME_CLOSE_SLIPPAGE,
     BacktestResult,
     OrderTicket,
     build_order_ticket,
@@ -170,6 +172,54 @@ class TestCostModel:
 
         assert len(tight.trades) > 0
         assert wide.trades["PnL"].sum() < tight.trades["PnL"].sum()
+
+
+class TestExecutionMode:
+    def test_rejects_unknown_execution_mode(self, tradeable_data):
+        strategy = MovingAverageCross(fast_period=5, slow_period=15, sl_pct=0.10)
+        risk_manager = RiskManager(account_equity=5000.0, risk_per_trade_pct=0.02)
+
+        with pytest.raises(ValueError, match="execution_mode"):
+            run_backtest(strategy, tradeable_data, risk_manager, execution_mode="BOGUS")
+
+    def test_default_execution_mode_is_next_open(self, tradeable_data):
+        strategy = MovingAverageCross(fast_period=5, slow_period=15, sl_pct=0.10)
+        risk_manager = RiskManager(account_equity=5000.0, risk_per_trade_pct=0.02)
+
+        default_run = run_backtest(strategy, tradeable_data, risk_manager)
+        explicit_next_open = run_backtest(
+            strategy,
+            tradeable_data,
+            risk_manager,
+            execution_mode=EXECUTION_MODE_NEXT_OPEN,
+        )
+
+        pd.testing.assert_frame_equal(default_run.trades, explicit_next_open.trades)
+
+    def test_same_close_slippage_fills_at_a_different_price_than_next_open(
+        self, tradeable_data
+    ):
+        strategy = MovingAverageCross(fast_period=5, slow_period=15, sl_pct=0.10)
+        risk_manager = RiskManager(account_equity=5000.0, risk_per_trade_pct=0.02)
+
+        next_open = run_backtest(
+            strategy,
+            tradeable_data,
+            risk_manager,
+            execution_mode=EXECUTION_MODE_NEXT_OPEN,
+        )
+        same_close = run_backtest(
+            strategy,
+            tradeable_data,
+            risk_manager,
+            execution_mode=EXECUTION_MODE_SAME_CLOSE_SLIPPAGE,
+        )
+
+        assert len(next_open.trades) > 0
+        assert len(same_close.trades) > 0
+        assert not next_open.trades["EntryPrice"].equals(
+            same_close.trades["EntryPrice"]
+        )
 
 
 class TestEstimateAtrSpreadPct:

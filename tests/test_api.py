@@ -62,6 +62,7 @@ def fake_prices(monkeypatch):
             df = df[df.index <= pd.Timestamp(end)]
         return df
 
+    import backend.app.api.analytics as analytics_module
     import backend.app.api.backtest as backtest_module
     import backend.app.api.deps as deps_module
     import backend.app.api.screener as screener_module
@@ -69,6 +70,7 @@ def fake_prices(monkeypatch):
     monkeypatch.setattr(deps_module, "load_prices", _load_prices)
     monkeypatch.setattr(backtest_module, "load_prices", _load_prices)
     monkeypatch.setattr(screener_module, "load_prices", _load_prices)
+    monkeypatch.setattr(analytics_module, "load_prices", _load_prices)
     monkeypatch.setattr(
         screener_module, "load_watchlist", lambda settings: ["AAPL", "MSFT"]
     )
@@ -469,6 +471,297 @@ class TestOrderTicketEndpoint:
             },
         )
         assert response.status_code == 422
+
+
+class TestDataSyncEndpoint:
+    @pytest.fixture(autouse=True)
+    def _reset_job_state(self):
+        import backend.app.api.data_sync as data_sync_module
+
+        data_sync_module._job_state = data_sync_module._SyncJobState()
+        yield
+        data_sync_module._job_state = data_sync_module._SyncJobState()
+
+    def test_sync_explicit_tickers_runs_in_background_and_reports_status(
+        self, client, monkeypatch
+    ):
+        import backend.app.api.data_sync as data_sync_module
+
+        class _FakeManager:
+            def __init__(self, data_dir):
+                self.data_dir = data_dir
+
+            def sync_ticker(self, ticker, now=None):
+                from backend.app.quant.data.parquet_manager import SyncResult
+
+                return SyncResult(ticker=ticker, status="synced", rows_added=3)
+
+        monkeypatch.setattr(data_sync_module, "ParquetSyncManager", _FakeManager)
+
+        response = client.post("/api/v1/data/sync", json={"tickers": ["aapl", "msft"]})
+        assert response.status_code == 202
+        body = response.json()
+        assert body["status"] == "started"
+        assert body["tickers"] == ["AAPL", "MSFT"]
+
+        status = client.get("/api/v1/data/sync/status").json()
+        assert status["in_progress"] is False
+        assert status["started_at"] is not None
+        results = {r["ticker"]: r for r in status["results"]}
+        assert results["AAPL"]["status"] == "synced"
+        assert results["AAPL"]["rows_added"] == 3
+        assert results["MSFT"]["status"] == "synced"
+
+    def test_omitted_tickers_falls_back_to_watchlist(self, client, monkeypatch):
+        import backend.app.api.data_sync as data_sync_module
+
+        monkeypatch.setattr(
+            data_sync_module, "load_watchlist", lambda settings: ["AAPL", "MSFT"]
+        )
+
+        class _FakeManager:
+            def __init__(self, data_dir):
+                pass
+
+            def sync_ticker(self, ticker, now=None):
+                from backend.app.quant.data.parquet_manager import SyncResult
+
+                return SyncResult(ticker=ticker, status="up_to_date")
+
+        monkeypatch.setattr(data_sync_module, "ParquetSyncManager", _FakeManager)
+
+        response = client.post("/api/v1/data/sync", json={})
+        assert response.status_code == 202
+        assert response.json()["tickers"] == ["AAPL", "MSFT"]
+
+    def test_empty_watchlist_and_no_tickers_is_422(self, client, monkeypatch):
+        import backend.app.api.data_sync as data_sync_module
+
+        monkeypatch.setattr(data_sync_module, "load_watchlist", lambda settings: [])
+
+        response = client.post("/api/v1/data/sync", json={})
+        assert response.status_code == 422
+
+    def test_corporate_action_result_surfaces_in_status(self, client, monkeypatch):
+        import backend.app.api.data_sync as data_sync_module
+
+        class _FakeManager:
+            def __init__(self, data_dir):
+                pass
+
+            def sync_ticker(self, ticker, now=None):
+                from backend.app.quant.data.parquet_manager import (
+                    CorporateActionAdjustment,
+                    SyncResult,
+                )
+
+                action = CorporateActionAdjustment(
+                    anchor_date=pd.Timestamp("2024-06-01"),
+                    old_factor=1.0,
+                    new_factor=0.5,
+                )
+                return SyncResult(
+                    ticker=ticker,
+                    status="corporate_action_adjusted",
+                    rows_added=2,
+                    corporate_action=action,
+                )
+
+        monkeypatch.setattr(data_sync_module, "ParquetSyncManager", _FakeManager)
+
+        client.post("/api/v1/data/sync", json={"tickers": ["AAPL"]})
+        status = client.get("/api/v1/data/sync/status").json()
+
+        result = status["results"][0]
+        assert result["status"] == "corporate_action_adjusted"
+        assert result["corporate_action"]["ratio"] == pytest.approx(0.5)
+
+    def test_status_before_any_sync_is_idle(self, client):
+        status = client.get("/api/v1/data/sync/status").json()
+        assert status["in_progress"] is False
+        assert status["started_at"] is None
+        assert status["results"] == []
+
+
+class TestMonteCarloEndpoint:
+    def test_valid_request_returns_full_payload(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/monte-carlo",
+            json={
+                "strategy": "moving_average_cross",
+                "strategy_params": {"fast_period": 5, "slow_period": 15, "sl_pct": 0.1},
+                "tickers": ["AAPL"],
+                "n_simulations": 100,
+                "seed": 1,
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["n_simulations"] == 100
+        assert 0 <= body["risk_of_ruin_pct"] <= 100
+        assert "p50" in body["equity_curve_percentiles"]
+
+    def test_unknown_strategy_is_422(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/monte-carlo",
+            json={"strategy": "not_a_real_strategy", "tickers": ["AAPL"]},
+        )
+        assert response.status_code == 422
+
+    def test_empty_tickers_is_422(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/monte-carlo",
+            json={"strategy": "donchian_breakout", "tickers": []},
+        )
+        assert response.status_code == 422
+
+    def test_unavailable_ticker_is_503(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/monte-carlo",
+            json={"strategy": "donchian_breakout", "tickers": ["NOPE_NOT_CACHED"]},
+        )
+        assert response.status_code == 503
+
+    def test_strategy_with_no_trades_is_422(self, client, fake_prices):
+        # An absurdly long breakout window on a short window of data takes
+        # no trades at all - nothing for Monte Carlo to bootstrap.
+        response = client.post(
+            "/api/v1/analytics/monte-carlo",
+            json={
+                "strategy": "donchian_breakout",
+                "strategy_params": {"breakout_period": 250, "momentum_period": 250},
+                "tickers": ["AAPL"],
+            },
+        )
+        assert response.status_code == 422
+
+    def test_relative_strength_strategy_wires_in_the_benchmark(
+        self, client, fake_prices
+    ):
+        response = client.post(
+            "/api/v1/analytics/monte-carlo",
+            json={
+                "strategy": "relative_strength",
+                "tickers": ["AAPL"],
+                "n_simulations": 50,
+            },
+        )
+        assert response.status_code in (200, 422)  # 422 only if it took no trades
+
+
+class TestWalkForwardEndpoint:
+    def test_valid_request_returns_full_payload(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/walk-forward",
+            json={
+                "strategy": "moving_average_cross",
+                "strategy_params": {"fast_period": 5, "slow_period": 15, "sl_pct": 0.1},
+                "ticker": "AAPL",
+                "is_months": 3,
+                "oos_months": 1,
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ticker"] == "AAPL"
+        assert body["is_window_months"] == 3
+        assert isinstance(body["windows"], list)
+        assert body["parameter_sensitivity"] is None
+
+    def test_unknown_strategy_is_422(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/walk-forward",
+            json={"strategy": "not_a_real_strategy", "ticker": "AAPL"},
+        )
+        assert response.status_code == 422
+
+    def test_unavailable_ticker_is_503(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/walk-forward",
+            json={"strategy": "donchian_breakout", "ticker": "NOPE_NOT_CACHED"},
+        )
+        assert response.status_code == 503
+
+    def test_parameter_sensitivity_sweep_is_included_when_requested(
+        self, client, fake_prices
+    ):
+        response = client.post(
+            "/api/v1/analytics/walk-forward",
+            json={
+                "strategy": "moving_average_cross",
+                "strategy_params": {"fast_period": 5, "slow_period": 15, "sl_pct": 0.1},
+                "ticker": "AAPL",
+                "is_months": 3,
+                "oos_months": 1,
+                "param_name": "fast_period",
+                "param_type": "int",
+            },
+        )
+        assert response.status_code == 200
+        sensitivity = response.json()["parameter_sensitivity"]
+        assert sensitivity is not None
+        assert sensitivity["param_name"] == "fast_period"
+        assert len(sensitivity["points"]) == 5
+        assert "is_cliff" in sensitivity
+
+    def test_param_name_not_in_strategy_params_is_422(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/walk-forward",
+            json={
+                "strategy": "moving_average_cross",
+                "ticker": "AAPL",
+                "param_name": "not_a_real_param",
+            },
+        )
+        assert response.status_code == 422
+
+
+class TestFactorExposureEndpoint:
+    def test_valid_request_returns_full_payload(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/factor-exposure",
+            json={
+                "strategy": "donchian_breakout",
+                "tickers": ["AAPL"],
+                "risk_free_rate": 0.02,
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        for key in (
+            "alpha_annual_pct",
+            "beta",
+            "sharpe_ratio",
+            "sortino_ratio",
+            "calmar_ratio",
+            "tail_ratio",
+        ):
+            assert key in body
+
+    def test_unknown_strategy_is_422(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/factor-exposure",
+            json={"strategy": "not_a_real_strategy", "tickers": ["AAPL"]},
+        )
+        assert response.status_code == 422
+
+    def test_missing_benchmark_is_503(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/factor-exposure",
+            json={
+                "strategy": "donchian_breakout",
+                "tickers": ["AAPL"],
+                "benchmark": "NOPE_NOT_CACHED",
+            },
+        )
+        assert response.status_code == 503
+
+    def test_unavailable_ticker_is_503(self, client, fake_prices):
+        response = client.post(
+            "/api/v1/analytics/factor-exposure",
+            json={"strategy": "donchian_breakout", "tickers": ["NOPE_NOT_CACHED"]},
+        )
+        assert response.status_code == 503
 
 
 class TestScreenerWebSocket:
