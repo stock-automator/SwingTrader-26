@@ -75,6 +75,31 @@ class _FakeTradingClient:
             portfolio_value="10000",
         )
 
+    def get_all_positions(self):
+        return [
+            SimpleNamespace(
+                symbol="AAPL",
+                side=_FakeEnumValue("long"),
+                qty="10",
+                avg_entry_price="190.00",
+                current_price="200.00",
+                market_value="2000.00",
+                cost_basis="1900.00",
+                unrealized_pl="100.00",
+                unrealized_plpc="0.0526",
+            )
+        ]
+
+    def get_portfolio_history(self, history_filter=None):
+        return SimpleNamespace(
+            timestamp=[1704067200],
+            equity=[10000.0],
+            profit_loss=[0.0],
+            profit_loss_pct=[0.0],
+            base_value=10000.0,
+            timeframe="1D",
+        )
+
 
 def _override_with_configured_client():
     fake_client = AlpacaExecutionClient("key", "secret", client=_FakeTradingClient())
@@ -104,6 +129,20 @@ class TestNotConfigured:
             lambda: AlpacaExecutionClient(None, None)
         )
         response = client.post("/api/v1/execution/close-all", json={"confirm": True})
+        assert response.status_code == 503
+
+    def test_positions_is_503_when_unconfigured(self, client):
+        app.dependency_overrides[execution_module._client] = (
+            lambda: AlpacaExecutionClient(None, None)
+        )
+        response = client.get("/api/v1/execution/positions")
+        assert response.status_code == 503
+
+    def test_portfolio_history_is_503_when_unconfigured(self, client):
+        app.dependency_overrides[execution_module._client] = (
+            lambda: AlpacaExecutionClient(None, None)
+        )
+        response = client.get("/api/v1/execution/portfolio-history")
         assert response.status_code == 503
 
 
@@ -182,6 +221,37 @@ class TestAccount:
         response = client.get("/api/v1/execution/account")
         assert response.status_code == 200
         assert response.json()["equity"] == 10000.0
+
+
+class TestPositions:
+    def test_returns_open_positions(self, client):
+        _override_with_configured_client()
+        response = client.get("/api/v1/execution/positions")
+        assert response.status_code == 200
+        positions = response.json()["positions"]
+        assert positions == [
+            {
+                "symbol": "AAPL",
+                "side": "long",
+                "qty": 10.0,
+                "avg_entry_price": 190.0,
+                "current_price": 200.0,
+                "market_value": 2000.0,
+                "cost_basis": 1900.0,
+                "unrealized_pl": 100.0,
+                "unrealized_plpc": 0.0526,
+            }
+        ]
+
+
+class TestPortfolioHistory:
+    def test_returns_equity_curve(self, client):
+        _override_with_configured_client()
+        response = client.get("/api/v1/execution/portfolio-history")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["equity"] == [10000.0]
+        assert body["timeframe"] == "1D"
 
 
 class TestDispatchGuards:

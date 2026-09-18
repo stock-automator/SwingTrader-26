@@ -16,6 +16,8 @@ from ..journal.executor import TradeJournal
 from .schemas import (
     JournalDecayResponse,
     JournalSummaryResponse,
+    JournalTradesResponse,
+    MaeMfeDistributionResponse,
     MaeMfeRequest,
     MaeMfeResponse,
 )
@@ -31,6 +33,13 @@ def _journal(settings: Settings = Depends(get_settings)) -> TradeJournal:
 def journal_summary(journal: TradeJournal = Depends(_journal)) -> dict:
     """All-time trade performance: win rate, expectancy, drawdown, etc."""
     return journal.analyze_all_trades()
+
+
+@router.get("/trades", response_model=JournalTradesResponse)
+def journal_trades(journal: TradeJournal = Depends(_journal)) -> dict:
+    """Every logged trade signal - the raw feed behind the Trade Journal
+    UI's table."""
+    return {"trades": journal.list_trades()}
 
 
 @router.get("/decay", response_model=JournalDecayResponse)
@@ -72,3 +81,21 @@ def journal_mae_mfe(
         return journal.compute_mae_mfe(request.trade_id, price_df)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/mae-mfe-distribution", response_model=MaeMfeDistributionResponse)
+def journal_mae_mfe_distribution(
+    settings: Settings = Depends(get_settings),
+    journal: TradeJournal = Depends(_journal),
+) -> dict:
+    """MAE/MFE for every completed trade, one price load per distinct
+    ticker - the data behind the Strategy Decay Visualizer's distribution
+    chart. A ticker whose price data can't be loaded is skipped (see
+    `warnings`) rather than failing the whole response."""
+
+    def _load(ticker: str):
+        return load_prices(
+            ticker, data_dir=settings.data_dir, allow_download=settings.allow_downloads
+        )
+
+    return journal.compute_mae_mfe_all(_load)

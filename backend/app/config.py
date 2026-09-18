@@ -110,6 +110,11 @@ class Settings:
             Discord alerts are disabled.
         generic_webhook_url: Arbitrary HTTP endpoint alerts are POSTed to as
             flat JSON. Unset means the generic webhook channel is disabled.
+        alert_config_path: JSON file the Alert Channel Configuration UI
+            reads/writes via `PUT /api/v1/alerts/config` - see
+            `alerts.config_store`. A field saved here overrides the
+            matching `telegram_*`/`discord_*`/`generic_webhook_url` value
+            above without editing `.env` or restarting the process.
         alpaca_api_key: Alpaca paper-trading API key. Unset means the
             execution endpoints return 503 rather than silently no-opping.
         alpaca_api_secret: Alpaca paper-trading API secret.
@@ -143,6 +148,7 @@ class Settings:
     telegram_chat_id: str | None = None
     discord_webhook_url: str | None = None
     generic_webhook_url: str | None = None
+    alert_config_path: Path = Path("config/alerts_channels.json")
     alpaca_api_key: str | None = None
     alpaca_api_secret: str | None = None
     execution_guards_enabled: bool = True
@@ -186,6 +192,9 @@ def get_settings() -> Settings:
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID") or None,
         discord_webhook_url=os.environ.get("DISCORD_WEBHOOK_URL") or None,
         generic_webhook_url=os.environ.get("GENERIC_WEBHOOK_URL") or None,
+        alert_config_path=Path(
+            os.environ.get("ALERT_CONFIG_PATH", "config/alerts_channels.json")
+        ),
         alpaca_api_key=os.environ.get("ALPACA_API_KEY") or None,
         alpaca_api_secret=os.environ.get("ALPACA_API_SECRET") or None,
         execution_guards_enabled=_env_bool("EXECUTION_GUARDS_ENABLED", True),

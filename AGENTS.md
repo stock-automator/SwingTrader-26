@@ -8,6 +8,30 @@ philosophy) see `README.md`. This document covers the **engineering
 contracts**: how strategies, risk sizing, execution engines, and analytics
 fit together, and how to extend each one.
 
+> **Paths below predate the FastAPI/React refactor.** Every `src/...` and
+> `engine/...` path in this document is the pre-refactor layout; the
+> **contracts and separation of concerns are still accurate**, only the
+> file locations moved. Translate as you read:
+>
+> | This document says | Now lives at |
+> |---|---|
+> | `src/strategies/` | `backend/app/quant/strategies/` |
+> | `src/strategies/base_strategy.py` | `backend/app/quant/strategies/base.py` |
+> | `src/core/risk.py` | `backend/app/quant/risk.py` |
+> | `engine/backtester.py` | `backend/app/quant/engine.py` |
+> | `engine/forward_tester.py` | `backend/app/quant/forward_tester.py` |
+> | `analytics/metrics.py`, `console.py`, `llm_reporter.py` | `backend/app/analytics/` |
+> | `src/agent.py` / `src/data/update_data.py` | `backend/app/data/agent.py` / `backend/app/data/loader.py` |
+> | `pytest tests/ -v --cov=src` | `pytest tests/ -v --cov=backend` |
+>
+> A full pass rewriting every code sample below to the new paths is a
+> tracked fast-follow, not done in this change — the sections were written
+> against a single-ticker CLI/notebook workflow (`src/strategies`,
+> in-process `ForwardTester`) that has no direct FastAPI-era equivalent to
+> point at yet (the live-screener/backtest engines in `backend/app/quant/`
+> cover the same ground but with a different calling convention). Treat
+> every path below as "conceptually here, mechanically moved," not literal.
+
 ---
 
 ## 1. Architecture Overview

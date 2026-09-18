@@ -1,14 +1,44 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Toaster } from "sonner";
 import { getHealth } from "./lib/api";
 import { ScreenerGrid } from "./components/ScreenerGrid";
-import { BacktestStudio } from "./components/BacktestStudio";
 import { SignalMatrixGrid } from "./components/SignalMatrixGrid";
 import { SyncStatusBanner } from "./components/SyncStatusBanner";
+import { AlertSettings } from "./components/alerts/AlertSettings";
 import type { MacroRegime } from "./types";
 
-type View = "screener" | "backtest" | "signals";
+// Code-split: each pulls in a charting/table library (lightweight-charts,
+// recharts, @tanstack/react-table) only the tab that uses it needs -
+// keeps those bytes out of the bundle every visitor downloads for the
+// always-shown Live Screener tab.
+const BacktestStudio = lazy(() =>
+  import("./components/BacktestStudio").then((m) => ({
+    default: m.BacktestStudio,
+  })),
+);
+const PortfolioDashboard = lazy(() =>
+  import("./components/portfolio/PortfolioDashboard").then((m) => ({
+    default: m.PortfolioDashboard,
+  })),
+);
+const JournalDashboard = lazy(() =>
+  import("./components/journal/JournalDashboard").then((m) => ({
+    default: m.JournalDashboard,
+  })),
+);
+
+function TabLoading() {
+  return <div className="text-sm text-text-dim">Loading…</div>;
+}
+
+type View =
+  | "screener"
+  | "backtest"
+  | "signals"
+  | "portfolio"
+  | "journal"
+  | "alerts";
 
 const REGIME_DISPLAY: Record<MacroRegime, { emoji: string; label: string }> = {
   BULL_TRENDING: { emoji: "🟢", label: "BULL_TRENDING" },
@@ -80,6 +110,9 @@ const NAV_ITEMS: { view: View; label: string; testId: string }[] = [
   { view: "screener", label: "Live Screener", testId: "nav-live-screener" },
   { view: "signals", label: "Signal Matrix", testId: "nav-signal-matrix" },
   { view: "backtest", label: "Backtesting Studio", testId: "nav-backtest-studio" },
+  { view: "portfolio", label: "Portfolio", testId: "nav-portfolio" },
+  { view: "journal", label: "Trade Journal", testId: "nav-journal" },
+  { view: "alerts", label: "Alerts", testId: "nav-alerts" },
 ];
 
 function App() {
@@ -176,7 +209,46 @@ function App() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18 }}
             >
-              <BacktestStudio />
+              <Suspense fallback={<TabLoading />}>
+                <BacktestStudio />
+              </Suspense>
+            </motion.div>
+          )}
+          {view === "portfolio" && (
+            <motion.div
+              key="portfolio"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <Suspense fallback={<TabLoading />}>
+                <PortfolioDashboard />
+              </Suspense>
+            </motion.div>
+          )}
+          {view === "journal" && (
+            <motion.div
+              key="journal"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <Suspense fallback={<TabLoading />}>
+                <JournalDashboard />
+              </Suspense>
+            </motion.div>
+          )}
+          {view === "alerts" && (
+            <motion.div
+              key="alerts"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <AlertSettings />
             </motion.div>
           )}
         </AnimatePresence>

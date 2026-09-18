@@ -378,6 +378,118 @@ class TestMaeMfe:
             journal.compute_mae_mfe(trade_id, empty_df)
 
 
+class TestListTrades:
+    def test_empty_journal_returns_empty_list(self, journal):
+        assert journal.list_trades() == []
+
+    def test_includes_pending_and_taken_trades_with_clean_types(self, journal):
+        journal.log_signal(
+            ticker="AAPL",
+            entry_date=datetime(2024, 1, 1),
+            entry_price=150.0,
+            thesis="Breakout",
+            signal_strength=75.0,
+            stop_loss=148.0,
+            target_1=155.0,
+            target_2=160.0,
+        )
+        taken_id = journal.log_signal(
+            ticker="MSFT",
+            entry_date=datetime(2024, 1, 2),
+            entry_price=300.0,
+            thesis="Pullback",
+            signal_strength=60.0,
+            stop_loss=290.0,
+            target_1=310.0,
+            target_2=320.0,
+        )
+        journal.log_entry(
+            trade_id=taken_id,
+            actual_entry_price=300.0,
+            actual_entry_date=datetime(2024, 1, 3),
+        )
+
+        trades = journal.list_trades()
+
+        assert len(trades) == 2
+        pending, taken = trades
+        assert pending["ticker"] == "AAPL"
+        assert pending["entry_status"] == "PENDING"
+        assert pending["exit_date"] is None
+        assert isinstance(pending["id"], int)
+        assert isinstance(pending["signal_strength"], float)
+        assert taken["actual_entry_date"] == datetime(2024, 1, 3).isoformat()
+
+
+class TestMaeMfeAll:
+    def _closed_trade(self, journal, ticker="AAPL", exit_price=108.0):
+        trade_id = journal.log_signal(
+            ticker=ticker,
+            entry_date=datetime(2024, 1, 1),
+            entry_price=100.0,
+            thesis="Test",
+            signal_strength=50.0,
+            stop_loss=95.0,
+            target_1=110.0,
+            target_2=120.0,
+        )
+        journal.log_entry(
+            trade_id=trade_id,
+            actual_entry_price=100.0,
+            actual_entry_date=datetime(2024, 1, 2),
+        )
+        journal.log_exit(
+            trade_id=trade_id,
+            exit_date=datetime(2024, 1, 5),
+            exit_price=exit_price,
+            exit_reason="TP1",
+        )
+        return trade_id
+
+    def _price_df(self):
+        index = pd.date_range("2024-01-02", "2024-01-05", freq="D")
+        return pd.DataFrame(
+            {
+                "Open": [100.0, 97.0, 103.0, 107.0],
+                "High": [101.0, 98.0, 112.0, 108.5],
+                "Low": [96.0, 95.0, 102.0, 106.0],
+                "Close": [97.0, 97.5, 111.0, 108.0],
+            },
+            index=index,
+        )
+
+    def test_no_completed_trades_returns_empty(self, journal):
+        result = journal.compute_mae_mfe_all(lambda ticker: self._price_df())
+        assert result == {"points": [], "warnings": []}
+
+    def test_loads_price_once_per_distinct_ticker(self, journal):
+        self._closed_trade(journal, ticker="AAPL")
+        self._closed_trade(journal, ticker="AAPL")
+        calls = []
+
+        def loader(ticker):
+            calls.append(ticker)
+            return self._price_df()
+
+        result = journal.compute_mae_mfe_all(loader)
+
+        assert calls == ["AAPL"]
+        assert len(result["points"]) == 2
+        assert result["points"][0]["mae_pct"] == pytest.approx(0.05)
+        assert result["warnings"] == []
+
+    def test_ticker_load_failure_is_collected_as_a_warning(self, journal):
+        self._closed_trade(journal, ticker="AAPL")
+
+        def loader(ticker):
+            raise RuntimeError("not cached")
+
+        result = journal.compute_mae_mfe_all(loader)
+
+        assert result["points"] == []
+        assert "AAPL" in result["warnings"][0]
+
+
 class TestDecayAnalytics:
     """Test rolling 30/60/90-day decay analytics"""
 

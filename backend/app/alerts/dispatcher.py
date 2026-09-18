@@ -151,18 +151,36 @@ class AlertDispatcher:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "AlertDispatcher":
-        """Builds only the channels whose credentials are fully configured."""
-        channels = []
-        if settings.telegram_bot_token and settings.telegram_chat_id:
+        """Builds only the channels whose credentials are fully configured,
+        from `settings`' environment-derived values alone. Routes that also
+        honor the UI-editable config store (`alerts.config_store`) should
+        call `from_channel_config` with `config_store.effective_channel_config`
+        instead."""
+        return cls.from_channel_config(
+            {
+                "telegram_bot_token": settings.telegram_bot_token,
+                "telegram_chat_id": settings.telegram_chat_id,
+                "discord_webhook_url": settings.discord_webhook_url,
+                "generic_webhook_url": settings.generic_webhook_url,
+            }
+        )
+
+    @classmethod
+    def from_channel_config(cls, config: dict[str, str | None]) -> "AlertDispatcher":
+        """Builds only the channels whose credentials are fully configured,
+        from a plain `{field: value}` dict - the shape both `Settings` and
+        `alerts.config_store.effective_channel_config` produce."""
+        channels: list[AlertChannel] = []
+        if config.get("telegram_bot_token") and config.get("telegram_chat_id"):
             channels.append(
                 TelegramAlertChannel(
-                    settings.telegram_bot_token, settings.telegram_chat_id
+                    config["telegram_bot_token"], config["telegram_chat_id"]
                 )
             )
-        if settings.discord_webhook_url:
-            channels.append(DiscordAlertChannel(settings.discord_webhook_url))
-        if settings.generic_webhook_url:
-            channels.append(WebhookAlertChannel(settings.generic_webhook_url))
+        if config.get("discord_webhook_url"):
+            channels.append(DiscordAlertChannel(config["discord_webhook_url"]))
+        if config.get("generic_webhook_url"):
+            channels.append(WebhookAlertChannel(config["generic_webhook_url"]))
         return cls(channels)
 
     def dispatch(self, message: AlertMessage) -> dict[str, str]:

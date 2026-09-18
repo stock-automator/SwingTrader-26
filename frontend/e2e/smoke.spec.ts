@@ -67,6 +67,40 @@ test.beforeEach(async ({ page }) => {
 test("app loads and every top-level tab renders without throwing", async ({
   page,
 }) => {
+  // Every tab added since this test was written gets a 503 here - each
+  // handles "backend not configured" as a normal empty state (see
+  // portfolio.spec.ts / alerts.spec.ts / journal.spec.ts for their
+  // success-path coverage), so this smoke test only has to prove that
+  // switching to it doesn't throw.
+  await page.route(`${API_BASE}/api/v1/execution/**`, (route) =>
+    route.fulfill({ status: 503, json: { detail: "Alpaca is not configured" } }),
+  );
+  await page.route(`${API_BASE}/api/v1/alerts/config`, (route) =>
+    route.fulfill({
+      json: {
+        telegram_bot_token: null,
+        telegram_chat_id: null,
+        discord_webhook_url: null,
+        generic_webhook_url: null,
+        telegram_configured: false,
+        discord_configured: false,
+        webhook_configured: false,
+      },
+    }),
+  );
+  await page.route(`${API_BASE}/api/v1/journal/summary`, (route) =>
+    route.fulfill({ json: { error: "No completed trades yet" } }),
+  );
+  await page.route(`${API_BASE}/api/v1/journal/decay**`, (route) =>
+    route.fulfill({ json: { windows: {} } }),
+  );
+  await page.route(`${API_BASE}/api/v1/journal/trades`, (route) =>
+    route.fulfill({ json: { trades: [] } }),
+  );
+  await page.route(`${API_BASE}/api/v1/journal/mae-mfe-distribution`, (route) =>
+    route.fulfill({ json: { points: [], warnings: [] } }),
+  );
+
   await page.goto("/");
   await expect(page.getByText("SWINGTRADER")).toBeVisible();
 
@@ -81,6 +115,18 @@ test("app loads and every top-level tab renders without throwing", async ({
   // Backtesting Studio
   await page.getByTestId("nav-backtest-studio").click();
   await expect(page.getByTestId("backtest-run-button")).toBeVisible();
+
+  // Portfolio
+  await page.getByTestId("nav-portfolio").click();
+  await expect(page.getByTestId("portfolio-not-configured")).toBeVisible();
+
+  // Trade Journal
+  await page.getByTestId("nav-journal").click();
+  await expect(page.getByTestId("journal-trades-empty")).toBeVisible();
+
+  // Alerts
+  await page.getByTestId("nav-alerts").click();
+  await expect(page.getByTestId("channel-card-telegram")).toBeVisible();
 
   // Back to Live Screener
   await page.getByTestId("nav-live-screener").click();

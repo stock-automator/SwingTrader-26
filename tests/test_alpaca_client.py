@@ -68,6 +68,32 @@ class _FakeTradingClient:
             portfolio_value="10000.00",
         )
 
+    def get_all_positions(self):
+        return [
+            SimpleNamespace(
+                symbol="AAPL",
+                side=_FakeEnumValue("long"),
+                qty="10",
+                avg_entry_price="190.00",
+                current_price="200.00",
+                market_value="2000.00",
+                cost_basis="1900.00",
+                unrealized_pl="100.00",
+                unrealized_plpc="0.0526",
+            )
+        ]
+
+    def get_portfolio_history(self, history_filter=None):
+        self.portfolio_history_filter = history_filter
+        return SimpleNamespace(
+            timestamp=[1704067200, 1704153600],
+            equity=[10000.0, 10100.0],
+            profit_loss=[0.0, 100.0],
+            profit_loss_pct=[0.0, 0.01],
+            base_value=10000.0,
+            timeframe="1D",
+        )
+
 
 class TestNotConfigured:
     def test_every_method_raises_when_unconfigured(self):
@@ -84,6 +110,10 @@ class TestNotConfigured:
             client.close_all_positions()
         with pytest.raises(AlpacaNotConfiguredError):
             client.get_account()
+        with pytest.raises(AlpacaNotConfiguredError):
+            client.get_positions()
+        with pytest.raises(AlpacaNotConfiguredError):
+            client.get_portfolio_history()
 
     def test_partial_credentials_still_count_as_unconfigured(self):
         client = AlpacaExecutionClient(api_key="key", api_secret=None)
@@ -167,3 +197,39 @@ class TestCloseAllAndAccount:
         assert account["account_number"] == "PA123"
         assert account["equity"] == 10000.0
         assert account["status"] == "ACTIVE"
+
+
+class TestPositionsAndHistory:
+    def test_get_positions_returns_plain_dicts(self):
+        fake = _FakeTradingClient()
+        client = AlpacaExecutionClient("key", "secret", client=fake)
+
+        positions = client.get_positions()
+
+        assert positions == [
+            {
+                "symbol": "AAPL",
+                "side": "long",
+                "qty": 10.0,
+                "avg_entry_price": 190.0,
+                "current_price": 200.0,
+                "market_value": 2000.0,
+                "cost_basis": 1900.0,
+                "unrealized_pl": 100.0,
+                "unrealized_plpc": 0.0526,
+            }
+        ]
+
+    def test_get_portfolio_history_converts_timestamps_and_values(self):
+        fake = _FakeTradingClient()
+        client = AlpacaExecutionClient("key", "secret", client=fake)
+
+        history = client.get_portfolio_history(period="1M", timeframe="1D")
+
+        assert history["equity"] == [10000.0, 10100.0]
+        assert history["base_value"] == 10000.0
+        assert history["timeframe"] == "1D"
+        assert len(history["timestamp"]) == 2
+        assert history["timestamp"][0].startswith("2024-01-01")
+        assert fake.portfolio_history_filter.period == "1M"
+        assert fake.portfolio_history_filter.timeframe == "1D"

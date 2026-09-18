@@ -35,6 +35,8 @@ from .schemas import (
     CloseAllPositionsResponse,
     ExecutionOrderRequest,
     ExecutionOrderResponse,
+    PortfolioHistoryResponse,
+    PositionsResponse,
 )
 
 log = logging.getLogger(__name__)
@@ -172,5 +174,31 @@ def get_account(client: AlpacaExecutionClient = Depends(_client)) -> dict:
 
     try:
         return client.get_account()
+    except AlpacaNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/positions", response_model=PositionsResponse)
+def get_positions(client: AlpacaExecutionClient = Depends(_client)) -> dict:
+    """Every currently open paper position."""
+    _require_configured(client)
+
+    try:
+        return {"positions": client.get_positions()}
+    except AlpacaNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/portfolio-history", response_model=PortfolioHistoryResponse)
+def get_portfolio_history(
+    period: str = "1M",
+    timeframe: str = "1D",
+    client: AlpacaExecutionClient = Depends(_client),
+) -> dict:
+    """Paper account equity curve for the Portfolio Dashboard's chart."""
+    _require_configured(client)
+
+    try:
+        return client.get_portfolio_history(period=period, timeframe=timeframe)
     except AlpacaNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
