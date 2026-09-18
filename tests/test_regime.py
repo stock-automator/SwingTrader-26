@@ -7,10 +7,16 @@ import pandas as pd
 import pytest
 
 from backend.app.quant.regime import (
+    MACRO_BEAR_TRENDING,
+    MACRO_BULL_TRENDING,
+    MACRO_HIGH_VOLATILITY_CHOP,
+    MACRO_NEUTRAL,
+    MACRO_REGIME_UNKNOWN,
     REGIME_BEAR_TREND,
     REGIME_BULL_TREND,
     REGIME_CHOPPY,
     REGIME_UNKNOWN,
+    MacroRegimeDetector,
     RegimeDetector,
 )
 
@@ -181,6 +187,158 @@ class TestCurrentRegime:
 
         assert detector.detect_regime(df).iloc[-1] is None
         assert detector.current_regime(df) == REGIME_UNKNOWN
+
+
+def _macro_ohlc(close: np.ndarray) -> pd.DataFrame:
+    close = pd.Series(close)
+    idx = pd.date_range("2020-01-01", periods=len(close), freq="D")
+    return pd.DataFrame(
+        {
+            "Open": close.values,
+            "High": close.values * 1.002,
+            "Low": close.values * 0.998,
+            "Close": close.values,
+            "Volume": 1_000_000,
+        },
+        index=idx,
+    )
+
+
+def _macro_bull(n: int = 260) -> pd.DataFrame:
+    rng = np.random.default_rng(1)
+    close = 100 + 0.3 * np.arange(n) + rng.normal(0, 0.05, n)
+    return _macro_ohlc(close)
+
+
+def _macro_bear(n: int = 260) -> pd.DataFrame:
+    rng = np.random.default_rng(2)
+    close = 200 - 0.3 * np.arange(n) + rng.normal(0, 0.05, n)
+    return _macro_ohlc(close)
+
+
+def _macro_high_vol_chop(n: int = 260) -> pd.DataFrame:
+    # Large daily swings around a flat mean: no sustained trend, but daily
+    # returns big enough that rolling annualised volatility clears 20%.
+    rng = np.random.default_rng(3)
+    daily_returns = rng.normal(0, 0.03, n)
+    close = 100 * np.cumprod(1 + daily_returns)
+    return _macro_ohlc(close)
+
+
+def _macro_neutral(n: int = 260) -> pd.DataFrame:
+    # Flat, low-volatility chop around a constant mean: SMAs converge near
+    # each other and price oscillates through them, so neither trend
+    # condition holds and volatility stays well under the threshold.
+    rng = np.random.default_rng(4)
+    close = 100 + np.sin(np.linspace(0, 6 * np.pi, n)) * 0.5 + rng.normal(0, 0.02, n)
+    return _macro_ohlc(close)
+
+
+@pytest.fixture
+def macro_detector():
+    return MacroRegimeDetector(
+        sma_fast_period=50,
+        sma_slow_period=200,
+        volatility_period=20,
+        high_vol_annualized_threshold=0.20,
+    )
+
+
+class TestMacroRegimeConstruction:
+    def test_rejects_short_fast_period(self):
+        with pytest.raises(ValueError):
+            MacroRegimeDetector(sma_fast_period=1)
+
+    def test_rejects_slow_period_not_greater_than_fast(self):
+        with pytest.raises(ValueError):
+            MacroRegimeDetector(sma_fast_period=50, sma_slow_period=50)
+        with pytest.raises(ValueError):
+            MacroRegimeDetector(sma_fast_period=50, sma_slow_period=20)
+
+    def test_rejects_short_volatility_period(self):
+        with pytest.raises(ValueError):
+            MacroRegimeDetector(volatility_period=1)
+
+    def test_rejects_non_positive_threshold(self):
+        with pytest.raises(ValueError):
+            MacroRegimeDetector(high_vol_annualized_threshold=0)
+
+
+class TestMacroComputeIndicators:
+    def test_adds_expected_columns(self, macro_detector):
+        out = macro_detector.compute_indicators(_macro_bull())
+        for col in ("sma_fast", "sma_slow", "volatility_annualized"):
+            assert col in out.columns
+
+    def test_warmup_rows_are_nan(self, macro_detector):
+        out = macro_detector.compute_indicators(_macro_bull())
+        assert out["sma_slow"].iloc[:199].isna().all()
+        assert pd.notna(out["sma_slow"].iloc[199])
+
+    def test_rejects_empty_frame(self, macro_detector):
+        with pytest.raises(ValueError, match="empty"):
+            macro_detector.compute_indicators(_macro_ohlc(np.array([])))
+
+    def test_rejects_missing_close(self, macro_detector):
+        df = _macro_bull().drop(columns=["Close"])
+        with pytest.raises(ValueError, match="missing required column"):
+            macro_detector.compute_indicators(df)
+
+
+class TestMacroDetectRegime:
+    def test_sustained_uptrend_is_bull_trending(self, macro_detector):
+        assert macro_detector.current_regime(_macro_bull()) == MACRO_BULL_TRENDING
+
+    def test_sustained_downtrend_is_bear_trending(self, macro_detector):
+        assert macro_detector.current_regime(_macro_bear()) == MACRO_BEAR_TRENDING
+
+    def test_large_daily_swings_are_high_volatility_chop(self, macro_detector):
+        assert (
+            macro_detector.current_regime(_macro_high_vol_chop())
+            == MACRO_HIGH_VOLATILITY_CHOP
+        )
+
+    def test_flat_low_vol_chop_is_neutral(self, macro_detector):
+        assert macro_detector.current_regime(_macro_neutral()) == MACRO_NEUTRAL
+
+    def test_volatility_takes_priority_over_trend(self, macro_detector):
+        # A strong uptrend whose recent volatility has spiked must still
+        # read as HIGH_VOLATILITY_CHOP, not BULL_TRENDING - the whole point
+        # of the volatility gate is that it overrides a trend read.
+        rng = np.random.default_rng(5)
+        n = 260
+        trend = 100 + 0.3 * np.arange(n)
+        spike = rng.normal(0, 0.06, n)
+        spike[-20:] += rng.normal(0, 3.0, 20)  # volatility spike at the tail
+        close = trend + spike
+        assert (
+            macro_detector.current_regime(_macro_ohlc(close))
+            == MACRO_HIGH_VOLATILITY_CHOP
+        )
+
+    def test_warmup_rows_are_none(self, macro_detector):
+        regime = macro_detector.detect_regime(_macro_bull())
+        assert regime.iloc[0] is None
+
+    def test_insufficient_data_returns_unknown(self, macro_detector):
+        assert macro_detector.current_regime(_macro_bull(n=50)) == MACRO_REGIME_UNKNOWN
+
+
+class TestMacroIsLongBlocked:
+    def test_bull_trending_is_not_blocked(self, macro_detector):
+        assert macro_detector.is_long_blocked(_macro_bull()) is False
+
+    def test_bear_trending_is_blocked(self, macro_detector):
+        assert macro_detector.is_long_blocked(_macro_bear()) is True
+
+    def test_high_volatility_chop_is_blocked(self, macro_detector):
+        assert macro_detector.is_long_blocked(_macro_high_vol_chop()) is True
+
+    def test_neutral_is_not_blocked(self, macro_detector):
+        assert macro_detector.is_long_blocked(_macro_neutral()) is False
+
+    def test_unknown_is_not_blocked(self, macro_detector):
+        assert macro_detector.is_long_blocked(_macro_bull(n=50)) is False
 
 
 if __name__ == "__main__":

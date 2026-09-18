@@ -1,4 +1,7 @@
-export function fmtCurrency(value: number | null | undefined, digits = 0): string {
+export function fmtCurrency(
+  value: number | null | undefined,
+  digits = 0,
+): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
   return value.toLocaleString("en-US", {
     style: "currency",
@@ -24,7 +27,8 @@ export function fmtInt(value: number | null | undefined): string {
 }
 
 export function signClass(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "text-text-dim";
+  if (value === null || value === undefined || Number.isNaN(value))
+    return "text-text-dim";
   if (value > 0) return "text-long";
   if (value < 0) return "text-short";
   return "text-text-dim";

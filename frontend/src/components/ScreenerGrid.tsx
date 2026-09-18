@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getLiveScreener, screenerWebSocketUrl } from "../lib/api";
 import { fmtInt, fmtNum, fmtPct } from "../lib/format";
-import { STRATEGIES, type ScreenerResponse, type ScreenerSetup, type Strategy } from "../types";
+import {
+  STRATEGIES,
+  type MacroRegime,
+  type ScreenerResponse,
+  type ScreenerSetup,
+  type Strategy,
+} from "../types";
+import { OrderTicketDrawer } from "./OrderTicketDrawer";
 
 const DIRECTION_STYLES: Record<ScreenerSetup["direction"], string> = {
   LONG: "text-long bg-long-dim/40 border-long-dim",
@@ -28,7 +35,32 @@ function ConnectionDot({ live }: { live: boolean }) {
   );
 }
 
-export function ScreenerGrid() {
+function RMultipleBadge({
+  reward_risk_ratio,
+}: {
+  reward_risk_ratio: number | null;
+}) {
+  if (reward_risk_ratio === null)
+    return <span className="text-text-faint">—</span>;
+  const strong = reward_risk_ratio >= 2.5;
+  return (
+    <span
+      className={`inline-block rounded border px-1.5 py-0.5 text-xs font-semibold ${
+        strong
+          ? "border-long-dim bg-long-dim/40 text-long"
+          : "border-amber-dim bg-amber-dim/40 text-amber"
+      }`}
+    >
+      {reward_risk_ratio.toFixed(1)}R
+    </span>
+  );
+}
+
+interface ScreenerGridProps {
+  onRegimeChange?: (regime: MacroRegime, circuitBreakerActive: boolean) => void;
+}
+
+export function ScreenerGrid({ onRegimeChange }: ScreenerGridProps = {}) {
   const [strategy, setStrategy] = useState<Strategy>("donchian_breakout");
   const [accountEquity, setAccountEquity] = useState(1000);
   const [riskPct, setRiskPct] = useState(0.02);
@@ -37,6 +69,8 @@ export function ScreenerGrid() {
   const [loading, setLoading] = useState(false);
   const [wsLive, setWsLive] = useState(false);
   const [hideFlat, setHideFlat] = useState(true);
+  const [earningsBlackout, setEarningsBlackout] = useState(false);
+  const [ticketSetup, setTicketSetup] = useState<ScreenerSetup | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   const fetchOnce = useCallback(() => {
@@ -45,14 +79,22 @@ export function ScreenerGrid() {
       strategy,
       account_equity: accountEquity,
       risk_per_trade_pct: riskPct,
+      earnings_blackout: earningsBlackout,
     })
       .then((res) => {
         setData(res);
         setError(null);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err) =>
+        setError(err instanceof Error ? err.message : String(err)),
+      )
       .finally(() => setLoading(false));
-  }, [strategy, accountEquity, riskPct]);
+  }, [strategy, accountEquity, riskPct, earningsBlackout]);
+
+  useEffect(() => {
+    if (data) onRegimeChange?.(data.macro_regime, data.circuit_breaker_active);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   // Initial load + whenever params change, refetch once (covers the case the
   // websocket is unavailable) and (re)open the live socket.
@@ -65,6 +107,7 @@ export function ScreenerGrid() {
       strategy,
       account_equity: accountEquity,
       risk_per_trade_pct: riskPct,
+      earnings_blackout: earningsBlackout,
     });
     let ws: WebSocket;
     try {
@@ -95,10 +138,12 @@ export function ScreenerGrid() {
       ws.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, accountEquity, riskPct]);
+  }, [strategy, accountEquity, riskPct, earningsBlackout]);
 
   const setups = data?.setups ?? [];
-  const visibleSetups = hideFlat ? setups.filter((s) => s.direction !== "FLAT") : setups;
+  const visibleSetups = hideFlat
+    ? setups.filter((s) => s.direction !== "FLAT")
+    : setups;
 
   return (
     <div className="flex flex-col gap-4">
@@ -148,6 +193,15 @@ export function ScreenerGrid() {
           />
           Hide flat
         </label>
+        <label className="flex items-center gap-2 text-xs text-text-dim">
+          <input
+            type="checkbox"
+            checked={earningsBlackout}
+            onChange={(e) => setEarningsBlackout(e.target.checked)}
+            className="accent-accent"
+          />
+          Earnings blackout
+        </label>
         <button
           onClick={fetchOnce}
           disabled={loading}
@@ -189,10 +243,12 @@ export function ScreenerGrid() {
               <th className="px-3 py-2 text-right">Stop</th>
               <th className="px-3 py-2 text-right">Target</th>
               <th className="px-3 py-2 text-right">Shares</th>
+              <th className="px-3 py-2 text-right">R</th>
               <th className="px-3 py-2 text-right">ADX</th>
               <th className="px-3 py-2 text-right">Rel. Strength</th>
               <th className="px-3 py-2 text-right">Rank</th>
               <th className="px-3 py-2">Note</th>
+              <th className="px-3 py-2"></th>
             </tr>
           </thead>
           <tbody>
@@ -210,25 +266,59 @@ export function ScreenerGrid() {
                     {s.direction}
                   </span>
                 </td>
-                <td className={`px-3 py-2 text-xs ${REGIME_STYLES[s.regime]}`}>{s.regime}</td>
-                <td className="px-3 py-2 text-right">{fmtNum(s.close)}</td>
-                <td className="px-3 py-2 text-right text-text-dim">{fmtNum(s.entry_price)}</td>
-                <td className="px-3 py-2 text-right text-short">{fmtNum(s.stop_loss)}</td>
-                <td className="px-3 py-2 text-right text-long">{fmtNum(s.take_profit)}</td>
-                <td className="px-3 py-2 text-right">{fmtInt(s.shares)}</td>
-                <td className="px-3 py-2 text-right text-text-dim">{fmtNum(s.adx, 1)}</td>
-                <td className="px-3 py-2 text-right">
-                  {s.relative_strength === null ? "—" : fmtPct(s.relative_strength * 100, 1)}
+                <td className={`px-3 py-2 text-xs ${REGIME_STYLES[s.regime]}`}>
+                  {s.regime}
                 </td>
-                <td className="px-3 py-2 text-right text-text-dim">{s.rank ?? "—"}</td>
-                <td className="max-w-[220px] truncate px-3 py-2 text-xs text-text-dim" title={s.note ?? ""}>
+                <td className="px-3 py-2 text-right">{fmtNum(s.close)}</td>
+                <td className="px-3 py-2 text-right text-text-dim">
+                  {fmtNum(s.entry_price)}
+                </td>
+                <td className="px-3 py-2 text-right text-short">
+                  {fmtNum(s.stop_loss)}
+                </td>
+                <td className="px-3 py-2 text-right text-long">
+                  {fmtNum(s.take_profit)}
+                </td>
+                <td className="px-3 py-2 text-right">{fmtInt(s.shares)}</td>
+                <td className="px-3 py-2 text-right">
+                  <RMultipleBadge reward_risk_ratio={s.reward_risk_ratio} />
+                </td>
+                <td className="px-3 py-2 text-right text-text-dim">
+                  {fmtNum(s.adx, 1)}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {s.relative_strength === null
+                    ? "—"
+                    : fmtPct(s.relative_strength * 100, 1)}
+                </td>
+                <td className="px-3 py-2 text-right text-text-dim">
+                  {s.rank ?? "—"}
+                </td>
+                <td
+                  className="max-w-[220px] truncate px-3 py-2 text-xs text-text-dim"
+                  title={s.note ?? ""}
+                >
                   {s.note ?? ""}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {s.direction === "LONG" && s.tradable && (
+                    <button
+                      onClick={() => setTicketSetup(s)}
+                      data-testid="order-ticket-button"
+                      className="rounded border border-border bg-panel-alt px-2 py-1 text-xs text-text hover:border-accent"
+                    >
+                      🎫 Ticket
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
             {visibleSetups.length === 0 && !loading && (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-text-faint">
+                <td
+                  colSpan={14}
+                  className="px-3 py-8 text-center text-text-faint"
+                >
                   No setups to show.
                 </td>
               </tr>
@@ -236,6 +326,11 @@ export function ScreenerGrid() {
           </tbody>
         </table>
       </div>
+
+      <OrderTicketDrawer
+        setup={ticketSetup}
+        onClose={() => setTicketSetup(null)}
+      />
     </div>
   );
 }

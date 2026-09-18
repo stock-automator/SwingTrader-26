@@ -164,6 +164,44 @@ def fetch_yfinance(
     return normalize_ohlcv(raw, ticker)
 
 
+def fetch_earnings_dates(ticker: str, limit: int = 8) -> list[pd.Timestamp]:
+    """Upcoming/recent earnings report dates for `ticker`, via yfinance.
+
+    Used by the catalyst filter (`quant/screener.py`'s `CatalystFilter`) to
+    suppress new long setups going into an earnings print. Returns dates
+    sorted ascending, deduplicated, and timezone-naive - the same convention
+    `normalize_ohlcv` puts price bars on, so a setup's `as_of` date and an
+    earnings date are directly comparable.
+
+    Args:
+        ticker: Symbol, case-insensitive.
+        limit: Max rows to request from the provider's earnings calendar.
+
+    Returns:
+        Empty list if the provider has no earnings calendar for this
+        ticker (e.g. an ETF, or a symbol yfinance doesn't cover) - that is a
+        "nothing to filter on" result, not an error.
+
+    Raises:
+        DataUnavailableError: on a provider failure (network, rate limit,
+            schema change). A missing calendar is not this - see above.
+    """
+    import yfinance as yf
+
+    try:
+        raw = yf.Ticker(ticker.upper()).get_earnings_dates(limit=limit)
+    except Exception as exc:  # network, rate limit, schema change
+        raise DataUnavailableError(
+            f"earnings calendar fetch failed for {ticker}: {exc}"
+        ) from exc
+
+    if raw is None or raw.empty:
+        return []
+
+    dates = pd.DatetimeIndex(raw.index).tz_localize(None)
+    return sorted(pd.Timestamp(d).normalize() for d in dates.unique())
+
+
 def load_prices(
     ticker: str,
     start: str | None = None,

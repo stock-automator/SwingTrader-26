@@ -42,6 +42,42 @@ class TestComputeMetricsTradeStats:
         assert metrics["profit_factor"] == float("inf")
 
 
+class TestMaxRMultiple:
+    def test_none_without_required_columns(self):
+        trades_df = pd.DataFrame({"pnl": [10, -5]})
+        assert compute_metrics(trades_df)["max_r_multiple"] is None
+
+    def test_none_on_empty_trades(self):
+        assert compute_metrics(pd.DataFrame({"pnl": []}))["max_r_multiple"] is None
+
+    def test_picks_the_best_realised_r(self):
+        trades_df = pd.DataFrame(
+            {
+                "pnl": [100.0, 50.0, -20.0],
+                "EntryPrice": [100.0, 100.0, 100.0],
+                "ExitPrice": [106.0, 103.0, 98.0],
+                "SL": [98.0, 98.0, 100.0],
+            }
+        )
+        # Trade 1: R = (106-100)/(100-98) = 3.0
+        # Trade 2: R = (103-100)/(100-98) = 1.5
+        # Trade 3: R = (98-100)/(100-100) -> zero risk, excluded
+        metrics = compute_metrics(trades_df)
+        assert metrics["max_r_multiple"] == pytest.approx(3.0)
+
+    def test_ignores_rows_missing_required_values(self):
+        trades_df = pd.DataFrame(
+            {
+                "pnl": [100.0, 50.0],
+                "EntryPrice": [100.0, None],
+                "ExitPrice": [106.0, 103.0],
+                "SL": [98.0, 98.0],
+            }
+        )
+        metrics = compute_metrics(trades_df)
+        assert metrics["max_r_multiple"] == pytest.approx(3.0)
+
+
 class TestComputeMetricsEquityCurve:
     def test_missing_equity_curve_defaults(self):
         trades_df = pd.DataFrame({"pnl": [10, -5]})

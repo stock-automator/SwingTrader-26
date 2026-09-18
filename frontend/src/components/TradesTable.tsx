@@ -31,15 +31,22 @@ export function TradesTable({ trades }: TradesTableProps) {
         </thead>
         <tbody>
           {trades.map((t, i) => (
-            <tr key={i} className="border-b border-border-soft last:border-0 hover:bg-panel-alt">
+            <tr
+              key={i}
+              className="border-b border-border-soft last:border-0 hover:bg-panel-alt"
+            >
               <td className="px-3 py-2 font-semibold">{t.ticker}</td>
               <td className="px-3 py-2 text-text-dim">{t.entry_time}</td>
               <td className="px-3 py-2 text-text-dim">{t.exit_time}</td>
               <td className="px-3 py-2 text-right">{fmtNum(t.entry_price)}</td>
               <td className="px-3 py-2 text-right">{fmtNum(t.exit_price)}</td>
               <td className="px-3 py-2 text-right">{fmtNum(t.size)}</td>
-              <td className={`px-3 py-2 text-right ${signClass(t.pnl)}`}>{fmtCurrency(t.pnl, 2)}</td>
-              <td className={`px-3 py-2 text-right ${signClass(t.return_pct)}`}>{fmtPct(t.return_pct)}</td>
+              <td className={`px-3 py-2 text-right ${signClass(t.pnl)}`}>
+                {fmtCurrency(t.pnl, 2)}
+              </td>
+              <td className={`px-3 py-2 text-right ${signClass(t.return_pct)}`}>
+                {fmtPct(t.return_pct)}
+              </td>
             </tr>
           ))}
         </tbody>
