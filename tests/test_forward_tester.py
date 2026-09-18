@@ -7,18 +7,13 @@ stop-loss exit, take-profit exit, trade log, equity curve - independent of
 any real indicator logic (those are covered by the strategy-specific tests).
 """
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.core.risk import RiskManager
-from src.engine.forward_tester import ForwardTester
-from src.strategies.base_strategy import BaseStrategy
+from backend.app.quant.forward_tester import ForwardTester
+from backend.app.quant.risk import RiskManager
+from backend.app.quant.strategies.base import BaseStrategy
 
 ENTRY_SENTINEL_VOLUME = 42
 

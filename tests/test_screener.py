@@ -2,15 +2,10 @@
 Tests for the relative-strength screener.
 """
 
-import sys
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.core.screener import RelativeStrengthScreener, relative_strength
+from backend.app.quant.screener import RelativeStrengthScreener, relative_strength
 
 
 def _ohlc_from_closes(closes: list[float]) -> pd.DataFrame:

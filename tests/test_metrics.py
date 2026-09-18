@@ -2,15 +2,10 @@
 Tests for analytics/metrics.py
 """
 
-import sys
-from pathlib import Path
-
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.analytics.metrics import (
+from backend.app.quant.metrics import (
     compute_metrics,
     export_trades_csv,
     save_equity_curve_chart,

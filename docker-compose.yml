@@ -1,0 +1,32 @@
+# Runs the whole app on your own machine with Docker - no Python/Node setup
+# needed, just Docker Desktop (or Docker Engine + Compose).
+#
+#   docker compose up --build
+#
+# Then open http://localhost:8080 (frontend) - it talks to the backend at
+# http://localhost:8000 automatically. Stop with Ctrl+C, or `docker compose
+# down`. This is a convenient local "one command" run, not a production
+# deployment - see README.md > "Hosting it somewhere else" for that.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Uncomment and set your own key to enable Finnhub live quotes -
+      # everything works without it (yfinance fallback).
+      # - FINNHUB_API_KEY=
+      - ALLOW_DOWNLOADS=true
+      - CORS_ORIGINS=http://localhost:8080,http://localhost:5173
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

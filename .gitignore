@@ -2,8 +2,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
-results/
-data/
+/results/
+/data/
 *.log
 .DS_Store
 .vscode/

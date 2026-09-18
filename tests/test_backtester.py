@@ -2,18 +2,13 @@
 Tests for engine/backtester.py
 """
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.core.risk import RiskManager
-from src.engine.backtester import BacktestResult, run_backtest
-from src.strategies.moving_average_cross import MovingAverageCross
+from backend.app.quant.engine import BacktestResult, run_backtest
+from backend.app.quant.risk import RiskManager
+from backend.app.quant.strategies.moving_average_cross import MovingAverageCross
 
 
 @pytest.fixture

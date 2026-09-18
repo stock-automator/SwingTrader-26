@@ -1,6 +1,6 @@
 import pytest
 
-from src.analytics.console import format_metrics_table, render_table
+from backend.app.analytics.console import format_metrics_table, render_table
 
 
 class TestRenderTable:
