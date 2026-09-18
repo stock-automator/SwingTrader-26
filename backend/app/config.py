@@ -13,6 +13,16 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Loads a repo-root `.env` file into the process environment, if one exists,
+# before `get_settings()` reads from it - lets a beginner following the
+# README's "create a .env file" step just work, rather than needing to
+# `export` each variable in their shell. A real environment variable already
+# set always wins (`load_dotenv`'s default: it does not override existing
+# keys), so this is a convenience layer, not a second source of truth.
+load_dotenv()
+
 #: Default browser origins allowed to call the API - the Vite dev server.
 DEFAULT_CORS_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 

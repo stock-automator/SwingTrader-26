@@ -1,45 +1,227 @@
+<div align="center">
+
 # SwingTrader
 
-A quantitative swing/momentum trading research platform: a FastAPI backend
-runs systematic strategies through a shared risk engine and answers one
-question precisely — **if you'd put $1,000 into this strategy, what would
-you have now, versus buying and holding the same ticker, versus SPY?** — and
-a React terminal-style frontend surfaces that backtest plus a live setup
-screener over a stock watchlist.
+**A quantitative swing/momentum trading research platform.**
 
-This repo just went through a full-stack refactor: the original
-Streamlit/CLI research tool (`src/`) has been rebuilt as a proper `backend/`
-FastAPI service, with a new `frontend/` React + Vite + Tailwind +
-lightweight-charts app on top of it.
+Answers one question precisely: *if you put $1,000 into this strategy, what
+would you have now — versus buying and holding the same stock, versus the
+S&P 500?*
 
----
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)]()
+[![FastAPI](https://img.shields.io/badge/backend-FastAPI-009485)]()
+[![React](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB)]()
+[![Tests](https://img.shields.io/badge/tests-239%20passing-brightgreen)]()
 
-## What's here
+[What is this?](#what-is-this) •
+[Quickstart](#quickstart-for-first-time-users) •
+[Do I need an API key?](#do-i-need-an-api-key) •
+[Configuration](#configuration) •
+[Hosting](#hosting-it-somewhere-else) •
+[Docs](#learn-more)
 
-- **`backend/app/quant/`** — the strategy/risk/backtest engine. Strategies
-  emit direction + stop/target intent, `RiskManager` turns that into sized
-  orders, `quant/engine.py` replays them bar-by-bar, and
-  `quant/backtest.py` compares the resulting equity curve to buy-and-hold
-  and SPY on a shared $1,000 baseline. `quant/setups.py` runs the same
-  strategies live for the screener instead of over history.
-- **`backend/app/api/`** — the FastAPI routes (`/api/v1/backtest`,
-  `/api/v1/screener/live`, `/ws/screener`, `/api/v1/health`) that expose all
-  of the above to the frontend.
-- **`frontend/`** — a React + Vite + Tailwind terminal UI (lightweight-charts
-  for the equity curves), maintained separately.
-- **`docs/`** — architecture, API reference, and the benchmark math, in
-  depth. See below for the map.
-
-For the underlying engineering contracts — the exact strategy signal
-schema, how `RiskManager` resolves stop/target types, how to add a new
-strategy — see **[`AGENTS.md`](AGENTS.md)**. That document predates this
-refactor and still refers to the old `src/` paths; the same contracts now
-live under `backend/app/quant/`, `backend/app/data/`, `backend/app/journal/`
-and `backend/app/analytics/`. This README does not duplicate that material.
+</div>
 
 ---
 
-## Architecture at a glance
+## What is this?
+
+SwingTrader is two things working together:
+
+1. A **backend** (Python + FastAPI) that runs systematic trading strategies
+   through a shared risk engine, then answers "what would $1,000 have
+   turned into?" by comparing the strategy's results against **buying and
+   holding the stock** and against **the S&P 500 (SPY)** — same starting
+   dollar amount, same dates, so the comparison is fair.
+2. A **frontend** (React) — a dark, terminal-style web app with two screens:
+   a **Live Screener** that scans a watchlist for buy/sell setups, and a
+   **Backtesting Studio** where you pick a strategy, a ticker, and a date
+   range, and get back charts and numbers.
+
+You do not need to know how to trade, or write any code, to run this and
+click around it. The sections below assume you've never set up a project
+like this before.
+
+---
+
+## Quickstart (for first-time users)
+
+### What you need installed first
+
+| Tool | Version | Check you have it | Don't have it? |
+|---|---|---|---|
+| **Python** | 3.11 or 3.12 | `python3 --version` | [python.org/downloads](https://www.python.org/downloads/) |
+| **Node.js** | 20 or newer | `node --version` | [nodejs.org](https://nodejs.org/) (pick the "LTS" version) |
+| **Git** | any recent version | `git --version` | [git-scm.com](https://git-scm.com/downloads) |
+
+Run each `Check you have it` command in a terminal. If it prints a version
+number, you're set — if it says "command not found," install that tool
+first.
+
+> **Tip:** on macOS/Linux, "terminal" means the Terminal app. On Windows, use
+> PowerShell, or [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701).
+
+### Do I need an API key?
+
+**No.** SwingTrader works immediately with no signup and no API key —
+price data comes from Yahoo Finance (via the free `yfinance` library),
+which needs no account.
+
+There's exactly **one optional** upgrade: a free [Finnhub](https://finnhub.io/register)
+API key adds real-time quotes to the live screener. Skip it for now — you
+can always add it later. Everything in this guide works without it.
+
+### Step 1 — Get the code
+
+```bash
+git clone https://github.com/stock-automator/SwingTrader-26.git
+cd SwingTrader-26
+```
+
+(Already have it? `cd` into the folder you cloned it to instead.)
+
+### Step 2 — Start the backend
+
+A **virtual environment** keeps this project's Python packages separate
+from everything else on your computer — it's the standard, safe way to do
+this, not an extra hoop.
+
+```bash
+python3 -m venv venv              # create it (only needed once)
+source venv/bin/activate           # macOS/Linux
+# venv\Scripts\activate             # Windows (PowerShell/CMD instead)
+
+pip install -r requirements.txt    # install everything the backend needs
+uvicorn backend.app.main:app --reload
+```
+
+Leave this terminal window running. You should see something like:
+
+```
+INFO:     Uvicorn running on http://127.0.0.1:8000
+INFO:     Application startup complete.
+```
+
+That means the backend is live. Visit **http://localhost:8000/docs** in a
+browser — you should see an interactive API page. If you do, the backend
+works.
+
+### Step 3 — Start the frontend
+
+Open a **second** terminal window (leave the first one running) and:
+
+```bash
+cd SwingTrader-26/frontend   # from the repo root
+npm install                   # only needed the first time
+npm run dev
+```
+
+You'll see:
+
+```
+  VITE ready
+  ➜  Local:   http://localhost:5173/
+```
+
+### Step 4 — Open it
+
+Go to **http://localhost:5173** in your browser. You should land on the
+**Live Screener** tab with a "API online" indicator in the top right — that
+green dot means the frontend successfully reached the backend from Step 2.
+
+> **Nothing showing up on the screener?** That's normal on a totally fresh
+> checkout with no cached price data yet — the first scan has to fetch bars
+> from Yahoo Finance, which takes a few seconds per ticker. Give it a
+> minute, or try the Backtesting Studio next (below) with a well-known
+> ticker like `AAPL`, which fetches faster since it's a single symbol.
+
+### Try it: run your first backtest
+
+1. Click **Backtesting Studio** in the top nav.
+2. Leave **Strategy** as `Donchian 20-day Breakout` and **Tickers** as `AAPL`.
+3. Set **Initial Capital** to `1000` (it already defaults to this).
+4. Click **Run Backtest**.
+
+After a few seconds you'll see a headline like *"$1,000 grown to $1,138 vs
+$1,070 buying & holding AAPL"*, a chart comparing three lines (your
+strategy, buy & hold, and SPY), and a table of every trade the strategy
+would have made. That's the whole platform in one click.
+
+### Running the tests (optional, for the curious)
+
+```bash
+pip install -r requirements-test.txt
+pytest tests/ -v
+```
+
+You should see `239 passed`. This isn't required to use the app — it's how
+you'd confirm nothing is broken if you change any code.
+
+---
+
+## Configuration
+
+Everything below is **optional** — the app runs correctly with none of it
+set. To customize any of it, copy `.env.example` to a new file named `.env`
+in the repo root and edit the values there; the backend reads it
+automatically on startup.
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Default | What it does |
+|---|---|---|
+| `FINNHUB_API_KEY` | *(unset)* | Adds real-time quotes to the live screener. Get a free one at [finnhub.io/register](https://finnhub.io/register). Without it, the screener uses Yahoo Finance data instead — fully functional, just not tick-by-tick. |
+| `ALLOW_DOWNLOADS` | `true` | Whether the backend may fetch a ticker it doesn't have cached. Set to `false` to run fully offline against only what's already downloaded. |
+| `DATA_DIR` | `data/raw` | Folder where downloaded price data is cached, so repeat requests don't re-download. |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Which frontend URLs the backend will accept requests from. Only change this if you're hosting the frontend somewhere other than your own machine. |
+| `WATCHLIST_PATH` | `config/watchlist.txt` | The list of tickers the live screener scans (one per line — already comes with ~500 S&P 500-ish names). |
+| `SCREENER_MAX_TICKERS` | `60` | Caps how many tickers one screener scan checks, so a request can't hang for minutes. |
+| `WS_POLL_SECONDS` | `15` | How often the live screener pushes a fresh scan over its live connection. |
+| `MAX_BACKTEST_TICKERS` | `10` | Caps how many tickers one backtest request can run at once. |
+
+> **Never commit a real `.env` file.** It's already excluded via
+> `.gitignore` — only `.env.example` (with no real keys in it) is tracked.
+
+---
+
+## Hosting it somewhere else
+
+The instructions above run everything on your own laptop, which is the
+right starting point. If you want a "start it with one command" local setup
+instead of two separate terminals, or you're ready to put it somewhere
+other people can reach:
+
+### Option A — One command, still on your own machine (Docker)
+
+Install [Docker Desktop](https://www.docker.com/products/docker-desktop/),
+then from the repo root:
+
+```bash
+docker compose up --build
+```
+
+Open **http://localhost:8080**. This builds and runs both the backend and
+frontend in containers — no Python or Node setup needed at all. Stop it
+with `Ctrl+C`, or `docker compose down`.
+
+### Option B — A real deployment (cloud hosting)
+
+This repo's CI automatically builds a container image of the backend and
+one of the frontend on every push to `main` and publishes them to GitHub
+Container Registry (see `.github/workflows/deploy.yml`) — that's the
+artifact you'd hand to a hosting provider (a VPS, Fly.io, Render, AWS/GCP/
+Azure, etc.). There's no live, publicly-hosted instance of this app today;
+wiring one up means picking a host, pointing it at those published images,
+and setting `FINNHUB_API_KEY`/`CORS_ORIGINS` for that environment. That's a
+deliberate, separate decision this repo doesn't make for you — nothing here
+requires paid infrastructure to *use* it, only to make it reachable by
+someone other than you.
+
+---
+
+## Architecture, for the curious
 
 ```
 data/raw/*.parquet, yfinance  ──►  BaseStrategy.generate_signals
@@ -64,54 +246,19 @@ data/raw/*.parquet, yfinance  ──►  BaseStrategy.generate_signals
                                    frontend/ (React)
 ```
 
-See **[`docs/architecture.md`](docs/architecture.md)** for the full data-flow
-diagram, including where `/ws/screener` fits.
+See **[`docs/architecture.md`](docs/architecture.md)** for the full
+walkthrough, including where the live `/ws/screener` connection fits.
 
----
-
-## Quickstart
-
-### Backend
-
-```bash
-pip install -r requirements.txt
-uvicorn backend.app.main:app --reload
-```
-
-The API comes up on `http://localhost:8000`. Interactive docs (Swagger UI)
-are auto-generated at `http://localhost:8000/docs`.
-
-Relevant environment variables (see `backend/app/config.py`):
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `FINNHUB_API_KEY` | unset | Enables Finnhub real-time quotes on the live screener; unset falls back to yfinance-only |
-| `DATA_DIR` | `data/raw` | Parquet cache directory |
-| `ALLOW_DOWNLOADS` | `true` | Whether the API may hit a live data provider for an uncached ticker (off in CI) |
-| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API |
-| `WATCHLIST_PATH` | `config/watchlist.txt` | Newline-delimited ticker list the screener scans |
-| `SCREENER_MAX_TICKERS` | `60` | Hard cap on tickers scanned per screener call |
-| `WS_POLL_SECONDS` | `15.0` | Interval between `/ws/screener` pushes |
-| `MAX_BACKTEST_TICKERS` | `10` | Cap on tickers per backtest request |
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Comes up on `http://localhost:5173` and talks to the backend at
-`http://localhost:8000`.
-
-### Tests
-
-```bash
-pytest tests/ -v
-```
-
----
+A strategy only looks at price history and returns direction + relative
+stop/target sizing; `RiskManager` is the only thing that knows about account
+equity and converts that into shares and absolute prices; the engines
+(`quant/engine.py` for full-history replay, `quant/setups.py` for the live
+screener) are the only things that simulate execution. This separation, the
+exact strategy output schema, and the steps for adding a new strategy are
+documented in **[`AGENTS.md`](AGENTS.md)** — note that document predates this
+refactor and still refers to the code's old `src/` location; the same
+contracts now live under `backend/app/quant/`, `backend/app/data/`,
+`backend/app/journal/` and `backend/app/analytics/`.
 
 ## The API, briefly
 
@@ -131,28 +278,13 @@ Full reference with request/response shapes and curl examples:
 - **`GET /api/v1/health`** — liveness + which optional data providers are
   configured.
 
----
-
-## Strategies, risk, and backtesting
-
-A strategy only looks at price history and returns direction + relative
-stop/target sizing; `RiskManager` is the only thing that knows about account
-equity and converts that into shares and absolute prices; the engines
-(`quant/engine.py` for full-history replay, `quant/setups.py` for the live
-screener) are the only things that simulate execution. This separation, the
-exact strategy output schema, and the steps for adding a new strategy are
-documented in **[`AGENTS.md`](AGENTS.md)** — read that before writing a new
-strategy, this README won't repeat it.
-
----
-
 ## Project layout
 
 ```text
 backend/
   app/
     main.py              FastAPI app, CORS, health check
-    config.py             Environment-driven Settings
+    config.py             Environment-driven Settings (.env aware)
     api/                  Routes: backtest.py, screener.py, schemas.py, deps.py
     quant/                Strategy engine: strategies/, engine.py, risk.py,
                            regime.py, indicators.py, setups.py, screener.py,
@@ -166,17 +298,25 @@ docs/
   architecture.md          Data-flow diagram, backend/frontend separation
   api.md                   Full endpoint reference
   benchmark_math.md         Alpha/beta/Sharpe/information-ratio, explained
+  code_review.md            Multi-persona review of this codebase
   media/                    Demo video recordings
 scripts/
   generate_demo_videos.py  Playwright walkthrough recorder
 tests/                     pytest suite, one file per backend/app module
 config/
   watchlist.txt             Ticker universe the screener scans
-data/raw/                  Cached OHLCV parquet files (gitignored)
+data/raw/                  Cached OHLCV parquet files
+docker-compose.yml          One-command local run via Docker
 AGENTS.md                  Engineering contract for strategies/risk/engines
 ```
 
----
+## Learn more
+
+- **[`docs/architecture.md`](docs/architecture.md)** — full data-flow diagram
+- **[`docs/api.md`](docs/api.md)** — every endpoint, request/response shapes, curl examples
+- **[`docs/benchmark_math.md`](docs/benchmark_math.md)** — exactly how alpha/beta/Sharpe are computed
+- **[`docs/code_review.md`](docs/code_review.md)** — a multi-persona review of this codebase
+- **[`AGENTS.md`](AGENTS.md)** — the engineering contract for strategies, risk sizing, and the backtest/screener engines
 
 ## Status
 
