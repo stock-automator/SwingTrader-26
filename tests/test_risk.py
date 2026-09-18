@@ -2,14 +2,9 @@
 Tests for RiskManager: SL/TP resolution and position sizing.
 """
 
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.core.risk import RiskManager
+from backend.app.quant.risk import RiskManager
 
 
 @pytest.fixture

@@ -2,16 +2,11 @@
 Tests for RegimeDetector: ADX/+DI/-DI-based regime classification.
 """
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.core.regime import (
+from backend.app.quant.regime import (
     REGIME_BEAR_TREND,
     REGIME_BULL_TREND,
     REGIME_CHOPPY,
@@ -86,7 +81,7 @@ class TestComputeIndicators:
         true_range = pd.concat(
             [high - low, (high - prev_close).abs(), (low - prev_close).abs()],
             axis=1,
-        ).max(axis=1)
+        ).max(axis=1, skipna=False)
         expected = true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
 
         pd.testing.assert_series_equal(
@@ -110,20 +105,22 @@ class TestComputeIndicators:
         true_range = pd.concat(
             [high - low, (high - prev_close).abs(), (low - prev_close).abs()],
             axis=1,
-        ).max(axis=1)
+        ).max(axis=1, skipna=False)
 
         expected = true_range.ewm(alpha=1 / 30, adjust=False, min_periods=30).mean()
         pd.testing.assert_series_equal(
             out["atr"], expected, check_names=False, rtol=1e-12
         )
 
-        # Warm-up follows atr_period, not adx_period. min_periods=30 makes
-        # bar 29 the first defined ATR; ADX is defined by bar 26 (double
-        # Wilder smoothing over 14 bars, so ~2x the period, not 14), which
-        # leaves bars 26-28 with an ADX but no ATR. Were the ATR smoothed on
+        # Warm-up follows atr_period, not adx_period. True range is NaN on
+        # the series' first bar (no previous close), so min_periods=30 needs
+        # 30 valid true-range observations starting at bar 1 - bar 30 is the
+        # first defined ATR. ADX is defined by bar 27 (double Wilder
+        # smoothing over 14 bars, so ~2x the period, not 14), which leaves
+        # bars 27-29 with an ADX but no ATR. Were the ATR smoothed on
         # adx_period it would already be defined there.
-        assert out["atr"].iloc[:29].isna().all()
-        assert pd.notna(out["atr"].iloc[29])
+        assert out["atr"].iloc[:30].isna().all()
+        assert pd.notna(out["atr"].iloc[30])
         assert pd.notna(out["adx"].iloc[27]) and pd.isna(out["atr"].iloc[27])
 
         wrong_period = true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()

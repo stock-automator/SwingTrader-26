@@ -5,17 +5,12 @@ This file is the template referenced by AGENTS.md for testing a new
 BaseStrategy subclass - copy its structure when adding a strategy.
 """
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.moving_average_cross import MovingAverageCross
+from backend.app.quant.strategies.base import BaseStrategy
+from backend.app.quant.strategies.moving_average_cross import MovingAverageCross
 
 
 @pytest.fixture

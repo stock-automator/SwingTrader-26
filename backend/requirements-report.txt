@@ -1,0 +1,5 @@
+-r ../requirements.txt
+
+# Optional: quantstats HTML tear-sheets (backend/app/quant/backtest.py::save_tearsheet).
+# Not required by the API itself - pulls in a large plotting/reporting stack.
+quantstats>=0.0.62

@@ -2,17 +2,12 @@
 Tests for Donchian Breakout Strategy
 """
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.strategies.base_strategy import BaseStrategy
-from src.strategies.donchian_breakout import DonchianBreakout
+from backend.app.quant.strategies.base import BaseStrategy
+from backend.app.quant.strategies.donchian_breakout import DonchianBreakout
 
 
 @pytest.fixture

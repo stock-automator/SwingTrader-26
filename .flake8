@@ -12,8 +12,3 @@ extend-exclude =
     htmlcov,
     build,
     dist
-
-per-file-ignores =
-    # Every test module prepends the repo root to sys.path before importing
-    # from src/, so its imports are intentionally not at the top of the file.
-    tests/*: E402

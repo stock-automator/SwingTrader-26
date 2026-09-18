@@ -5,17 +5,13 @@ The Ollama HTTP call is mocked throughout - these tests never require a
 live Ollama server.
 """
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 import requests
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from src.analytics.llm_reporter import (
+from backend.app.analytics.llm_reporter import (
     LLMReporter,
     _extract_drawdown_periods,
     _max_consecutive_losses,
@@ -44,7 +40,7 @@ class TestConstruction:
 
 
 class TestGenerateReportOllama:
-    @patch("src.analytics.llm_reporter.requests.post")
+    @patch("backend.app.analytics.llm_reporter.requests.post")
     def test_successful_call_returns_response_text(
         self, mock_post, sample_metrics, sample_trades
     ):
@@ -61,7 +57,7 @@ class TestGenerateReportOllama:
         assert "sharpe_ratio" in sent_prompt
         assert "1.2" in sent_prompt
 
-    @patch("src.analytics.llm_reporter.requests.post")
+    @patch("backend.app.analytics.llm_reporter.requests.post")
     def test_connection_error_returns_friendly_message(
         self, mock_post, sample_metrics, sample_trades
     ):
@@ -72,7 +68,7 @@ class TestGenerateReportOllama:
 
         assert "unavailable" in report.lower()
 
-    @patch("src.analytics.llm_reporter.requests.post")
+    @patch("backend.app.analytics.llm_reporter.requests.post")
     def test_non_200_status_returns_friendly_message(
         self, mock_post, sample_metrics, sample_trades
     ):
@@ -83,7 +79,7 @@ class TestGenerateReportOllama:
 
         assert "unavailable" in report.lower()
 
-    @patch("src.analytics.llm_reporter.requests.post")
+    @patch("backend.app.analytics.llm_reporter.requests.post")
     def test_includes_drawdown_periods_in_prompt(
         self, mock_post, sample_metrics, sample_trades
     ):
