@@ -189,6 +189,9 @@ cp .env.example .env
 | `DISCORD_WEBHOOK_URL` | *(unset)* | Discord alert channel (incoming webhook). |
 | `GENERIC_WEBHOOK_URL` | *(unset)* | Generic HTTP alert channel — setups are POSTed here as flat JSON. |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | *(unset)* | Alpaca **paper-trading** credentials for `/api/v1/execution/*`. The SDK always points at Alpaca's paper endpoint regardless of these values — there is no setting that makes this platform place live orders. |
+| `FMP_API_KEY` | *(unset)* | Financial Modeling Prep key, third-tier fallback in `quant/data/provider_fallback.py`. Unset means that tier is skipped, not attempted. |
+| `ALPHA_VANTAGE_API_KEY` | *(unset)* | Alpha Vantage key, fourth-tier fallback. |
+| `POLYGON_API_KEY` | *(unset)* | Polygon.io key, fifth-tier fallback. |
 
 > **Never commit a real `.env` file.** It's already excluded via
 > `.gitignore` — only `.env.example` (with no real keys in it) is tracked.
@@ -269,6 +272,59 @@ refactor and still refers to the code's old `src/` location; the same
 contracts now live under `backend/app/quant/`, `backend/app/data/`,
 `backend/app/journal/` and `backend/app/analytics/`.
 
+### Portfolio Manager & Signal Ranker
+
+`RiskManager` (above) sizes and gates *one* trade at a time; it has no view
+of what else is already in the book. `quant/risk/ranker.py` and
+`quant/risk/portfolio_manager.py` sit one layer above it, turning a *batch*
+of candidate signals - e.g. everything the Signal Matrix surfaced today,
+across every strategy - into a portfolio-aware allocation:
+
+```
+CandidateSignal[] ──► SignalRanker.rank()  (0.4·WFE + 0.3·Sharpe + 0.3·regime, deterministic tie-break)
+                              │
+                              ▼
+                     RankedSignal[] (best first)
+                              │
+                              ▼
+             PortfolioManager.build_allocation()
+       ATR volatility-parity sizing, walked in rank order,
+       trimmed against two hard caps: 3% total portfolio
+       heat (risk-at-stop) and 20% notional per sector
+                              │
+                              ▼
+                    AllocationManifest
+        (every candidate kept, incl. rejected ones + why)
+```
+
+The allocator is intentionally simple: a *greedy, rank-ordered* walk, not a
+global optimizer - the best-ranked candidate gets first claim on both
+budgets, and a lower-ranked one only gets what's left (it will not bump a
+higher-ranked candidate to make room). A rejected or trimmed candidate stays
+in the output manifest with its reason, rather than silently disappearing,
+so a caller/UI can show *why* a promising setup didn't make the cut. This
+sprint ships the module and its test suite only - it isn't wired to an API
+route yet (see the Status section).
+
+### Multi-Provider Data Fallback Cascade
+
+`quant/data/provider_fallback.py` extends `data/loader.py`'s existing
+cache-then-yfinance resolution with three more tiers, each skipped entirely
+(not attempted) if its API key isn't configured:
+
+```
+Parquet cache ──► yfinance ──► Financial Modeling Prep ──► Alpha Vantage ──► Polygon.io
+```
+
+Every remote tier gets exponential-backoff retries on a detected rate limit
+(HTTP 429, or - Alpha Vantage's free tier being what it is - a `"Note"`/
+`"Information"` throttle message embedded in an otherwise-200 response
+body) before falling through to the next tier. This exists to keep a full
+watchlist scan from stalling on a free-tier rate limit alone; it's a
+standalone orchestrator for now, not yet wired into the production
+`load_frames`/`load_prices` call path the live screener actually uses (see
+Status).
+
 ## The API, briefly
 
 Full reference with request/response shapes and curl examples:
@@ -322,9 +378,15 @@ backend/
                            replay.py, alerts.py, execution.py, journal.py,
                            data_sync.py, schemas.py, deps.py
     quant/                Strategy engine: strategies/ (10 registered),
-                           engine.py, risk.py, regime.py, indicators.py,
-                           setups.py, screener.py, backtest.py (the $1,000
-                           benchmark), metrics.py
+                           engine.py, regime.py, indicators.py, setups.py,
+                           screener.py, backtest.py (the $1,000 benchmark),
+                           metrics.py
+      risk/                RiskManager/CircuitBreaker (manager.py),
+                           SignalRanker (ranker.py), PortfolioManager
+                           (portfolio_manager.py)
+      data/                Parquet cache (parquet_manager.py),
+                           provider_fallback.py (cache→yfinance→FMP→
+                           Alpha Vantage→Polygon cascade)
     alerts/                Telegram/Discord/webhook dispatch (dispatcher.py)
     execution/             Alpaca paper-trading client wrapper
     data/                 Price loading/caching (loader.py, agent.py)
@@ -343,7 +405,11 @@ docs/
   media/                    Demo video recordings
 scripts/
   generate_demo_videos.py  Playwright walkthrough recorder
-tests/                     pytest suite, one file per backend/app module
+  update_watchlist.py      Monthly S&P 500/Nasdaq-100 sync (see
+                           .github/workflows/watchlist_sync.yml)
+tests/                     pytest suite - one file per backend/app module,
+                           plus risk/ and data/ subpackages for the newer
+                           portfolio/ranker and data-fallback/watchlist tests
 config/
   watchlist.txt             Ticker universe the screener scans
 data/raw/                  Cached OHLCV parquet files
@@ -389,14 +455,27 @@ evidence for further investigation, not proof of anything.
    (`zscore_mean_reversion`, Hurst-filtered), momentum
    (`supertrend_psar`, `dual_momentum`), and market-structure
    (`obv_divergence`) coverage.
-5. **This round** — cross-strategy signal matrix, point-in-time historical
-   replay (zero lookahead by construction), trade execution simulation,
-   multichannel alerts (Telegram/Discord/generic webhook), Alpaca
-   paper-trading order placement + emergency close-all, trade-journal decay
-   analytics (MAE/MFE, 30/60/90-day win-rate/expectancy windows), and the
-   matching frontend surface: a real-time data-sync banner, the Signal
-   Matrix grid (sortable/filterable, one-click paper-trade action), toast
+5. Cross-strategy signal matrix, point-in-time historical replay (zero
+   lookahead by construction), trade execution simulation, multichannel
+   alerts (Telegram/Discord/generic webhook), Alpaca paper-trading order
+   placement + emergency close-all, trade-journal decay analytics (MAE/MFE,
+   30/60/90-day win-rate/expectancy windows), and the matching frontend
+   surface: a real-time data-sync banner, the Signal Matrix grid
+   (sortable/filterable, one-click paper-trade action), toast
    notifications, and animated tab transitions.
+6. **Sprint 1 (this round)** — a portfolio-level overlay above per-trade
+   risk: `SignalRanker` scores a batch of candidate signals with a
+   deterministic composite score (0.4·WFE + 0.3·Sharpe + 0.3·regime-fit,
+   with an explicit tie-break chain so re-ranking the same input always
+   produces the same order), and `PortfolioManager` sizes them via ATR
+   volatility parity and trims/rejects in rank order against a 3%
+   portfolio-heat cap and a 20%-per-sector concentration cap - rejected
+   candidates stay in the output with a reason rather than disappearing.
+   Also: a five-tier data fallback cascade (Parquet → yfinance → FMP →
+   Alpha Vantage → Polygon.io) with rate-limit-aware exponential backoff,
+   and a monthly S&P 500/Nasdaq-100 watchlist sync script + scheduled
+   GitHub Action that opens a PR (never pushes straight to `main`) so a
+   human reviews what the live screener scans before it changes.
 
 **Deliberately not done yet** (so the next session doesn't have to rediscover
 this by reading code):
@@ -417,3 +496,13 @@ this by reading code):
   strategy library expansion — they need a multi-symbol architecture and new
   data sources (COT reports, yield curves) beyond the current single-ticker
   `BaseStrategy` interface and Parquet/yfinance pipeline.
+- `PortfolioManager`/`SignalRanker` aren't wired to an API route yet — the
+  Signal Matrix's response doesn't currently carry the `wfe`/`sharpe`/
+  `regime_score`/`sector` fields a real caller would need to feed them.
+- `provider_fallback.py`'s cascade isn't wired into the production data
+  path (`api/deps.py`'s `load_frames`/`data/loader.py`'s `load_prices`) —
+  it's a standalone, fully-tested module; rewiring the live path to use it
+  is a separate, larger decision.
+- The watchlist sync script targets `config/watchlist.txt`, not the
+  originally-specified `data/watchlist.txt` — nothing in this codebase
+  reads the latter path; see the script's own docstring for why.

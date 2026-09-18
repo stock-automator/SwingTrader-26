@@ -1,0 +1,54 @@
+name: Watchlist Sync
+
+# Monthly S&P 500 / Nasdaq-100 refresh of config/watchlist.txt
+# (scripts/update_watchlist.py). Deliberately does NOT push straight to
+# main - a fully automated job silently rewriting the live trading
+# watchlist with no human review is exactly the kind of change that should
+# get a look first. It opens a PR instead (via peter-evans/create-pull-
+# request, which is itself a no-op if the script didn't actually change
+# the file), for a human to merge.
+
+on:
+  schedule:
+    - cron: "0 0 1 * *" # 00:00 UTC on the 1st of every month
+  workflow_dispatch: {} # manual trigger, for testing this workflow itself
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run watchlist sync
+        run: python scripts/update_watchlist.py
+
+      - name: Open a PR if the watchlist changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: monthly watchlist sync"
+          title: "chore: monthly watchlist sync"
+          body: |
+            Automated S&P 500 / Nasdaq-100 constituent refresh via
+            `scripts/update_watchlist.py`, run on schedule by
+            `.github/workflows/watchlist_sync.yml`.
+
+            Review the diff on `config/watchlist.txt` before merging - this
+            changes what the live screener scans.
+          branch: automated/watchlist-sync-${{ github.run_id }}
+          add-paths: config/watchlist.txt
+          delete-branch: true
