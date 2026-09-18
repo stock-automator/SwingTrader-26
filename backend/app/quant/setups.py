@@ -43,6 +43,95 @@ DIRECTION_FLAT = "FLAT"
 #: window) with room for the ADX/ATR warm-up on top.
 MIN_BARS = 100
 
+#: Trailing bars `_check_liquidity`'s average-volume floor is measured over.
+DEFAULT_VOLUME_LOOKBACK = 20
+
+#: Minimum trailing average volume (shares/day) for a ticker to be scanned
+#: at all - below this a setup isn't tradable at any real position size, so
+#: there's no point running the strategy over it.
+DEFAULT_MIN_AVG_VOLUME = 100_000.0
+
+
+class ScanSkipError(ValueError):
+    """Base for `scan_ticker` skip reasons `scan_universe` categorizes.
+
+    Subclasses `ValueError` so a caller catching the older, coarser
+    `(ValueError, KeyError)` pair still catches these - only `scan_universe`
+    itself needs the finer-grained `reason` to sort skips into
+    `ScanReport.skip_reasons` buckets a UI can render distinctly (a stale
+    cache is an ops problem; insufficient history is just a new listing).
+    """
+
+    reason: str = "UNKNOWN"
+
+
+class InsufficientHistoryError(ScanSkipError):
+    reason = "INSUFFICIENT_HISTORY"
+
+
+class DataStaleError(ScanSkipError):
+    reason = "DATA_STALE"
+
+
+class VolumeFilterFailedError(ScanSkipError):
+    reason = "VOLUME_FILTER_FAILED"
+
+
+class ZeroLiquidityError(ScanSkipError):
+    reason = "ZERO_LIQUIDITY"
+
+
+def _check_liquidity(
+    ticker: str,
+    df: pd.DataFrame,
+    min_avg_volume: float | None,
+    volume_lookback: int,
+) -> None:
+    """Raise `ZeroLiquidityError`/`VolumeFilterFailedError` for an
+    unscoreable-by-liquidity ticker; otherwise return.
+
+    Args:
+        min_avg_volume: `None` disables the average-volume floor entirely
+            (the zero-volume check still applies - that's never tradable).
+    """
+    latest_volume = float(df["Volume"].iloc[-1])
+    if not math.isfinite(latest_volume) or latest_volume <= 0:
+        raise ZeroLiquidityError(f"{ticker}: zero volume on the latest bar")
+
+    if min_avg_volume is None:
+        return
+
+    lookback = min(volume_lookback, len(df))
+    avg_volume = float(df["Volume"].iloc[-lookback:].mean())
+    if not math.isfinite(avg_volume) or avg_volume < min_avg_volume:
+        raise VolumeFilterFailedError(
+            f"{ticker}: {avg_volume:,.0f}-share average volume over the "
+            f"trailing {lookback} bars is below the {min_avg_volume:,.0f} "
+            "liquidity floor"
+        )
+
+
+def _check_staleness(
+    ticker: str,
+    df: pd.DataFrame,
+    stale_after_days: int | None,
+    as_of_reference: pd.Timestamp | None,
+) -> None:
+    """Raise `DataStaleError` if `df`'s last bar is older than
+    `stale_after_days`. A no-op when `stale_after_days` is `None`."""
+    if stale_after_days is None:
+        return
+
+    reference = as_of_reference or pd.Timestamp.now().normalize()
+    last_bar_date = pd.Timestamp(df.index[-1]).normalize()
+    age_days = (reference - last_bar_date).days
+    if age_days > stale_after_days:
+        raise DataStaleError(
+            f"{ticker}: last bar is {age_days} days old (as of "
+            f"{reference.date()}), exceeds the {stale_after_days}-day "
+            "staleness limit"
+        )
+
 
 @dataclass(frozen=True)
 class Setup:
@@ -106,6 +195,10 @@ def scan_ticker(
     regime_detector: RegimeDetector | None = None,
     catalyst_filter: CatalystFilter | None = None,
     earnings_dates: list[pd.Timestamp] | None = None,
+    min_avg_volume: float | None = DEFAULT_MIN_AVG_VOLUME,
+    volume_lookback: int = DEFAULT_VOLUME_LOOKBACK,
+    stale_after_days: int | None = None,
+    as_of_reference: pd.Timestamp | None = None,
 ) -> Setup:
     """Resolve `ticker`'s latest bar into a `Setup`.
 
@@ -118,14 +211,33 @@ def scan_ticker(
             get the same behavior as before this filter existed.
         earnings_dates: The ticker's known/estimated earnings report dates.
             Ignored if `catalyst_filter` is `None`.
+        min_avg_volume: Minimum trailing average volume for the ticker to be
+            scanned at all; `None` disables the floor (the zero-volume check
+            still applies).
+        volume_lookback: Trailing bar count `min_avg_volume` is averaged over.
+        stale_after_days: Skip the ticker if its last bar is older than this
+            many days. `None` (the default) disables the check.
+        as_of_reference: Reference "today" the staleness check measures bar
+            age against. Defaults to `pd.Timestamp.now()` - tests that
+            exercise `stale_after_days` should pass this explicitly rather
+            than depend on wall-clock time.
 
     Raises:
-        ValueError: if `df` has fewer than `MIN_BARS` rows, or the strategy
-            emits a signal the risk manager cannot size. Callers scanning a
-            heterogeneous universe should catch this - `scan_universe` does.
+        InsufficientHistoryError: if `df` has fewer than `MIN_BARS` rows.
+        ZeroLiquidityError: if the latest bar's volume is zero/non-finite.
+        VolumeFilterFailedError: if trailing average volume is below
+            `min_avg_volume`.
+        DataStaleError: if the last bar is older than `stale_after_days`.
+        ValueError: if the strategy emits a signal the risk manager cannot
+            size. Callers scanning a heterogeneous universe should catch all
+            of the above - `scan_universe` does.
     """
     if len(df) < MIN_BARS:
-        raise ValueError(f"{ticker}: {len(df)} bars, need at least {MIN_BARS}")
+        raise InsufficientHistoryError(
+            f"{ticker}: {len(df)} bars, need at least {MIN_BARS}"
+        )
+    _check_liquidity(ticker, df, min_avg_volume, volume_lookback)
+    _check_staleness(ticker, df, stale_after_days, as_of_reference)
 
     detector = regime_detector or RegimeDetector()
     signals = strategy.generate_signals(df)
@@ -258,6 +370,10 @@ def scan_universe(
     include_flat: bool = False,
     catalyst_filter: CatalystFilter | None = None,
     earnings_by_ticker: dict[str, list[pd.Timestamp]] | None = None,
+    min_avg_volume: float | None = DEFAULT_MIN_AVG_VOLUME,
+    volume_lookback: int = DEFAULT_VOLUME_LOOKBACK,
+    stale_after_days: int | None = None,
+    as_of_reference: pd.Timestamp | None = None,
 ) -> ScanReport:
     """Scan every ticker in `frames`, tolerating per-ticker failures.
 
@@ -269,6 +385,12 @@ def scan_universe(
         earnings_by_ticker: `{ticker: [earnings dates]}`. A ticker missing
             from this map is scanned with no earnings dates, i.e. never
             blocked - the same as an unscoreable/uncovered symbol.
+        min_avg_volume: Forwarded to `scan_ticker`; `None` disables the
+            liquidity floor.
+        volume_lookback: Forwarded to `scan_ticker`.
+        stale_after_days: Forwarded to `scan_ticker`; `None` disables the
+            staleness check.
+        as_of_reference: Forwarded to `scan_ticker`.
     """
     detector = regime_detector or RegimeDetector()
     earnings_by_ticker = earnings_by_ticker or {}
@@ -284,7 +406,15 @@ def scan_universe(
                 detector,
                 catalyst_filter=catalyst_filter,
                 earnings_dates=earnings_by_ticker.get(ticker),
+                min_avg_volume=min_avg_volume,
+                volume_lookback=volume_lookback,
+                stale_after_days=stale_after_days,
+                as_of_reference=as_of_reference,
             )
+        except ScanSkipError as exc:
+            report.skipped += 1
+            report.skip_reasons[exc.reason] += 1
+            continue
         except (ValueError, KeyError) as exc:
             report.skipped += 1
             report.skip_reasons[type(exc).__name__] += 1

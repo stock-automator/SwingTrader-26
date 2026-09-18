@@ -3,10 +3,16 @@
 it becomes available to the API, the screener and the demo script at once."""
 
 from .base import BaseStrategy
+from .bollinger_keltner_squeeze import BollingerKeltnerSqueezeStrategy
 from .donchian_breakout import DonchianBreakout
+from .dual_momentum import DualMomentumStrategy
+from .kama_trend import KAMATrendStrategy
 from .moving_average_cross import MovingAverageCross
+from .obv_divergence import OBVDivergenceStrategy
 from .relative_strength import RelativeStrengthStrategy
+from .supertrend_psar import SupertrendPSARStrategy
 from .vcp_breakout import VCPBreakoutStrategy
+from .zscore_mean_reversion import ZScoreMeanReversionStrategy
 
 #: Wire-format strategy id -> class. Keys are what `/api/v1/backtest`
 #: accepts in its `strategy` field.
@@ -15,12 +21,18 @@ REGISTRY: dict[str, type[BaseStrategy]] = {
     "moving_average_cross": MovingAverageCross,
     "vcp_breakout": VCPBreakoutStrategy,
     "relative_strength": RelativeStrengthStrategy,
+    "bollinger_keltner_squeeze": BollingerKeltnerSqueezeStrategy,
+    "kama_trend": KAMATrendStrategy,
+    "zscore_mean_reversion": ZScoreMeanReversionStrategy,
+    "supertrend_psar": SupertrendPSARStrategy,
+    "obv_divergence": OBVDivergenceStrategy,
+    "dual_momentum": DualMomentumStrategy,
 }
 
 #: Strategy ids that require a benchmark frame wired in via `set_benchmark`
 #: before `generate_signals` can run - `build_strategy`'s generic,
 #: JSON-params-only instantiation has no way to supply one itself.
-REQUIRES_BENCHMARK: frozenset[str] = frozenset({"relative_strength"})
+REQUIRES_BENCHMARK: frozenset[str] = frozenset({"relative_strength", "dual_momentum"})
 
 
 def build_strategy(name: str, params: dict | None = None) -> BaseStrategy:
@@ -48,10 +60,16 @@ def build_strategy(name: str, params: dict | None = None) -> BaseStrategy:
 
 __all__ = [
     "BaseStrategy",
+    "BollingerKeltnerSqueezeStrategy",
     "DonchianBreakout",
+    "DualMomentumStrategy",
+    "KAMATrendStrategy",
     "MovingAverageCross",
+    "OBVDivergenceStrategy",
     "RelativeStrengthStrategy",
+    "SupertrendPSARStrategy",
     "VCPBreakoutStrategy",
+    "ZScoreMeanReversionStrategy",
     "REGISTRY",
     "REQUIRES_BENCHMARK",
     "build_strategy",

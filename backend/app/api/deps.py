@@ -9,6 +9,8 @@ do we do when one is unavailable" rather than drifting apart.
 from __future__ import annotations
 
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 
@@ -17,6 +19,51 @@ from ..data.loader import DataUnavailableError, load_prices
 
 log = logging.getLogger(__name__)
 
+#: Fetch attempts per ticker before giving up. Only retried when a download
+#: was actually attempted - a pure cache miss will not change between
+#: attempts, so retrying it just delays the response for free.
+RETRY_ATTEMPTS = 3
+
+#: Base delay before the first retry; doubled on each subsequent attempt
+#: (0.5s, 1s) - long enough to ride out a transient provider rate limit,
+#: short enough that three failed tickers don't noticeably slow a scan.
+RETRY_BACKOFF_SECONDS = 0.5
+
+
+def _load_one(
+    ticker: str,
+    settings: Settings,
+    start: str | None,
+    end: str | None,
+) -> tuple[str, pd.DataFrame | None, Exception | None]:
+    """Load one ticker's bars, retrying transient failures with backoff.
+
+    Runs on a worker thread (see `load_frames`) - safe because `load_prices`
+    only reads a parquet file or makes an independent HTTP call, with no
+    shared mutable state.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(RETRY_ATTEMPTS):
+        try:
+            df = load_prices(
+                ticker,
+                start=start,
+                end=end,
+                data_dir=settings.data_dir,
+                allow_download=settings.allow_downloads,
+            )
+            return ticker, df, None
+        except DataUnavailableError as exc:
+            last_exc = exc
+            # Downloads off means every failure is a cache miss, which is
+            # deterministic - retrying it would just burn the backoff delay
+            # for the same answer three times.
+            if not settings.allow_downloads or attempt == RETRY_ATTEMPTS - 1:
+                break
+            time.sleep(RETRY_BACKOFF_SECONDS * (2**attempt))
+
+    return ticker, None, last_exc
+
 
 def load_frames(
     tickers: list[str],
@@ -24,7 +71,16 @@ def load_frames(
     start: str | None = None,
     end: str | None = None,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
-    """Load OHLCV bars for each ticker, tolerating per-ticker failures.
+    """Load OHLCV bars for each ticker concurrently, tolerating per-ticker
+    failures.
+
+    Tickers are fetched from a bounded thread pool
+    (`settings.screener_max_workers` workers) rather than one at a time -
+    serially fetching a several-hundred-name watchlist is what previously
+    made a full scan slow enough to look like it was skipping symbols. The
+    pool size doubles as the de facto rate limit against the underlying data
+    provider. Each ticker gets up to `RETRY_ATTEMPTS` tries with exponential
+    backoff before it's reported as unavailable.
 
     Returns:
         `(frames, warnings)` - `frames` has one entry per ticker that
@@ -34,20 +90,37 @@ def load_frames(
     frames: dict[str, pd.DataFrame] = {}
     warnings: list[str] = []
 
-    for ticker in tickers:
-        try:
-            frames[ticker] = load_prices(
-                ticker,
-                start=start,
-                end=end,
-                data_dir=settings.data_dir,
-                allow_download=settings.allow_downloads,
-            )
-        except DataUnavailableError as exc:
-            log.warning("skipping %s: %s", ticker, exc)
-            warnings.append(str(exc))
+    if not tickers:
+        return frames, warnings
+
+    workers = max(1, min(settings.screener_max_workers, len(tickers)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(_load_one, ticker, settings, start, end) for ticker in tickers
+        ]
+        for future in as_completed(futures):
+            ticker, df, exc = future.result()
+            if exc is not None:
+                log.warning("skipping %s: %s", ticker, exc)
+                warnings.append(str(exc))
+            else:
+                frames[ticker] = df
 
     return frames, warnings
+
+
+def _read_watchlist(settings: Settings) -> list[str]:
+    """Every ticker in `settings.watchlist_path`, one per line, uncapped.
+    Empty if the file doesn't exist."""
+    path = settings.watchlist_path
+    if not path.exists():
+        return []
+
+    return [
+        line.strip().upper()
+        for line in path.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
 
 def load_watchlist(settings: Settings) -> list[str]:
@@ -56,17 +129,21 @@ def load_watchlist(settings: Settings) -> list[str]:
 
     Returns an empty list if the file doesn't exist rather than raising -
     the screener endpoint reports that as an empty result set, not a 500.
+    Use `watchlist_overflow` alongside this to detect (and report) silent
+    truncation against the cap.
     """
-    path = settings.watchlist_path
-    if not path.exists():
-        return []
-
-    tickers = [
-        line.strip().upper()
-        for line in path.read_text().splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
-    return tickers[: settings.screener_max_tickers]
+    return _read_watchlist(settings)[: settings.screener_max_tickers]
 
 
-__all__ = ["load_frames", "load_watchlist", "get_settings"]
+def watchlist_overflow(settings: Settings) -> int:
+    """How many tickers `load_watchlist` silently drops off the end of
+    `settings.watchlist_path` for exceeding `screener_max_tickers`.
+
+    `0` if the file fits under the cap or doesn't exist. Callers use this to
+    surface a truncation warning instead of a scan that comes back short for
+    no visible reason.
+    """
+    return max(0, len(_read_watchlist(settings)) - settings.screener_max_tickers)
+
+
+__all__ = ["load_frames", "load_watchlist", "watchlist_overflow", "get_settings"]

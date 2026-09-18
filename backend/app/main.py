@@ -13,12 +13,17 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .api.alerts import router as alerts_router
 from .api.analytics import router as analytics_router
 from .api.backtest import router as backtest_router
 from .api.data_sync import router as data_sync_router
+from .api.execution import router as execution_router
+from .api.journal import router as journal_router
 from .api.order_ticket import router as order_ticket_router
+from .api.replay import router as replay_router
 from .api.schemas import HealthResponse
 from .api.screener import router as screener_router
+from .api.signals import router as signals_router
 from .config import get_settings
 
 app = FastAPI(
@@ -46,6 +51,11 @@ app.include_router(screener_router)
 app.include_router(order_ticket_router)
 app.include_router(data_sync_router)
 app.include_router(analytics_router)
+app.include_router(alerts_router)
+app.include_router(execution_router)
+app.include_router(signals_router)
+app.include_router(replay_router)
+app.include_router(journal_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)

@@ -33,7 +33,7 @@ from ..quant.risk import CircuitBreaker, RiskManager
 from ..quant.screener import CatalystFilter, RelativeStrengthScreener
 from ..quant.setups import DIRECTION_LONG, annotate_relative_strength, scan_universe
 from ..quant.strategies import build_strategy
-from .deps import load_frames, load_watchlist
+from .deps import load_frames, load_watchlist, watchlist_overflow
 from .schemas import ScreenerResponse
 
 log = logging.getLogger(__name__)
@@ -73,7 +73,20 @@ def _scan(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    universe = tickers or load_watchlist(settings)
+    truncation_warning = None
+    if tickers is None:
+        universe = load_watchlist(settings)
+        overflow = watchlist_overflow(settings)
+        if overflow:
+            truncation_warning = (
+                f"Watchlist has {len(universe) + overflow} tickers; capped to "
+                f"{settings.screener_max_tickers} (screener_max_tickers) - "
+                f"{overflow} not scanned. Raise SCREENER_MAX_TICKERS to scan more."
+            )
+            log.warning(truncation_warning)
+    else:
+        universe = tickers
+
     if not universe:
         return {
             "setups": [],
@@ -82,9 +95,12 @@ def _scan(
             "skip_reasons": {},
             "macro_regime": MACRO_REGIME_UNKNOWN,
             "circuit_breaker_active": False,
+            "warnings": [truncation_warning] if truncation_warning else [],
         }
 
     frames, warnings = load_frames(universe, settings)
+    if truncation_warning:
+        warnings.append(truncation_warning)
     if not frames:
         raise HTTPException(
             status_code=503,
@@ -113,6 +129,9 @@ def _scan(
         risk_manager,
         catalyst_filter=catalyst_filter,
         earnings_by_ticker=earnings_by_ticker,
+        min_avg_volume=settings.screener_min_avg_volume,
+        volume_lookback=settings.screener_volume_lookback,
+        stale_after_days=settings.screener_stale_after_days,
     )
 
     spy_frame = None

@@ -5,7 +5,7 @@ Critical for finding blind spots between backtest and reality
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
 
@@ -307,6 +307,105 @@ class TradeJournal:
             }
 
         return results
+
+    def compute_mae_mfe(self, trade_id: int, price_df: pd.DataFrame) -> Dict:
+        """Maximum Adverse/Favorable Excursion during a closed trade's
+        holding period.
+
+        Uses intrabar Low/High against the actual entry price over
+        `[actual_entry_date, exit_date]` - how far the trade moved against
+        you (MAE) and in your favor (MFE) at any point, not just at exit.
+        Assumes a long position, matching every engine in this codebase.
+
+        Args:
+            price_df: The trade's ticker's OHLCV frame, datetime-indexed.
+
+        Raises:
+            ValueError: if `trade_id` is unknown, the trade isn't `TAKEN`
+                with both `actual_entry_date` and `exit_date` recorded, or
+                `price_df` has no bars in the holding window.
+        """
+        mask = self.df["id"] == trade_id
+        if not mask.any():
+            raise ValueError(f"Unknown trade_id: {trade_id}")
+        trade = self.df.loc[mask].iloc[0]
+
+        if trade["entry_status"] != "TAKEN":
+            raise ValueError(f"Trade {trade_id} is not TAKEN")
+        if pd.isna(trade["actual_entry_date"]) or pd.isna(trade["exit_date"]):
+            raise ValueError(
+                f"Trade {trade_id} is missing actual_entry_date or exit_date"
+            )
+
+        entry_price = float(trade["actual_entry_price"])
+        holding_start = trade["actual_entry_date"]
+        holding_end = trade["exit_date"]
+        window = price_df.loc[holding_start:holding_end]
+        if window.empty:
+            raise ValueError(f"No price bars for trade {trade_id}'s holding window")
+
+        # Clamped at 0: a trade that never traded below/above entry has no
+        # adverse/favorable excursion, not a negative one.
+        mae_dollars = max(0.0, entry_price - float(window["Low"].min()))
+        mfe_dollars = max(0.0, float(window["High"].max()) - entry_price)
+
+        return {
+            "trade_id": trade_id,
+            "mae_dollars": mae_dollars,
+            "mae_pct": mae_dollars / entry_price if entry_price else 0.0,
+            "mfe_dollars": mfe_dollars,
+            "mfe_pct": mfe_dollars / entry_price if entry_price else 0.0,
+        }
+
+    def analyze_decay(
+        self, windows: tuple = (30, 60, 90), as_of: datetime | None = None
+    ) -> Dict:
+        """Rolling win-rate/expectancy over trailing windows - catches a
+        strategy's edge decaying before it shows up in the all-time numbers.
+
+        Args:
+            windows: Trailing day-counts to report on independently, e.g.
+                trades exited in the last 30 days vs. the last 90.
+            as_of: Reference "now" each window is measured back from.
+                Defaults to `datetime.now()` - tests should pass this
+                explicitly rather than depend on wall-clock time.
+
+        Returns:
+            `{window: {trade_count, win_rate, avg_r_multiple, expectancy}}`.
+            A window with zero exited trades reports `None` for the rate
+            fields rather than dividing by zero.
+        """
+        as_of = as_of or datetime.now()
+        exited = self.df[self.df["exit_date"].notna()]
+
+        result: Dict = {}
+        for window in windows:
+            cutoff = as_of - timedelta(days=window)
+            cohort = exited[exited["exit_date"] >= cutoff]
+
+            if len(cohort) == 0:
+                result[window] = {
+                    "trade_count": 0,
+                    "win_rate": None,
+                    "avg_r_multiple": None,
+                    "expectancy": None,
+                }
+                continue
+
+            winners = cohort[cohort["pnl"] > 0]
+            avg_r_multiple = cohort["r_multiple"].mean()
+            expectancy = cohort["pnl"].mean()
+
+            result[window] = {
+                "trade_count": len(cohort),
+                "win_rate": len(winners) / len(cohort),
+                "avg_r_multiple": (
+                    float(avg_r_multiple) if pd.notna(avg_r_multiple) else None
+                ),
+                "expectancy": float(expectancy) if pd.notna(expectancy) else None,
+            }
+
+        return result
 
     @staticmethod
     def _max_consecutive_losses(df: pd.DataFrame) -> int:

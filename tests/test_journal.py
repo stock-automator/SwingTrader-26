@@ -4,9 +4,10 @@ Tests for Trade Journal
 
 import shutil
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from backend.app.journal.executor import TradeJournal
@@ -299,6 +300,134 @@ class TestAnalytics:
         assert "SL" in by_reason
         assert "TP1" in by_reason
         assert len(by_reason) == 4
+
+
+class TestMaeMfe:
+    """Test Maximum Adverse/Favorable Excursion analytics"""
+
+    def _closed_trade(self, journal, entry_price=100.0, stop_loss=95.0):
+        trade_id = journal.log_signal(
+            ticker="AAPL",
+            entry_date=datetime(2024, 1, 1),
+            entry_price=entry_price,
+            thesis="Test",
+            signal_strength=50.0,
+            stop_loss=stop_loss,
+            target_1=110.0,
+            target_2=120.0,
+        )
+        journal.log_entry(
+            trade_id=trade_id,
+            actual_entry_price=entry_price,
+            actual_entry_date=datetime(2024, 1, 2),
+        )
+        journal.log_exit(
+            trade_id=trade_id,
+            exit_date=datetime(2024, 1, 5),
+            exit_price=108.0,
+            exit_reason="TP1",
+        )
+        return trade_id
+
+    def test_computes_worst_dip_and_best_run_up(self, journal):
+        trade_id = self._closed_trade(journal)
+
+        index = pd.date_range("2024-01-02", "2024-01-05", freq="D")
+        price_df = pd.DataFrame(
+            {
+                "Open": [100.0, 97.0, 103.0, 107.0],
+                "High": [101.0, 98.0, 112.0, 108.5],
+                "Low": [96.0, 95.0, 102.0, 106.0],
+                "Close": [97.0, 97.5, 111.0, 108.0],
+            },
+            index=index,
+        )
+
+        result = journal.compute_mae_mfe(trade_id, price_df)
+
+        assert result["mae_dollars"] == pytest.approx(100.0 - 95.0)
+        assert result["mfe_dollars"] == pytest.approx(112.0 - 100.0)
+        assert result["mae_pct"] == pytest.approx(0.05)
+        assert result["mfe_pct"] == pytest.approx(0.12)
+
+    def test_unknown_trade_id_raises(self, journal):
+        with pytest.raises(ValueError):
+            journal.compute_mae_mfe(999, pd.DataFrame())
+
+    def test_pending_trade_raises(self, journal):
+        trade_id = journal.log_signal(
+            ticker="AAPL",
+            entry_date=datetime(2024, 1, 1),
+            entry_price=100.0,
+            thesis="Test",
+            signal_strength=50.0,
+            stop_loss=95.0,
+            target_1=110.0,
+            target_2=120.0,
+        )
+        with pytest.raises(ValueError):
+            journal.compute_mae_mfe(trade_id, pd.DataFrame())
+
+    def test_empty_price_window_raises(self, journal):
+        trade_id = self._closed_trade(journal)
+        empty_df = pd.DataFrame(
+            {"Open": [], "High": [], "Low": [], "Close": []},
+            index=pd.DatetimeIndex([]),
+        )
+        with pytest.raises(ValueError):
+            journal.compute_mae_mfe(trade_id, empty_df)
+
+
+class TestDecayAnalytics:
+    """Test rolling 30/60/90-day decay analytics"""
+
+    def _trade_exited_days_ago(self, journal, days_ago: int, pnl_positive: bool):
+        as_of = datetime(2024, 6, 1)
+        exit_date = as_of - timedelta(days=days_ago)
+        trade_id = journal.log_signal(
+            ticker="AAPL",
+            entry_date=exit_date - timedelta(days=3),
+            entry_price=100.0,
+            thesis="Test",
+            signal_strength=50.0,
+            stop_loss=95.0,
+            target_1=110.0,
+            target_2=120.0,
+        )
+        journal.log_entry(
+            trade_id=trade_id,
+            actual_entry_price=100.0,
+            actual_entry_date=exit_date - timedelta(days=3),
+        )
+        exit_price = 110.0 if pnl_positive else 90.0
+        journal.log_exit(
+            trade_id=trade_id,
+            exit_date=exit_date,
+            exit_price=exit_price,
+            exit_reason="TP1",
+        )
+        return as_of
+
+    def test_buckets_trades_into_the_correct_windows(self, journal):
+        as_of = self._trade_exited_days_ago(journal, days_ago=10, pnl_positive=True)
+        self._trade_exited_days_ago(journal, days_ago=45, pnl_positive=False)
+        self._trade_exited_days_ago(journal, days_ago=80, pnl_positive=True)
+
+        decay = journal.analyze_decay(windows=(30, 60, 90), as_of=as_of)
+
+        assert decay[30]["trade_count"] == 1
+        assert decay[60]["trade_count"] == 2
+        assert decay[90]["trade_count"] == 3
+        assert decay[30]["win_rate"] == pytest.approx(1.0)
+
+    def test_empty_window_reports_none_rather_than_dividing_by_zero(self, journal):
+        as_of = datetime(2024, 6, 1)
+        decay = journal.analyze_decay(windows=(30,), as_of=as_of)
+
+        assert decay[30]["trade_count"] == 0
+        assert decay[30]["win_rate"] is None
+        assert decay[30]["avg_r_multiple"] is None
+        assert decay[30]["expectancy"] is None
 
 
 if __name__ == "__main__":
