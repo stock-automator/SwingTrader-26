@@ -113,6 +113,13 @@ class Settings:
         alpaca_api_key: Alpaca paper-trading API key. Unset means the
             execution endpoints return 503 rather than silently no-opping.
         alpaca_api_secret: Alpaca paper-trading API secret.
+        fmp_api_key: Financial Modeling Prep API key for
+            `quant.data.provider_fallback`'s third-tier fallback. Unset
+            means that tier is skipped entirely, not attempted.
+        alpha_vantage_api_key: Alpha Vantage API key for the fourth-tier
+            fallback. Unset means it's skipped.
+        polygon_api_key: Polygon.io API key for the fifth-tier fallback.
+            Unset means it's skipped.
     """
 
     finnhub_api_key: str | None = None
@@ -134,6 +141,9 @@ class Settings:
     generic_webhook_url: str | None = None
     alpaca_api_key: str | None = None
     alpaca_api_secret: str | None = None
+    fmp_api_key: str | None = None
+    alpha_vantage_api_key: str | None = None
+    polygon_api_key: str | None = None
 
     @property
     def has_finnhub(self) -> bool:
@@ -174,4 +184,7 @@ def get_settings() -> Settings:
         generic_webhook_url=os.environ.get("GENERIC_WEBHOOK_URL") or None,
         alpaca_api_key=os.environ.get("ALPACA_API_KEY") or None,
         alpaca_api_secret=os.environ.get("ALPACA_API_SECRET") or None,
+        fmp_api_key=os.environ.get("FMP_API_KEY") or None,
+        alpha_vantage_api_key=os.environ.get("ALPHA_VANTAGE_API_KEY") or None,
+        polygon_api_key=os.environ.get("POLYGON_API_KEY") or None,
     )
