@@ -187,6 +187,19 @@ class AlpacaExecutionClient:
         )
         return _order_to_dict(client.submit_order(request))
 
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancels one open order by id. Returns `True` if the cancel was
+        accepted, `False` if Alpaca rejects it (e.g. already filled - the
+        SDK raises an `APIError` in that case, caught and reported as a
+        declined cancel rather than propagated). Raises
+        `AlpacaNotConfiguredError` if no credentials are set."""
+        client = self._require_client()
+        try:
+            client.cancel_order_by_id(order_id)
+            return True
+        except Exception:  # noqa: BLE001 - any SDK/API failure means "not cancelled"
+            return False
+
     def close_all_positions(self) -> list[dict]:
         """Emergency kill-switch: liquidates every open position and cancels
         every open order. Raises `AlpacaNotConfiguredError` if no

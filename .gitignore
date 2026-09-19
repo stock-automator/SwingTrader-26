@@ -5,6 +5,7 @@ __pycache__/
 /results/
 /data/
 /config/alerts_channels.json
+/config/universe.json
 *.log
 .DS_Store
 .vscode/

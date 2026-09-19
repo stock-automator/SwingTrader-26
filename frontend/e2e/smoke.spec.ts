@@ -34,6 +34,21 @@ test.beforeEach(async ({ page }) => {
       },
     }),
   );
+  await page.route(`${API_BASE}/api/v1/market/regime`, (route) =>
+    route.fulfill({
+      json: {
+        state: "CAUTION_CHOP",
+        spy_alignment: "NEUTRAL",
+        qqq_alignment: "NEUTRAL",
+        vix_level: 16.5,
+        vix_regime: "NORMAL",
+        breadth_pct: 50.0,
+        breadth_above: 250,
+        breadth_total: 500,
+        notes: [],
+      },
+    }),
+  );
   await page.route(`${API_BASE}/api/v1/signals/live-today**`, (route) =>
     route.fulfill({
       json: {

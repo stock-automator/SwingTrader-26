@@ -76,6 +76,23 @@ def _create_tables(conn: duckdb.DuckDBPyConnection) -> None:
             payload JSON
         )
         """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS routed_orders (
+            order_id TEXT PRIMARY KEY,
+            broker TEXT,
+            ticker TEXT,
+            side TEXT,
+            order_type TEXT,
+            qty DOUBLE,
+            limit_price DOUBLE,
+            status TEXT,
+            fill_price DOUBLE,
+            broker_order_id TEXT,
+            error TEXT,
+            submitted_at TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+        """)
 
 
 def _get_shared_connection_locked() -> duckdb.DuckDBPyConnection:

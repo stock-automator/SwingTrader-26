@@ -22,7 +22,9 @@ import type {
   JournalTradesResponse,
   ListScansResponse,
   MaeMfeDistributionResponse,
+  MarketRegimeResponse,
   OrderTicketRequest,
+  PositionSizerResponse,
   OrderTicketsResponse,
   PortfolioHistory,
   Position,
@@ -75,6 +77,26 @@ export function getHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/api/v1/health");
 }
 
+export function getMarketRegime(): Promise<MarketRegimeResponse> {
+  return request<MarketRegimeResponse>("/api/v1/market/regime");
+}
+
+export interface PositionSizerRequest {
+  account_capital: number;
+  risk_pct: number;
+  atr: number;
+  atr_multiplier?: number;
+}
+
+export function previewPositionSize(
+  body: PositionSizerRequest,
+): Promise<PositionSizerResponse> {
+  return request<PositionSizerResponse>("/api/v1/position-sizer/preview", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export interface LiveScreenerParams {
   strategy: Strategy;
   account_equity?: number;
@@ -113,6 +135,10 @@ export function getLiveScreener(
 export function screenerWebSocketUrl(params: LiveScreenerParams): string {
   const search = screenerSearchParams(params);
   return `${WS_BASE_URL}/ws/screener?${search.toString()}`;
+}
+
+export function liveFeedWebSocketUrl(): string {
+  return `${WS_BASE_URL}/ws/v1/live-feed`;
 }
 
 export function runBacktest(body: BacktestRequest): Promise<BacktestResponse> {

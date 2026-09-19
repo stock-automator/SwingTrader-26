@@ -26,6 +26,19 @@ load_dotenv()
 #: Default browser origins allowed to call the API - the Vite dev server.
 DEFAULT_CORS_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 
+#: Matches the Vite dev server (any port) reached over a private/CGNAT
+#: network - LAN (`192.168.x.x`, `10.x.x.x`), and the CGNAT range
+#: (`100.64.0.0/10`, approximated here as any `100.x.x.x`) that Tailscale
+#: and NordVPN Meshnet both hand out. Lets a phone on the same Meshnet/LAN
+#: reach the API with `vite.config.ts`'s `server.host = '0.0.0.0'` without
+#: hardcoding one machine's current IP into `CORS_ORIGINS`. Not used for
+#: `allow_origins` directly - `CORSMiddleware`'s `allow_origin_regex`
+#: matches per-origin at request time, unlike the exact-match origin list.
+DEFAULT_CORS_ORIGIN_REGEX = (
+    r"^https?://(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|100\.\d{1,3}\.\d{1,3}\.\d{1,3}):\d+$"
+)
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
@@ -76,6 +89,12 @@ class Settings:
             uncached ticker. Off in CI so a test run cannot depend on the
             network.
         cors_origins: Browser origins allowed to call the API.
+        cors_origin_regex: Pattern matching additional allowed origins by
+            shape rather than exact value - private-network/Meshnet IPs on
+            any port, so a phone on the same LAN/Tailscale/NordVPN Meshnet
+            can reach the API without hardcoding its current IP into
+            `cors_origins`. `None` disables this (exact-match `cors_origins`
+            only).
         watchlist_path: Newline-delimited ticker list the screener scans.
         screener_max_tickers: Hard cap on tickers scanned per screener call -
             a safety valve against an accidentally enormous watchlist, not a
@@ -135,6 +154,7 @@ class Settings:
     data_dir: Path = Path("data/raw")
     allow_downloads: bool = True
     cors_origins: tuple[str, ...] = field(default=DEFAULT_CORS_ORIGINS)
+    cors_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX
     watchlist_path: Path = Path("config/watchlist.txt")
     screener_max_tickers: int = 750
     screener_max_workers: int = 16
@@ -179,6 +199,8 @@ def get_settings() -> Settings:
             if origins
             else DEFAULT_CORS_ORIGINS
         ),
+        cors_origin_regex=os.environ.get("CORS_ORIGIN_REGEX", DEFAULT_CORS_ORIGIN_REGEX)
+        or None,
         watchlist_path=Path(os.environ.get("WATCHLIST_PATH", "config/watchlist.txt")),
         screener_max_tickers=_env_int("SCREENER_MAX_TICKERS", 750),
         screener_max_workers=_env_int("SCREENER_MAX_WORKERS", 16),

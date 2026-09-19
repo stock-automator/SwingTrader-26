@@ -6,6 +6,7 @@ import { ScreenerGrid } from "./components/ScreenerGrid";
 import { SignalMatrixGrid } from "./components/SignalMatrixGrid";
 import { SyncStatusBanner } from "./components/SyncStatusBanner";
 import { AlertSettings } from "./components/alerts/AlertSettings";
+import { LiveFeedListener } from "./components/common/LiveFeedListener";
 import { ScanProvider } from "./lib/ScanContext";
 import type { MacroRegime } from "./types";
 
@@ -132,6 +133,7 @@ function App() {
   return (
     <ScanProvider>
     <div className="min-h-screen bg-bg text-text">
+      <LiveFeedListener />
       <Toaster
         theme="dark"
         position="bottom-right"

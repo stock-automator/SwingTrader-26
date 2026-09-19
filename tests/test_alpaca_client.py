@@ -44,10 +44,17 @@ class _FakeTradingClient:
     def __init__(self):
         self.submitted_orders = []
         self.close_all_called = False
+        self.cancelled_order_ids = []
+        self.cancel_raises: Exception | None = None
 
     def submit_order(self, order_data):
         self.submitted_orders.append(order_data)
         return _fake_order()
+
+    def cancel_order_by_id(self, order_id):
+        if self.cancel_raises:
+            raise self.cancel_raises
+        self.cancelled_order_ids.append(order_id)
 
     def close_all_positions(self, cancel_orders=None):
         self.close_all_called = True
@@ -173,6 +180,27 @@ class TestSubmitOrders:
         client = AlpacaExecutionClient("key", "secret", client=fake)
         with pytest.raises(ValueError):
             client.submit_market_order("AAPL", 10, "sideways")
+
+
+class TestCancelOrder:
+    def test_cancel_success_returns_true(self):
+        fake = _FakeTradingClient()
+        client = AlpacaExecutionClient("key", "secret", client=fake)
+
+        assert client.cancel_order("order-123") is True
+        assert fake.cancelled_order_ids == ["order-123"]
+
+    def test_cancel_failure_returns_false_not_raises(self):
+        fake = _FakeTradingClient()
+        fake.cancel_raises = RuntimeError("already filled")
+        client = AlpacaExecutionClient("key", "secret", client=fake)
+
+        assert client.cancel_order("order-123") is False
+
+    def test_cancel_raises_when_unconfigured(self):
+        client = AlpacaExecutionClient(api_key=None, api_secret=None)
+        with pytest.raises(AlpacaNotConfiguredError):
+            client.cancel_order("order-123")
 
 
 class TestCloseAllAndAccount:

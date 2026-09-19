@@ -82,6 +82,30 @@ class TestLoadFrames:
         assert warnings == []
         assert attempts["AAPL"] == 2
 
+    def test_unexpected_exception_from_one_ticker_does_not_crash_the_batch(
+        self, monkeypatch, settings
+    ):
+        """Regression: a delisted/malformed ticker can raise something other
+        than `DataUnavailableError` (e.g. a `ValueError` deep inside pandas
+        column selection). `_load_one` must catch it and report a per-ticker
+        error tuple, not let it propagate out of `future.result()` and abort
+        every other ticker in the batch."""
+
+        def flaky_load_prices(
+            ticker, start=None, end=None, data_dir=None, allow_download=True
+        ):
+            if ticker == "BK":
+                raise ValueError("Columns must be same length as key")
+            return _bars()
+
+        monkeypatch.setattr(deps_module, "load_prices", flaky_load_prices)
+
+        frames, warnings = deps_module.load_frames(["AAPL", "BK", "MSFT"], settings)
+
+        assert set(frames) == {"AAPL", "MSFT"}
+        assert len(warnings) == 1
+        assert "Columns must be same length as key" in warnings[0]
+
     def test_gives_up_after_max_attempts(self, monkeypatch, settings):
         attempts: dict[str, int] = {}
 

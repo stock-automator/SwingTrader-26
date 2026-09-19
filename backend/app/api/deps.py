@@ -61,6 +61,18 @@ def _load_one(
             if not settings.allow_downloads or attempt == RETRY_ATTEMPTS - 1:
                 break
             time.sleep(RETRY_BACKOFF_SECONDS * (2**attempt))
+        except Exception as exc:  # noqa: BLE001 - see module docstring
+            # A delisted/broken symbol can surface as something other than
+            # DataUnavailableError - e.g. a malformed provider frame raising
+            # ValueError deep inside pandas. This runs on a worker thread
+            # inside a ThreadPoolExecutor (see `load_frames`): an
+            # unretried exception here would propagate out of
+            # `future.result()` and abort the *entire* batch scan over one
+            # bad ticker. Not retried - the failure is structural (bad
+            # frame shape), not transient, so retrying would just repeat it.
+            last_exc = exc
+            log.warning("unexpected error loading %s: %s", ticker, exc)
+            break
 
     return ticker, None, last_exc
 

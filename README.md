@@ -143,6 +143,25 @@ green dot means the frontend successfully reached the backend from Step 2.
 > minute, or try the Backtesting Studio next (below) with a well-known
 > ticker like `AAPL`, which fetches faster since it's a single symbol.
 
+### Mobile / LAN / NordVPN Meshnet access
+
+Both dev servers already bind every network interface, not just
+`localhost` - `vite.config.ts` sets `server.host = "0.0.0.0"`, and the
+backend's CORS allows any `192.168.*`, `10.*`, or `100.*` origin (the LAN
+and Tailscale/NordVPN Meshnet CGNAT ranges) on any port. To reach the app
+from a phone or another machine on the same network/Meshnet:
+
+```bash
+uvicorn backend.app.main:app --reload --host 0.0.0.0   # instead of Step 2
+```
+
+Then on the phone/other device, visit
+`http://<this-machine's-LAN-or-Meshnet-IP>:5173` and point the frontend at
+the same host's backend by setting `VITE_API_BASE_URL` before `npm run
+dev`, e.g. `VITE_API_BASE_URL=http://100.x.x.x:8000 npm run dev` (find your
+IP with `ifconfig`/`ip addr` on macOS/Linux, or your Meshnet client's own
+IP display).
+
 ### Try it: run your first backtest
 
 1. Click **Backtesting Studio** in the top nav.

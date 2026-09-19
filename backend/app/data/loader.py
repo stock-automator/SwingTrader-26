@@ -50,6 +50,14 @@ def flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
     df.columns = df.columns.droplevel(-1)
+    # A delisted/renamed ticker can make yfinance return a frame where the
+    # dropped level leaves duplicate labels (e.g. a provider-side ticker
+    # alias). Downstream `df[list(OHLCV_COLUMNS)]` selection against
+    # duplicate labels returns a wider-than-expected frame and can raise
+    # "Columns must be same length as key" several calls later - deduped
+    # here, at the one place that knows why duplicates could exist, rather
+    # than guarded defensively at every call site.
+    df = df.loc[:, ~df.columns.duplicated(keep="first")]
     return df
 
 
@@ -147,11 +155,21 @@ def fetch_yfinance(
     if end is not None:
         end = (pd.Timestamp(end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
+    # yfinance's own `download` defaults to `period="1mo"` whenever neither
+    # `start` nor `period` is passed - so `start=None` here (this function's
+    # documented "all available history") would otherwise silently come
+    # back with about 22 trading days. Passing `period="max"` explicitly
+    # only when there's no `start` restores that documented contract; a
+    # caller-supplied `start` still takes precedence exactly as before
+    # (`start`/`period` are mutually exclusive to yfinance).
+    period = "max" if start is None else None
+
     try:
         raw = yf.download(
             ticker,
             start=start,
             end=end,
+            period=period,
             progress=False,
             auto_adjust=True,
             actions=False,
