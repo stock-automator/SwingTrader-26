@@ -141,3 +141,72 @@ class TestJournalMaeMfe:
             "/api/v1/journal/mae-mfe", json={"trade_id": 1, "ticker": "AAPL"}
         )
         assert response.status_code == 503
+
+
+class TestJournalTrades:
+    def test_empty_journal_returns_empty_list(self, client, journal_settings):
+        response = client.get("/api/v1/journal/trades")
+        assert response.status_code == 200
+        assert response.json() == {"trades": []}
+
+    def test_returns_logged_trade(self, client, journal_settings):
+        _seed_closed_trade(journal_settings)
+        response = client.get("/api/v1/journal/trades")
+        assert response.status_code == 200
+        trades = response.json()["trades"]
+        assert len(trades) == 1
+        assert trades[0]["ticker"] == "AAPL"
+        assert trades[0]["entry_status"] == "TAKEN"
+        assert trades[0]["exit_reason"] == "TP1"
+
+
+class TestJournalMaeMfeDistribution:
+    def test_no_completed_trades_returns_empty(self, client, journal_settings):
+        response = client.get("/api/v1/journal/mae-mfe-distribution")
+        assert response.status_code == 200
+        assert response.json() == {"points": [], "warnings": []}
+
+    def test_computes_points_for_completed_trades(
+        self, client, journal_settings, monkeypatch
+    ):
+        _seed_closed_trade(journal_settings)
+
+        index = pd.date_range("2024-01-02", "2024-01-05", freq="D")
+        price_df = pd.DataFrame(
+            {
+                "Open": [100.0, 97.0, 103.0, 109.0],
+                "High": [101.0, 98.0, 112.0, 110.5],
+                "Low": [96.0, 95.0, 102.0, 108.0],
+                "Close": [97.0, 97.5, 111.0, 110.0],
+            },
+            index=index,
+        )
+
+        import backend.app.api.journal as journal_module
+
+        monkeypatch.setattr(journal_module, "load_prices", lambda *a, **k: price_df)
+
+        response = client.get("/api/v1/journal/mae-mfe-distribution")
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["points"]) == 1
+        assert body["points"][0]["ticker"] == "AAPL"
+        assert body["warnings"] == []
+
+    def test_unavailable_ticker_becomes_a_warning_not_an_error(
+        self, client, journal_settings, monkeypatch
+    ):
+        _seed_closed_trade(journal_settings)
+
+        def _raise(*a, **k):
+            raise DataUnavailableError("AAPL not cached")
+
+        import backend.app.api.journal as journal_module
+
+        monkeypatch.setattr(journal_module, "load_prices", _raise)
+
+        response = client.get("/api/v1/journal/mae-mfe-distribution")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["points"] == []
+        assert "AAPL" in body["warnings"][0]

@@ -252,9 +252,16 @@ export interface SignalMatrixRow {
   reward_risk_ratio: number | null;
   notional_value: number | null;
   note: string | null;
-  // Always null today - no model-backed estimate exists yet. Never render a
-  // synthesized number here; see backend/app/api/signals.py.
+  // From analytics/expectancy.py: a regime-matched historical backtest win
+  // rate, or a block-bootstrap Monte Carlo percentile below that sample
+  // size, or null when there isn't enough trade history for either (always
+  // null for SHORT rows - the backtest engine is long-only).
   win_probability: number | null;
+  win_probability_method: string | null;
+  win_probability_sample_size: number | null;
+  win_probability_confidence_low: number | null;
+  win_probability_confidence_high: number | null;
+  win_probability_note: string | null;
 }
 
 export interface SignalMatrixResponse {
@@ -285,4 +292,140 @@ export interface ExecutionOrderResponse {
   order_class: string | null;
   status: string | null;
   submitted_at: string | null;
+}
+
+export interface AlpacaAccount {
+  account_number: string;
+  status: string;
+  equity: number;
+  cash: number;
+  buying_power: number;
+  portfolio_value: number;
+}
+
+export interface Position {
+  symbol: string;
+  side: string | null;
+  qty: number;
+  avg_entry_price: number;
+  current_price: number | null;
+  market_value: number | null;
+  cost_basis: number;
+  unrealized_pl: number | null;
+  unrealized_plpc: number | null;
+}
+
+export interface PortfolioHistory {
+  timestamp: string[];
+  equity: number[];
+  profit_loss: number[];
+  profit_loss_pct: (number | null)[];
+  base_value: number | null;
+  timeframe: string;
+}
+
+export interface ClosedPosition {
+  symbol: string | null;
+  status: number | null;
+  order_id: string | null;
+}
+
+export interface CloseAllPositionsResponse {
+  closed: ClosedPosition[];
+}
+
+// ---- Alerts ----
+
+export type AlertChannelName = "telegram" | "discord" | "webhook";
+
+export interface AlertChannelsConfig {
+  telegram_bot_token: string | null;
+  telegram_chat_id: string | null;
+  discord_webhook_url: string | null;
+  generic_webhook_url: string | null;
+}
+
+export interface AlertChannelsConfigResponse extends AlertChannelsConfig {
+  telegram_configured: boolean;
+  discord_configured: boolean;
+  webhook_configured: boolean;
+}
+
+export interface AlertTestResponse {
+  channel: AlertChannelName;
+  status: string;
+}
+
+// ---- Trade Journal ----
+
+export interface JournalSummary {
+  total_trades: number | null;
+  completed_trades: number | null;
+  open_trades: number | null;
+  win_rate: number | null;
+  profit_factor: number | null;
+  avg_winner: number | null;
+  avg_loser: number | null;
+  avg_pnl: number | null;
+  median_pnl: number | null;
+  avg_r_multiple: number | null;
+  max_consecutive_losses: number | null;
+  max_drawdown: number | null;
+  avg_holding_days: number | null;
+  error: string | null;
+}
+
+export interface DecayWindow {
+  trade_count: number;
+  win_rate: number | null;
+  avg_r_multiple: number | null;
+  expectancy: number | null;
+}
+
+export interface JournalDecay {
+  windows: Record<string, DecayWindow>;
+}
+
+export interface JournalTrade {
+  id: number;
+  ticker: string;
+  entry_date: string | null;
+  entry_price: number | null;
+  entry_thesis: string | null;
+  signal_strength: number | null;
+  stop_loss: number | null;
+  target_1: number | null;
+  target_2: number | null;
+  entry_status: string | null;
+  skip_reason: string | null;
+  actual_entry_date: string | null;
+  actual_entry_price: number | null;
+  exit_date: string | null;
+  exit_price: number | null;
+  exit_reason: string | null;
+  holding_days: number | null;
+  pnl: number | null;
+  pnl_pct: number | null;
+  r_multiple: number | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
+export interface JournalTradesResponse {
+  trades: JournalTrade[];
+}
+
+export interface MaeMfeDistributionPoint {
+  trade_id: number;
+  ticker: string;
+  mae_pct: number;
+  mfe_pct: number;
+  pnl: number | null;
+  r_multiple: number | null;
+  exit_reason: string | null;
+}
+
+export interface MaeMfeDistributionResponse {
+  points: MaeMfeDistributionPoint[];
+  warnings: string[];
 }

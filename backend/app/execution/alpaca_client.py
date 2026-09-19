@@ -9,11 +9,13 @@ the API layer (and its tests) never need to import `alpaca` types directly.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
 from alpaca.trading.requests import (
+    GetPortfolioHistoryRequest,
     LimitOrderRequest,
     MarketOrderRequest,
     StopLossRequest,
@@ -49,6 +51,34 @@ def _order_to_dict(order: Any) -> dict:
         "status": str(order.status.value) if order.status is not None else None,
         "submitted_at": (
             order.submitted_at.isoformat() if order.submitted_at else None
+        ),
+    }
+
+
+def _position_to_dict(position: Any) -> dict:
+    return {
+        "symbol": position.symbol,
+        "side": str(position.side.value) if position.side is not None else None,
+        "qty": float(position.qty),
+        "avg_entry_price": float(position.avg_entry_price),
+        "current_price": (
+            float(position.current_price)
+            if position.current_price is not None
+            else None
+        ),
+        "market_value": (
+            float(position.market_value) if position.market_value is not None else None
+        ),
+        "cost_basis": float(position.cost_basis),
+        "unrealized_pl": (
+            float(position.unrealized_pl)
+            if position.unrealized_pl is not None
+            else None
+        ),
+        "unrealized_plpc": (
+            float(position.unrealized_plpc)
+            if position.unrealized_plpc is not None
+            else None
         ),
     }
 
@@ -177,4 +207,35 @@ class AlpacaExecutionClient:
             "cash": float(account.cash),
             "buying_power": float(account.buying_power),
             "portfolio_value": float(account.portfolio_value),
+        }
+
+    def get_positions(self) -> list[dict]:
+        """Every currently open paper position. Raises
+        `AlpacaNotConfiguredError` if no credentials are set."""
+        client = self._require_client()
+        return [_position_to_dict(p) for p in client.get_all_positions()]
+
+    def get_portfolio_history(self, period: str = "1M", timeframe: str = "1D") -> dict:
+        """Equity curve over `period` (e.g. `"1M"`, `"1W"`, `"1A"`), bucketed
+        at `timeframe` (e.g. `"1D"`, `"1H"`). Raises
+        `AlpacaNotConfiguredError` if no credentials are set."""
+        client = self._require_client()
+        history = client.get_portfolio_history(
+            GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
+        )
+        timestamps = [
+            datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+            for ts in history.timestamp
+        ]
+        return {
+            "timestamp": timestamps,
+            "equity": [float(v) for v in history.equity],
+            "profit_loss": [float(v) for v in history.profit_loss],
+            "profit_loss_pct": [
+                float(v) if v is not None else None for v in history.profit_loss_pct
+            ],
+            "base_value": (
+                float(history.base_value) if history.base_value is not None else None
+            ),
+            "timeframe": history.timeframe,
         }

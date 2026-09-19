@@ -159,12 +159,39 @@ export function SignalMatrixGrid() {
       }),
       columnHelper.accessor("win_probability", {
         header: "Win Prob.",
-        enableSorting: false,
-        cell: () => (
-          <span className="text-text-faint" title="No model-backed estimate yet">
-            —
-          </span>
-        ),
+        cell: (info) => {
+          const row = info.row.original;
+          const v = info.getValue();
+          if (v === null) {
+            return (
+              <span
+                className="text-text-faint"
+                title={row.win_probability_note ?? "No model-backed estimate available"}
+              >
+                —
+              </span>
+            );
+          }
+          const isBootstrap = row.win_probability_method === "block_bootstrap";
+          const band =
+            isBootstrap &&
+            row.win_probability_confidence_low !== null &&
+            row.win_probability_confidence_high !== null
+              ? ` (${(row.win_probability_confidence_low * 100).toFixed(0)}-${(row.win_probability_confidence_high * 100).toFixed(0)}%)`
+              : "";
+          return (
+            <span
+              title={`${row.win_probability_note ?? ""} · n=${row.win_probability_sample_size ?? "?"}`}
+            >
+              {(v * 100).toFixed(0)}%{band}
+              {isBootstrap && (
+                <span className="ml-1 text-text-faint" title="Block-bootstrap estimate">
+                  ~
+                </span>
+              )}
+            </span>
+          );
+        },
       }),
       columnHelper.accessor("shares", {
         header: "Shares",

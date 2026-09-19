@@ -467,6 +467,42 @@ screener or signal-matrix scan.
 `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`, `GENERIC_WEBHOOK_URL`) — that's a
 valid response, not an error. One channel failing never blocks another.
 
+### `GET` / `PUT /api/v1/alerts/config`
+
+Backs the frontend's Alert Channel Configuration UI (Alerts tab) — a
+channel can be configured entirely from the browser, no `.env` edit or
+restart required. `PUT` replaces the whole stored config (the UI always
+submits the full form) and is persisted to `ALERT_CONFIG_PATH` (default
+`config/alerts_channels.json`, gitignored). A field saved this way
+overrides the matching environment variable; see
+`backend/app/alerts/config_store.py`.
+
+```json
+{
+  "telegram_bot_token": null,
+  "telegram_chat_id": null,
+  "discord_webhook_url": "https://discord.com/api/webhooks/...",
+  "generic_webhook_url": null,
+  "telegram_configured": false,
+  "discord_configured": true,
+  "webhook_configured": false
+}
+```
+
+`PUT` request body is the same four `*_token`/`*_url` fields (the
+`*_configured` booleans are response-only).
+
+### `POST /api/v1/alerts/test`
+
+Sends a canned test message to exactly one channel — the "Send Test Alert"
+button per channel in the UI. Body: `{"channel": "telegram" | "discord" |
+"webhook"}`.
+
+| Status | Cause |
+|---|---|
+| `422` | That channel has no credentials configured (file or env) |
+| `502` | The channel's HTTP call failed (network error / non-2xx response) |
+
 ---
 
 ## `/api/v1/execution/*` — Alpaca paper trading
@@ -516,6 +552,31 @@ action.
 Returns `account_number`, `status`, `equity`, `cash`, `buying_power`,
 `portfolio_value`.
 
+### `GET /api/v1/execution/positions`
+
+Every currently open paper position:
+
+```json
+{
+  "positions": [
+    {
+      "symbol": "AAPL", "side": "long", "qty": 10.0,
+      "avg_entry_price": 190.0, "current_price": 200.0,
+      "market_value": 2000.0, "cost_basis": 1900.0,
+      "unrealized_pl": 100.0, "unrealized_plpc": 0.0526
+    }
+  ]
+}
+```
+
+### `GET /api/v1/execution/portfolio-history?period=1M&timeframe=1D`
+
+Equity curve for the Portfolio Dashboard's chart — `period` (`"1D"`,
+`"1W"`, `"1M"`, `"1A"`, ...) and `timeframe` (`"1D"`, `"1H"`, ...) are
+passed straight through to Alpaca's portfolio-history API. Returns
+`timestamp`/`equity`/`profit_loss`/`profit_loss_pct` arrays of equal
+length, plus `base_value` and the `timeframe` actually used.
+
 ### Errors
 
 | Status | Cause |
@@ -561,12 +622,38 @@ Maximum Adverse/Favorable Excursion for one closed trade — how far it moved
 against you and in your favor at any point during the holding period, not
 just at exit. Body: `{"trade_id": 12, "ticker": "AAPL"}`.
 
+### `GET /api/v1/journal/trades`
+
+Every logged trade signal, PENDING/SKIPPED/TAKEN alike — the raw feed
+behind the Trade Journal UI's table, as opposed to `/summary`'s aggregated
+all-time stats.
+
+### `GET /api/v1/journal/mae-mfe-distribution`
+
+MAE/MFE for every completed (TAKEN + exited) trade in one call — one price
+load per distinct ticker rather than one per trade — the data behind the
+Strategy Decay Visualizer's scatter chart:
+
+```json
+{
+  "points": [
+    { "trade_id": 12, "ticker": "AAPL", "mae_pct": 0.018, "mfe_pct": 0.061,
+      "pnl": 84.5, "r_multiple": 1.7, "exit_reason": "TP1" }
+  ],
+  "warnings": ["MSFT: price data unavailable (...)"]
+}
+```
+
+A ticker whose price history can't be loaded, or a trade with no bars in
+its holding window, is skipped and reported in `warnings` rather than
+failing the whole response.
+
 ### Errors
 
 | Status | Cause |
 |---|---|
 | `422` | Unknown `trade_id`, or the trade isn't `TAKEN` with both entry and exit dates recorded |
-| `503` | No usable price history for `ticker` |
+| `503` | No usable price history for `ticker` (`/mae-mfe` only — `/mae-mfe-distribution` reports this per-ticker in `warnings` instead) |
 
 ---
 

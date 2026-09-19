@@ -11,7 +11,8 @@ S&P 500?*
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)]()
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009485)]()
 [![React](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB)]()
-[![Tests](https://img.shields.io/badge/tests-239%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-687%20passing-brightgreen)]()
+[![E2E](https://img.shields.io/badge/e2e-11%20passing-brightgreen)]()
 
 [What is this?](#what-is-this) •
 [Quickstart](#quickstart-for-first-time-users) •
@@ -33,14 +34,21 @@ SwingTrader is two things working together:
    turned into?" by comparing the strategy's results against **buying and
    holding the stock** and against **the S&P 500 (SPY)** — same starting
    dollar amount, same dates, so the comparison is fair.
-2. A **frontend** (React) — a dark, terminal-style web app with two screens:
-   a **Live Screener** that scans a watchlist for buy/sell setups, and a
-   **Backtesting Studio** where you pick a strategy, a ticker, and a date
-   range, and get back charts and numbers.
+2. A **frontend** (React) — a dark, terminal-style web app with six tabs:
+   a **Live Screener** that scans a watchlist for buy/sell setups, a
+   **Signal Matrix** ranking actionable setups across every strategy at
+   once, a **Backtesting Studio** where you pick a strategy, a ticker, and
+   a date range and get back charts and numbers, a **Portfolio** dashboard
+   for the Alpaca paper account (equity, positions, emergency close-all),
+   a **Trade Journal** with MAE/MFE and win-rate/expectancy decay charts,
+   and an **Alerts** tab to configure Telegram/Discord/webhook channels
+   from the browser.
 
 You do not need to know how to trade, or write any code, to run this and
 click around it. The sections below assume you've never set up a project
 like this before.
+
+<img src="docs/media/screenshots/nav-overview.jpg" alt="SwingTrader's six tabs: Live Screener, Signal Matrix, Backtesting Studio, Portfolio, Trade Journal, Alerts" width="900">
 
 ---
 
@@ -147,6 +155,41 @@ $1,070 buying & holding AAPL"*, a chart comparing three lines (your
 strategy, buy & hold, and SPY), and a table of every trade the strategy
 would have made. That's the whole platform in one click.
 
+### Try it: Portfolio, Trade Journal, and Alerts
+
+These three tabs work without any extra setup, but show the most once
+you've configured what they talk to:
+
+- **Portfolio** needs `ALPACA_API_KEY`/`ALPACA_API_SECRET` (see
+  [Configuration](#configuration)) — without them it shows a calm "not
+  configured" notice instead of an error. With them set, it shows your
+  Alpaca **paper** account's equity/cash/buying-power, an equity curve, your
+  open positions, and an emergency **Close All Positions** button (behind a
+  confirmation modal — it's a real, if paper-money, destructive action).
+
+  <img src="docs/media/screenshots/portfolio-dashboard.jpg" alt="Portfolio Dashboard, showing the not-configured empty state on a fresh checkout" width="720">
+
+- **Trade Journal** reads whatever's in `JOURNAL_PATH` (default
+  `data/trades_live.csv`, empty on a fresh checkout) — win rate,
+  expectancy, rolling 30/60/90-day decay vs. the all-time baseline, and a
+  MAE/MFE scatter chart across every completed trade. Empty until you've
+  logged and closed at least one trade through `journal.executor.TradeJournal`.
+
+  <img src="docs/media/screenshots/trade-journal.jpg" alt="Trade Journal tab, showing the empty state before any trade has closed" width="720">
+
+- **Alerts** needs nothing to *open* — click **Alerts** in the top nav, paste
+  a Telegram bot token + chat ID, a Discord webhook URL, or a generic
+  webhook URL, click **Save Channel Settings**, then **Send Test Alert** on
+  that channel to confirm it actually works. No `.env` edit or restart
+  required — see [`ALERT_CONFIG_PATH`](#configuration).
+
+  <img src="docs/media/screenshots/alert-channels.jpg" alt="Alert Channels tab after saving a Discord webhook - the Connected badge and Send Test Alert button light up, plus the save-confirmation toast" width="720">
+
+> Screenshots above are a real, freshly-checked-out local run — no Alpaca
+> credentials, no journal history, and a Discord webhook saved live through
+> the UI to show the round trip. That's also why they're a good source of
+> truth: nothing in them is staged data.
+
 ### Running the tests (optional, for the curious)
 
 ```bash
@@ -154,8 +197,17 @@ pip install -r requirements-test.txt
 pytest tests/ -v
 ```
 
-You should see `239 passed`. This isn't required to use the app — it's how
-you'd confirm nothing is broken if you change any code.
+You should see `687 passed`. This isn't required to use the app — it's how
+you'd confirm nothing is broken if you change any code. For the frontend's
+Playwright end-to-end suite (tab switching, filtering, paper-trade
+submission, modal confirmations, error toasts — all against a mocked
+backend, no live API needed):
+
+```bash
+cd frontend
+npx playwright install chromium   # once
+npx playwright test
+```
 
 ---
 
@@ -188,6 +240,7 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(unset)* | Telegram alert channel for `POST /api/v1/alerts/dispatch`; both must be set to activate it. |
 | `DISCORD_WEBHOOK_URL` | *(unset)* | Discord alert channel (incoming webhook). |
 | `GENERIC_WEBHOOK_URL` | *(unset)* | Generic HTTP alert channel — setups are POSTed here as flat JSON. |
+| `ALERT_CONFIG_PATH` | `config/alerts_channels.json` | Where the Alerts tab's **Save Channel Settings** persists Telegram/Discord/webhook credentials, so they can be configured from the browser without editing `.env` or restarting. A field saved here overrides the matching variable above; gitignored, since it can hold real secrets. |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | *(unset)* | Alpaca **paper-trading** credentials for `/api/v1/execution/*`. The SDK always points at Alpaca's paper endpoint regardless of these values — there is no setting that makes this platform place live orders. |
 | `EXECUTION_GUARDS_ENABLED` | `true` | Whether `POST /api/v1/execution/orders` runs the session-clock and earnings/split lockout guards before dispatching (see `execution/guards.py`). Only turn off for local/paper testing outside market hours. |
 | `EXECUTION_ALLOW_EXTENDED_HOURS` | `false` | Whether pre-market/after-hours count as dispatchable sessions (still illiquid) instead of being blocked like a closed market. |
@@ -308,17 +361,24 @@ Full reference with request/response shapes and curl examples:
 - **`POST /api/v1/alerts/dispatch`** — sends a message to whichever of
   Telegram / Discord / a generic webhook are configured; on-demand only,
   nothing auto-fires from a scan.
+- **`GET`/`PUT /api/v1/alerts/config`**, **`POST /api/v1/alerts/test`** —
+  backs the Alerts tab: persist channel credentials from the browser
+  (`ALERT_CONFIG_PATH`, no `.env` edit or restart) and fire a test message
+  at exactly one channel.
 - **`POST /api/v1/execution/orders`**, **`/close-all`**, **`GET
-  /api/v1/execution/account`** — Alpaca **paper-trading** order placement
-  (market/limit/bracket) and an emergency flatten-everything switch. 503 if
-  no Alpaca credentials are configured. `/orders` also runs the session-clock
-  and earnings/split lockout guards first (`execution/guards.py`) — a 422
-  means the order was never sent to Alpaca at all. `/close-all` is
-  deliberately never guarded: an emergency flatten must always be reachable.
-- **`GET /api/v1/journal/summary`**, **`/decay`**, **`POST
-  /api/v1/journal/mae-mfe`** — trade-journal analytics: win rate/expectancy,
-  30/60/90-day performance decay, and per-trade max adverse/favorable
-  excursion.
+  /api/v1/execution/account`**, **`/positions`**, **`/portfolio-history`** —
+  Alpaca **paper-trading** order placement (market/limit/bracket), an
+  emergency flatten-everything switch, and the account/positions/equity-curve
+  reads behind the Portfolio Dashboard. 503 if no Alpaca credentials are
+  configured. `/orders` also runs the session-clock and earnings/split
+  lockout guards first (`execution/guards.py`) — a 422 means the order was
+  never sent to Alpaca at all. `/close-all` is deliberately never guarded:
+  an emergency flatten must always be reachable.
+- **`GET /api/v1/journal/summary`**, **`/decay`**, **`/trades`**, **`/mae-mfe-distribution`**,
+  **`POST /api/v1/journal/mae-mfe`** — trade-journal analytics: win
+  rate/expectancy, 30/60/90-day performance decay, the raw trade log, and
+  per-trade (or whole-journal) max adverse/favorable excursion — the data
+  behind the Trade Journal tab's charts.
 - **`GET /api/v1/data/sync/status`** / **`POST /api/v1/data/sync`** — kicks
   off (and reports progress on) a background Parquet cache refresh; the
   frontend's header sync banner polls this.
@@ -388,10 +448,15 @@ backend/
     analytics/             Console/report rendering, expectancy.py
                            (win-probability engine)
 frontend/
-  src/                    React + Vite + Tailwind + lightweight-charts UI
-                           (Signal Matrix grid, sync status banner, toasts,
-                           Framer Motion tab transitions)
-  e2e/                    Playwright smoke test
+  src/                    React + Vite + Tailwind UI (lightweight-charts,
+                           Recharts, TanStack Table); Signal Matrix grid,
+                           sync status banner, toasts, Framer Motion tab
+                           transitions
+    components/portfolio/  Alpaca account/positions/equity-curve, close-all
+    components/journal/    MAE/MFE distribution, decay charts, trade log
+    components/alerts/     Telegram/Discord/webhook channel settings
+  e2e/                    Playwright suite: smoke, portfolio, journal,
+                           alerts, signals (filtering, paper-trade, toasts)
 docs/
   architecture.md          Data-flow diagram, backend/frontend separation
   api.md                   Full endpoint reference
@@ -446,28 +511,41 @@ evidence for further investigation, not proof of anything.
    (`zscore_mean_reversion`, Hurst-filtered), momentum
    (`supertrend_psar`, `dual_momentum`), and market-structure
    (`obv_divergence`) coverage.
-5. **This round** — cross-strategy signal matrix, point-in-time historical
-   replay (zero lookahead by construction), trade execution simulation,
-   multichannel alerts (Telegram/Discord/generic webhook), Alpaca
-   paper-trading order placement + emergency close-all, trade-journal decay
-   analytics (MAE/MFE, 30/60/90-day win-rate/expectancy windows), and the
-   matching frontend surface: a real-time data-sync banner, the Signal
-   Matrix grid (sortable/filterable, one-click paper-trade action), toast
-   notifications, and animated tab transitions.
+5. Cross-strategy signal matrix, point-in-time historical replay (zero
+   lookahead by construction), trade execution simulation, multichannel
+   alerts (Telegram/Discord/generic webhook), Alpaca paper-trading order
+   placement + emergency close-all, trade-journal decay analytics (MAE/MFE,
+   30/60/90-day win-rate/expectancy windows), a real win-probability engine
+   (regime-matched historical backtest, falling back to a block-bootstrap
+   Monte Carlo percentile), and the matching frontend surface: a real-time
+   data-sync banner, the Signal Matrix grid (sortable/filterable, one-click
+   paper-trade action), toast notifications, and animated tab transitions.
+6. **This round** — the frontend panels for the backend surfaces §5 shipped
+   without one: a **Portfolio Dashboard** (Alpaca account/positions/equity
+   curve, emergency close-all behind a modal), an **Alert Channel
+   Configuration UI** (Telegram/Discord/webhook, no `.env` edit needed —
+   backed by two new endpoints, `GET`/`PUT /api/v1/alerts/config` and
+   `POST /api/v1/alerts/test`), and a **Trade Journal & Strategy Decay**
+   view (MAE/MFE scatter chart, rolling win-rate/expectancy vs. baseline —
+   backed by two new endpoints, `GET /api/v1/journal/trades` and
+   `/mae-mfe-distribution`). Also fixed the Signal Matrix's Win Prob.
+   column, which was still hard-coded to `—` from before §5's win-probability
+   engine landed. Playwright coverage expanded from one smoke test to 11
+   tests across 5 spec files (tab switching, filtering, paper-trade
+   submission, modal confirmations, configured/unconfigured empty states,
+   error toasts).
 
 **Deliberately not done yet** (so the next session doesn't have to rediscover
 this by reading code):
 
-- `win_probability` on the signal matrix is hard-coded `null` everywhere —
-  no model-backed estimate exists, and a fabricated number would be
-  actively misleading for a real trading decision.
-- No UI yet for configuring alert channels, viewing the Alpaca account /
-  positions, or the journal's decay analytics — the backend endpoints exist
-  and are tested, the frontend panels don't yet.
-- Only one Playwright smoke test exists (app loads, all tabs render, no
-  thrown errors against a mocked backend) — the full
-  success/failure/network-degradation/edge-case e2e matrix from the original
-  spec is still a fast-follow.
+- The Trade Journal's decay baseline is the journal's own all-time
+  expectancy/win-rate (`GET /api/v1/journal/summary`), not a per-strategy
+  backtest result — `trades_live.csv` has no strategy-attribution column, so
+  there's no way to join a logged trade back to the backtest that would have
+  predicted it without adding one.
+- Logging entries/exits into the trade journal is still done via the
+  `TradeJournal` class directly (script/notebook) — there is no "log this
+  fill" UI action yet; the frontend is read-only against the journal.
 - Statistical-arbitrage pairs trading (cointegration/Johansen) and the
   macro/cross-asset strategies (yield curve, VIX term structure, COT
   positioning, intermarket lead-lag, seasonality) were scoped out of the

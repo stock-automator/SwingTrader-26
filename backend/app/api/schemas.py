@@ -462,6 +462,38 @@ class AlertDispatchResponse(BaseModel):
     )
 
 
+class AlertChannelsConfigRequest(BaseModel):
+    """`PUT /api/v1/alerts/config` body - a full replace of the stored
+    channel config; omit a field (or send it empty) to leave that channel
+    unconfigured."""
+
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    discord_webhook_url: str | None = None
+    generic_webhook_url: str | None = None
+
+
+class AlertChannelsConfigResponse(BaseModel):
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+    discord_webhook_url: str | None = None
+    generic_webhook_url: str | None = None
+    telegram_configured: bool
+    discord_configured: bool
+    webhook_configured: bool
+
+
+class AlertTestRequest(BaseModel):
+    """`POST /api/v1/alerts/test` body."""
+
+    channel: Literal["telegram", "discord", "webhook"]
+
+
+class AlertTestResponse(BaseModel):
+    channel: str
+    status: str
+
+
 # ---- Execution (Alpaca paper trading) ----
 
 
@@ -517,6 +549,31 @@ class AlpacaAccountResponse(BaseModel):
     cash: float
     buying_power: float
     portfolio_value: float
+
+
+class PositionResponse(BaseModel):
+    symbol: str
+    side: str | None
+    qty: float
+    avg_entry_price: float
+    current_price: float | None
+    market_value: float | None
+    cost_basis: float
+    unrealized_pl: float | None
+    unrealized_plpc: float | None
+
+
+class PositionsResponse(BaseModel):
+    positions: list[PositionResponse]
+
+
+class PortfolioHistoryResponse(BaseModel):
+    timestamp: list[str]
+    equity: list[float]
+    profit_loss: list[float]
+    profit_loss_pct: list[float | None]
+    base_value: float | None
+    timeframe: str
 
 
 # ---- Signal matrix ----
@@ -748,6 +805,53 @@ class MaeMfeResponse(BaseModel):
     mae_pct: float
     mfe_dollars: float
     mfe_pct: float
+
+
+class JournalTradeResponse(BaseModel):
+    """One row from `TradeJournal`'s CSV, as-is - the raw feed behind the
+    Trade Journal UI's table."""
+
+    id: int
+    ticker: str
+    entry_date: str | None = None
+    entry_price: float | None = None
+    entry_thesis: str | None = None
+    signal_strength: float | None = None
+    stop_loss: float | None = None
+    target_1: float | None = None
+    target_2: float | None = None
+    entry_status: str | None = None
+    skip_reason: str | None = None
+    actual_entry_date: str | None = None
+    actual_entry_price: float | None = None
+    exit_date: str | None = None
+    exit_price: float | None = None
+    exit_reason: str | None = None
+    holding_days: float | None = None
+    pnl: float | None = None
+    pnl_pct: float | None = None
+    r_multiple: float | None = None
+    notes: str | None = None
+    created_at: str | None = None
+
+
+class JournalTradesResponse(BaseModel):
+    trades: list[JournalTradeResponse]
+
+
+class MaeMfeDistributionPoint(BaseModel):
+    trade_id: int
+    ticker: str
+    mae_pct: float
+    mfe_pct: float
+    pnl: float | None
+    r_multiple: float | None
+    exit_reason: str | None
+
+
+class MaeMfeDistributionResponse(BaseModel):
+    points: list[MaeMfeDistributionPoint]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SimulateTradeExecutionResponse(BaseModel):

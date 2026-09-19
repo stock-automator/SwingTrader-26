@@ -7,8 +7,9 @@ Critical for finding blind spots between backtest and reality
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List
 
+import numpy as np
 import pandas as pd
 
 
@@ -356,6 +357,87 @@ class TradeJournal:
             "mfe_dollars": mfe_dollars,
             "mfe_pct": mfe_dollars / entry_price if entry_price else 0.0,
         }
+
+    def list_trades(self) -> List[Dict]:
+        """Every logged trade signal, in log order - the raw feed behind
+        the Trade Journal UI's table. Unlike `analyze_all_trades`, this
+        includes PENDING/SKIPPED rows and open (not-yet-exited) TAKEN
+        trades, not just completed ones."""
+
+        def _clean(value):
+            # `datetime` also matches `pd.Timestamp` (a subclass) - covers
+            # both a freshly-loaded CSV column and a same-session in-memory
+            # assignment like `log_entry`'s raw `datetime.datetime`.
+            if isinstance(value, datetime):
+                return None if pd.isna(value) else value.isoformat()
+            if isinstance(value, np.integer):
+                return int(value)
+            if isinstance(value, np.floating):
+                return None if pd.isna(value) else float(value)
+            if isinstance(value, str):
+                return value
+            return None if pd.isna(value) else value
+
+        return [
+            {col: _clean(row[col]) for col in self.df.columns}
+            for _, row in self.df.iterrows()
+        ]
+
+    def compute_mae_mfe_all(self, price_loader: Callable[[str], pd.DataFrame]) -> Dict:
+        """MAE/MFE for every completed (TAKEN + exited) trade, calling
+        `price_loader` once per distinct ticker rather than once per trade.
+
+        A per-ticker load failure or a per-trade `compute_mae_mfe` failure
+        (e.g. no bars in the holding window) is collected into `warnings`
+        and that trade is skipped, rather than failing the whole
+        distribution - mirrors `alerts.dispatcher.AlertDispatcher.dispatch`
+        isolating one channel's failure from the rest.
+
+        Returns:
+            `{"points": [...], "warnings": [...]}`.
+        """
+        taken = self.df[self.df["entry_status"] == "TAKEN"]
+        exited = taken[taken["exit_date"].notna()]
+
+        warnings: List[str] = []
+        price_cache: Dict[str, pd.DataFrame] = {}
+        for ticker in exited["ticker"].unique():
+            try:
+                price_cache[ticker] = price_loader(ticker)
+            except Exception as exc:  # noqa: BLE001 - isolates one ticker's failure
+                warnings.append(f"{ticker}: price data unavailable ({exc})")
+
+        points: List[Dict] = []
+        for _, trade in exited.iterrows():
+            ticker = trade["ticker"]
+            price_df = price_cache.get(ticker)
+            if price_df is None:
+                continue
+            trade_id = int(trade["id"])
+            try:
+                mae_mfe = self.compute_mae_mfe(trade_id, price_df)
+            except ValueError as exc:
+                warnings.append(f"trade {trade_id}: {exc}")
+                continue
+            points.append(
+                {
+                    "trade_id": trade_id,
+                    "ticker": ticker,
+                    "mae_pct": mae_mfe["mae_pct"],
+                    "mfe_pct": mae_mfe["mfe_pct"],
+                    "pnl": (float(trade["pnl"]) if pd.notna(trade["pnl"]) else None),
+                    "r_multiple": (
+                        float(trade["r_multiple"])
+                        if pd.notna(trade["r_multiple"])
+                        else None
+                    ),
+                    "exit_reason": (
+                        trade["exit_reason"] if pd.notna(trade["exit_reason"]) else None
+                    ),
+                }
+            )
+
+        return {"points": points, "warnings": warnings}
 
     def analyze_decay(
         self, windows: tuple = (30, 60, 90), as_of: datetime | None = None
