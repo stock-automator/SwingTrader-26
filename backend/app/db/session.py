@@ -51,8 +51,7 @@ def _resolve_db_path() -> Path:
 
 
 def _create_tables(conn: duckdb.DuckDBPyConnection) -> None:
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS scan_jobs (
             job_id TEXT PRIMARY KEY,
             status TEXT,
@@ -61,10 +60,8 @@ def _create_tables(conn: duckdb.DuckDBPyConnection) -> None:
             completed_at TIMESTAMP,
             error TEXT
         )
-        """
-    )
-    conn.execute(
-        """
+        """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS scan_results (
             job_id TEXT,
             ticker TEXT,
@@ -78,8 +75,7 @@ def _create_tables(conn: duckdb.DuckDBPyConnection) -> None:
             trigger_reason TEXT,
             payload JSON
         )
-        """
-    )
+        """)
 
 
 def _get_shared_connection_locked() -> duckdb.DuckDBPyConnection:

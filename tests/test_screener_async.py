@@ -157,9 +157,7 @@ class TestCreateAndPollScan:
             assert result_count == len(body["results"])
 
     def test_defaults_to_every_registered_strategy(self, client, fake_prices):
-        response = client.post(
-            "/api/v1/scans", json={"tickers": ["AAPL", "MSFT"]}
-        )
+        response = client.post("/api/v1/scans", json={"tickers": ["AAPL", "MSFT"]})
         assert response.status_code == 202
         job_id = response.json()["job_id"]
         body = _poll_until_done(client, job_id)

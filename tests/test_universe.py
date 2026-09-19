@@ -194,19 +194,29 @@ class TestSyncFallback:
         def _boom():
             raise RuntimeError("no network in this sandbox")
 
-        monkeypatch.setattr(pd, "read_html", lambda *a, **k: (_ for _ in ()).throw(
-            RuntimeError("no network in this sandbox")
-        ))
+        monkeypatch.setattr(
+            pd,
+            "read_html",
+            lambda *a, **k: (_ for _ in ()).throw(
+                RuntimeError("no network in this sandbox")
+            ),
+        )
 
         symbols = manager.fetch_sp500_constituents()
 
         assert "AAPL" in symbols
         assert len(symbols) > 50
 
-    def test_nasdaq100_fetch_raises_falls_back_to_static_list(self, manager, monkeypatch):
-        monkeypatch.setattr(pd, "read_html", lambda *a, **k: (_ for _ in ()).throw(
-            RuntimeError("no network in this sandbox")
-        ))
+    def test_nasdaq100_fetch_raises_falls_back_to_static_list(
+        self, manager, monkeypatch
+    ):
+        monkeypatch.setattr(
+            pd,
+            "read_html",
+            lambda *a, **k: (_ for _ in ()).throw(
+                RuntimeError("no network in this sandbox")
+            ),
+        )
 
         symbols = manager.fetch_nasdaq100_constituents()
 
@@ -216,9 +226,13 @@ class TestSyncFallback:
     def test_sync_still_writes_a_result_when_network_is_unavailable(
         self, manager, monkeypatch
     ):
-        monkeypatch.setattr(pd, "read_html", lambda *a, **k: (_ for _ in ()).throw(
-            RuntimeError("no network in this sandbox")
-        ))
+        monkeypatch.setattr(
+            pd,
+            "read_html",
+            lambda *a, **k: (_ for _ in ()).throw(
+                RuntimeError("no network in this sandbox")
+            ),
+        )
         manager.data_dir.mkdir(parents=True, exist_ok=True)
         # Give a handful of the static-fallback names real data so the
         # active list isn't empty after the broken-data purge.
@@ -241,9 +255,11 @@ class TestSyncFallback:
 
 class TestReadRoundTrip:
     def test_read_after_sync_matches(self, manager, monkeypatch):
-        monkeypatch.setattr(pd, "read_html", lambda *a, **k: (_ for _ in ()).throw(
-            RuntimeError("offline")
-        ))
+        monkeypatch.setattr(
+            pd,
+            "read_html",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")),
+        )
         manager.data_dir.mkdir(parents=True, exist_ok=True)
         _write_parquet(manager.data_dir / "AAPL.parquet")
 
