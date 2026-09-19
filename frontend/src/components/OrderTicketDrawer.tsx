@@ -6,7 +6,11 @@ import type { OrderTicket, ScreenerSetup } from "../types";
 interface OrderTicketDrawerProps {
   setup: ScreenerSetup | null;
   onClose: () => void;
+  /** Account sizes to price the ticket at. Defaults to $1k/$5k/$10k. */
+  accountTiers?: number[];
 }
+
+const DEFAULT_ACCOUNT_TIERS = [1000, 5000, 10000];
 
 function ticketText(ticket: OrderTicket): string {
   return [
@@ -77,7 +81,11 @@ function TicketCard({ ticket }: { ticket: OrderTicket }) {
   );
 }
 
-export function OrderTicketDrawer({ setup, onClose }: OrderTicketDrawerProps) {
+export function OrderTicketDrawer({
+  setup,
+  onClose,
+  accountTiers = DEFAULT_ACCOUNT_TIERS,
+}: OrderTicketDrawerProps) {
   const [tickets, setTickets] = useState<OrderTicket[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,13 +112,14 @@ export function OrderTicketDrawer({ setup, onClose }: OrderTicketDrawerProps) {
       tp_type: "FIXED",
       tp_value: tpValue,
       direction: 1,
+      account_tiers: accountTiers,
     })
       .then((res) => setTickets(res.tickets))
       .catch((err) =>
         setError(err instanceof ApiError ? err.message : String(err)),
       )
       .finally(() => setLoading(false));
-  }, [setup]);
+  }, [setup, accountTiers]);
 
   const isOpen = setup !== null;
 

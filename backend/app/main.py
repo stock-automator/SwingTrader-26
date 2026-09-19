@@ -21,10 +21,13 @@ from .api.execution import router as execution_router
 from .api.journal import router as journal_router
 from .api.order_ticket import router as order_ticket_router
 from .api.replay import router as replay_router
+from .api.scans import router as scans_router
 from .api.schemas import HealthResponse
 from .api.screener import router as screener_router
 from .api.signals import router as signals_router
+from .api.universe import router as universe_router
 from .config import get_settings
+from .data.universe import register_universe_startup
 
 app = FastAPI(
     title="SwingTrader API",
@@ -56,6 +59,10 @@ app.include_router(execution_router)
 app.include_router(signals_router)
 app.include_router(replay_router)
 app.include_router(journal_router)
+app.include_router(scans_router)
+app.include_router(universe_router)
+
+register_universe_startup(app)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)

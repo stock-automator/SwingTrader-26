@@ -20,6 +20,7 @@ import pandas as pd
 from backtesting import Backtest, Strategy
 
 from backend.app.quant.indicators import wilder_atr
+from backend.app.quant.regime import MacroRegimeDetector
 from backend.app.quant.risk import RiskManager
 from backend.app.quant.strategies.base import BaseStrategy
 
@@ -342,3 +343,149 @@ def build_order_tickets(
         )
         for tier in account_tiers
     ]
+
+
+#: Trading days a single simulated trade is allowed to stay open before it
+#: is force-closed at that bar's close as a `TIMEOUT` - a swing trade that
+#: hasn't resolved to its stop or target in ~3 months is treated as "thesis
+#: didn't play out" rather than left open indefinitely.
+DEFAULT_MAX_HOLDING_PERIOD_DAYS = 60
+
+EXIT_TRIGGER_STOP = "STOP"
+EXIT_TRIGGER_TARGET = "TARGET"
+EXIT_TRIGGER_REGIME = "REGIME"
+EXIT_TRIGGER_TIMEOUT = "TIMEOUT"
+
+VALID_EXIT_TRIGGERS = frozenset(
+    {EXIT_TRIGGER_STOP, EXIT_TRIGGER_TARGET, EXIT_TRIGGER_REGIME, EXIT_TRIGGER_TIMEOUT}
+)
+
+
+@dataclass(frozen=True)
+class ExitResolution:
+    """How a single already-filled trade would have resolved, walking
+    forward bar-by-bar from the fill.
+
+    `mae_pct`/`mfe_pct` are measured over the *entire path* from entry to
+    `exit_date` (the worst/best intrabar excursion at any point along the
+    way), not just entry-to-exit - the whole reason a trader wants this
+    over a bare P&L number.
+    """
+
+    exit_date: pd.Timestamp
+    exit_price: float
+    exit_trigger: str
+    holding_period_days: int
+    mae_pct: float
+    mfe_pct: float
+
+
+def resolve_trade_exit(
+    df: pd.DataFrame,
+    fill_bar_index: int,
+    entry_price: float,
+    stop_loss: float,
+    take_profit: float,
+    direction: int = 1,
+    max_holding_period_days: int = DEFAULT_MAX_HOLDING_PERIOD_DAYS,
+    use_regime_filter: bool = True,
+) -> ExitResolution:
+    """Walk `df` forward from the bar after `fill_bar_index`, one bar at a
+    time, until the trade's stop, target, a blocked macro regime, or the
+    holding-period ceiling resolves it - whichever comes first.
+
+    Each bar `i` is evaluated using only `df.iloc[:i+1]` (bars up to and
+    including `i`): the regime check at bar `i` cannot see bar `i+1`, so
+    this walk carries zero lookahead beyond what a trade holding through
+    bar `i` has itself already revealed.
+
+    Priority when more than one condition is true on the same bar: `STOP`
+    beats `TARGET` beats `REGIME` - the conservative assumption (a bar that
+    gapped through both levels is charged the worse outcome) matches how a
+    real stop-loss order would have filled first if the bar opened against
+    the position.
+
+    Args:
+        fill_bar_index: Index (into `df`) of the bar the trade actually
+            filled on - the walk starts at `fill_bar_index + 1`, never
+            re-examining the fill bar itself.
+        entry_price: The actual fill price (post-slippage), not a raw
+            reference price - MAE/MFE and P&L must be measured from what
+            the trade actually paid.
+        direction: `1` for long, `-1` for short.
+        use_regime_filter: If `True` and `direction == 1`, an `UNKNOWN`-or-
+            blocked macro regime (`MacroRegimeDetector.is_long_blocked`) on
+            a bar closes the trade there as `REGIME`. Shorts have no
+            symmetric macro filter defined in this codebase, so this has no
+            effect when `direction == -1`.
+
+    Raises:
+        ValueError: if `direction` is not `1`/`-1`, or there is no bar after
+            `fill_bar_index` to walk forward on.
+    """
+    if direction not in (1, -1):
+        raise ValueError("direction must be 1 (long) or -1 (short)")
+    if fill_bar_index + 1 >= len(df):
+        raise ValueError(
+            "No bars after fill_bar_index are available to resolve an exit"
+        )
+    if max_holding_period_days < 1:
+        raise ValueError("max_holding_period_days must be at least 1")
+
+    regime_detector = (
+        MacroRegimeDetector() if use_regime_filter and direction == 1 else None
+    )
+
+    last_idx = min(fill_bar_index + max_holding_period_days, len(df) - 1)
+    mae_dollars = 0.0
+    mfe_dollars = 0.0
+
+    for i in range(fill_bar_index + 1, last_idx + 1):
+        low = float(df["Low"].iloc[i])
+        high = float(df["High"].iloc[i])
+
+        if direction == 1:
+            adverse = max(0.0, entry_price - low)
+            favorable = max(0.0, high - entry_price)
+            stop_touched = low <= stop_loss
+            target_touched = high >= take_profit
+        else:
+            adverse = max(0.0, high - entry_price)
+            favorable = max(0.0, entry_price - low)
+            stop_touched = high >= stop_loss
+            target_touched = low <= take_profit
+
+        mae_dollars = max(mae_dollars, adverse)
+        mfe_dollars = max(mfe_dollars, favorable)
+
+        if stop_touched:
+            exit_price, trigger = stop_loss, EXIT_TRIGGER_STOP
+        elif target_touched:
+            exit_price, trigger = take_profit, EXIT_TRIGGER_TARGET
+        elif regime_detector is not None and regime_detector.is_long_blocked(
+            df.iloc[: i + 1]
+        ):
+            exit_price, trigger = float(df["Close"].iloc[i]), EXIT_TRIGGER_REGIME
+        else:
+            continue
+
+        return ExitResolution(
+            exit_date=df.index[i],
+            exit_price=exit_price,
+            exit_trigger=trigger,
+            holding_period_days=(df.index[i] - df.index[fill_bar_index]).days,
+            mae_pct=mae_dollars / entry_price if entry_price else 0.0,
+            mfe_pct=mfe_dollars / entry_price if entry_price else 0.0,
+        )
+
+    # Nothing triggered within the holding-period ceiling: force-close at
+    # the last examined bar's close.
+    timeout_idx = last_idx
+    return ExitResolution(
+        exit_date=df.index[timeout_idx],
+        exit_price=float(df["Close"].iloc[timeout_idx]),
+        exit_trigger=EXIT_TRIGGER_TIMEOUT,
+        holding_period_days=(df.index[timeout_idx] - df.index[fill_bar_index]).days,
+        mae_pct=mae_dollars / entry_price if entry_price else 0.0,
+        mfe_pct=mfe_dollars / entry_price if entry_price else 0.0,
+    )

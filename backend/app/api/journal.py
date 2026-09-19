@@ -8,6 +8,7 @@ choice `api/data_sync.py` and every other stateless route here already make.
 
 from __future__ import annotations
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..config import Settings, get_settings
@@ -15,7 +16,9 @@ from ..data.loader import DataUnavailableError, load_prices
 from ..journal.executor import TradeJournal
 from .schemas import (
     JournalDecayResponse,
+    JournalSimulateRequest,
     JournalSummaryResponse,
+    JournalTradeResponse,
     JournalTradesResponse,
     MaeMfeDistributionResponse,
     MaeMfeRequest,
@@ -23,6 +26,11 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api/v1/journal", tags=["journal"])
+
+#: Tag written to `TradeJournal`'s `source` column by the write endpoint
+#: below - distinguishes a resolved point-in-time replay a trader is
+#: journaling for study from a real signal/trade ("LIVE", the default).
+MANUAL_SIMULATION_SOURCE = "MANUAL_SIMULATION"
 
 
 def _journal(settings: Settings = Depends(get_settings)) -> TradeJournal:
@@ -81,6 +89,50 @@ def journal_mae_mfe(
         return journal.compute_mae_mfe(request.trade_id, price_df)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/simulate", response_model=JournalTradeResponse)
+def journal_simulate(
+    request: JournalSimulateRequest, journal: TradeJournal = Depends(_journal)
+) -> dict:
+    """Persist one resolved `simulate-trade-execution` result as a closed
+    journal entry tagged `source="MANUAL_SIMULATION"`, via `TradeJournal.
+    log_signal` -> `log_entry` -> `log_exit` (the same three calls a live
+    signal's full lifecycle makes) so it shows up in every existing
+    analysis method (`/summary`, `/decay`, `/mae-mfe-distribution`, ...)
+    alongside real trades, distinguishable by `source`.
+    """
+    try:
+        entry_date = pd.Timestamp(request.entry_date).to_pydatetime()
+        exit_date = pd.Timestamp(request.exit_date).to_pydatetime()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid date: {exc}") from exc
+
+    trade_id = journal.log_signal(
+        ticker=request.ticker,
+        entry_date=entry_date,
+        entry_price=request.entry_price,
+        thesis=request.entry_thesis,
+        signal_strength=request.signal_strength,
+        stop_loss=request.stop_loss,
+        target_1=request.take_profit,
+        target_2=request.take_profit,
+        source=MANUAL_SIMULATION_SOURCE,
+    )
+    journal.log_entry(
+        trade_id=trade_id,
+        actual_entry_price=request.entry_price,
+        actual_entry_date=entry_date,
+    )
+    journal.log_exit(
+        trade_id=trade_id,
+        exit_date=exit_date,
+        exit_price=request.exit_price,
+        exit_reason=request.exit_trigger,
+        notes=request.post_mortem_note,
+    )
+
+    return next(row for row in journal.list_trades() if row["id"] == trade_id)
 
 
 @router.get("/mae-mfe-distribution", response_model=MaeMfeDistributionResponse)

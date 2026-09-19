@@ -36,6 +36,28 @@ from .strategies.base import BaseStrategy
 #: baseline itself and a +/-10% midpoint for a smoother reading.
 DEFAULT_PARAMETER_PERTURBATIONS: tuple[float, ...] = (-0.2, -0.1, 0.0, 0.1, 0.2)
 
+#: The product's "+/-20% between adjacent windows" parameter-stability
+#: threshold: a per-window optimal value that drifts beyond this fraction
+#: of the previous window's value is flagged as unstable.
+DEFAULT_PARAM_STABILITY_THRESHOLD_PCT = 0.2
+
+
+def _slice_window(
+    df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp
+) -> pd.DataFrame:
+    """Half-open `[start, end)` slice of `df`.
+
+    `generate_windows` makes each OOS window start exactly where the
+    previous IS window ends (`is_end == oos_start`), so both a plain
+    `df.loc[is_start:is_end]` and `df.loc[oos_start:oos_end]` would
+    include that shared boundary bar in *both* windows - label-based
+    `.loc` slicing is inclusive on both ends. That one duplicated bar is
+    a real (if small) breach of "OOS is data the IS side never saw":
+    this half-open slice gives it to exactly one window, always the
+    earlier one.
+    """
+    return df.loc[(df.index >= start) & (df.index < end)]
+
 
 def _window_return_pct(
     strategy: BaseStrategy,
@@ -208,7 +230,7 @@ def run_walk_forward(
     for is_start, is_end, oos_start, oos_end in windows:
         is_return = _window_return_pct(
             strategy,
-            df.loc[is_start:is_end],
+            _slice_window(df, is_start, is_end),
             initial_capital,
             risk_per_trade_pct,
             commission,
@@ -216,7 +238,7 @@ def run_walk_forward(
         )
         oos_return = _window_return_pct(
             strategy,
-            df.loc[oos_start:oos_end],
+            _slice_window(df, oos_start, oos_end),
             initial_capital,
             risk_per_trade_pct,
             commission,
@@ -368,4 +390,153 @@ def analyze_parameter_sensitivity(
         baseline_value=baseline_value,
         points=points,
         cliff_threshold=cliff_threshold,
+    )
+
+
+@dataclass(frozen=True)
+class ParameterStabilityWindow:
+    """One rolling window's IS-optimized parameter value."""
+
+    is_start: pd.Timestamp
+    is_end: pd.Timestamp
+    optimal_value: float | None
+
+    def as_dict(self) -> dict:
+        return {
+            "is_start": self.is_start.strftime("%Y-%m-%d"),
+            "is_end": self.is_end.strftime("%Y-%m-%d"),
+            "optimal_value": self.optimal_value,
+        }
+
+
+@dataclass(frozen=True)
+class ParameterStabilityResult:
+    """Whether a strategy parameter's IS-optimal value holds steady across
+    rolling walk-forward windows, or drifts - the sign of a parameter fit
+    to a specific slice of history rather than a durable edge."""
+
+    param_name: str
+    windows: list[ParameterStabilityWindow]
+    drift_threshold_pct: float = DEFAULT_PARAM_STABILITY_THRESHOLD_PCT
+
+    @property
+    def drifts_pct(self) -> list[float | None]:
+        """Fractional change of each window's `optimal_value` versus the
+        immediately preceding window's, aligned to `windows` (index 0 is
+        always `None`: there is no prior window to drift from). `None`
+        wherever either value is undefined or the prior value is zero (a
+        ratio would be undefined/infinite)."""
+        drifts: list[float | None] = [None]
+        for previous, current in zip(self.windows, self.windows[1:]):
+            prev_value, curr_value = previous.optimal_value, current.optimal_value
+            if prev_value is None or curr_value is None or prev_value == 0:
+                drifts.append(None)
+            else:
+                drifts.append((curr_value - prev_value) / abs(prev_value))
+        return drifts
+
+    @property
+    def unstable_window_indices(self) -> list[int]:
+        """Indices into `windows` (the later window of each adjacent pair)
+        whose drift from the previous window exceeds `drift_threshold_pct`
+        in either direction."""
+        return [
+            i
+            for i, drift in enumerate(self.drifts_pct)
+            if drift is not None and abs(drift) > self.drift_threshold_pct
+        ]
+
+    @property
+    def is_stable(self) -> bool:
+        return len(self.unstable_window_indices) == 0
+
+    def as_dict(self) -> dict:
+        return {
+            "param_name": self.param_name,
+            "drift_threshold_pct": self.drift_threshold_pct,
+            "is_stable": self.is_stable,
+            "unstable_window_indices": self.unstable_window_indices,
+            "windows": [
+                {**w.as_dict(), "drift_pct": drift}
+                for w, drift in zip(self.windows, self.drifts_pct)
+            ],
+        }
+
+
+def optimize_parameter_per_window(
+    strategy_factory: Callable[[float], BaseStrategy],
+    param_name: str,
+    param_grid: Sequence[float],
+    df: pd.DataFrame,
+    is_months: int = 12,
+    oos_months: int = 3,
+    step_months: int | None = None,
+    initial_capital: float = 1000.0,
+    risk_per_trade_pct: float = 0.02,
+    commission: float = 0.001,
+    slippage_pct: float = 0.0005,
+    drift_threshold_pct: float = DEFAULT_PARAM_STABILITY_THRESHOLD_PCT,
+) -> ParameterStabilityResult:
+    """For each rolling `is_months`/`oos_months` window (see
+    `generate_windows`), pick whichever `param_grid` value maximizes return
+    on that window's own IS slice, then flag windows whose pick drifts more
+    than `drift_threshold_pct` from the previous window's.
+
+    The optimization for a given window only ever sees that window's IS
+    slice (via `_slice_window`, which excludes the boundary bar shared with
+    the following OOS window) - it never touches that window's own OOS data
+    or any later window's data, so a parameter chosen here is never fit to
+    data it will then be "tested" against.
+
+    Args:
+        strategy_factory: Builds a strategy instance given one parameter
+            value, as in `analyze_parameter_sensitivity`.
+        param_name: Label only, surfaced in the result.
+        param_grid: Candidate values to try for each window; the one with
+            the best IS return wins that window.
+        drift_threshold_pct: See `ParameterStabilityResult`.
+
+    Raises:
+        ValueError: via `generate_windows`, for a non-positive window
+            argument or an empty `df`; or if `param_grid` is empty.
+    """
+    if not param_grid:
+        raise ValueError("param_grid must be non-empty")
+
+    windows = generate_windows(df.index, is_months, oos_months, step_months)
+
+    stability_windows = []
+    for is_start, is_end, _oos_start, _oos_end in windows:
+        df_is = _slice_window(df, is_start, is_end)
+        best_value: float | None = None
+        best_return: float | None = None
+        for value in param_grid:
+            try:
+                strategy = strategy_factory(value)
+            except Exception:
+                continue
+            candidate_return = _window_return_pct(
+                strategy,
+                df_is,
+                initial_capital,
+                risk_per_trade_pct,
+                commission,
+                slippage_pct,
+            )
+            if candidate_return is None:
+                continue
+            if best_return is None or candidate_return > best_return:
+                best_return = candidate_return
+                best_value = value
+
+        stability_windows.append(
+            ParameterStabilityWindow(
+                is_start=is_start, is_end=is_end, optimal_value=best_value
+            )
+        )
+
+    return ParameterStabilityResult(
+        param_name=param_name,
+        windows=stability_windows,
+        drift_threshold_pct=drift_threshold_pct,
     )

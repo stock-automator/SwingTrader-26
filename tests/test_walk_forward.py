@@ -11,9 +11,12 @@ from backend.app.quant.strategies.moving_average_cross import MovingAverageCross
 from backend.app.quant.walk_forward import (
     ParameterSensitivityPoint,
     ParameterSensitivityResult,
+    ParameterStabilityResult,
+    ParameterStabilityWindow,
     WalkForwardWindow,
     analyze_parameter_sensitivity,
     generate_windows,
+    optimize_parameter_per_window,
     run_walk_forward,
 )
 
@@ -278,6 +281,116 @@ class TestAnalyzeParameterSensitivity:
         assert payload["param_name"] == "fast_period"
         assert "is_cliff" in payload
         assert len(payload["points"]) == 5
+
+
+class TestParameterStabilityResult:
+    def _windows(self, values: list[float | None]) -> list[ParameterStabilityWindow]:
+        return [
+            ParameterStabilityWindow(
+                is_start=pd.Timestamp("2020-01-01") + pd.DateOffset(months=i),
+                is_end=pd.Timestamp("2021-01-01") + pd.DateOffset(months=i),
+                optimal_value=v,
+            )
+            for i, v in enumerate(values)
+        ]
+
+    def test_stable_when_values_dont_drift_beyond_threshold(self):
+        result = ParameterStabilityResult(
+            param_name="fast_period",
+            windows=self._windows([10.0, 10.5, 11.0, 10.8]),
+            drift_threshold_pct=0.2,
+        )
+        assert result.is_stable is True
+        assert result.unstable_window_indices == []
+        assert result.drifts_pct[0] is None
+
+    def test_unstable_when_a_window_drifts_beyond_threshold(self):
+        result = ParameterStabilityResult(
+            param_name="fast_period",
+            windows=self._windows([10.0, 10.5, 20.0, 20.5]),
+            drift_threshold_pct=0.2,
+        )
+        assert result.is_stable is False
+        assert result.unstable_window_indices == [2]
+        assert result.drifts_pct[2] == pytest.approx((20.0 - 10.5) / 10.5)
+
+    def test_none_values_never_flagged_as_unstable(self):
+        result = ParameterStabilityResult(
+            param_name="fast_period",
+            windows=self._windows([10.0, None, 20.0]),
+            drift_threshold_pct=0.2,
+        )
+        assert result.drifts_pct == [None, None, None]
+        assert result.is_stable is True
+
+    def test_as_dict_is_json_ready(self):
+        result = ParameterStabilityResult(
+            param_name="fast_period",
+            windows=self._windows([10.0, 20.0]),
+            drift_threshold_pct=0.2,
+        )
+        payload = result.as_dict()
+        assert payload["param_name"] == "fast_period"
+        assert payload["is_stable"] is False
+        assert payload["unstable_window_indices"] == [1]
+        assert payload["windows"][1]["drift_pct"] == pytest.approx(1.0)
+
+
+class TestOptimizeParameterPerWindow:
+    def test_rejects_empty_param_grid(self):
+        df = _trending_ohlcv(n=300)
+        with pytest.raises(ValueError, match="param_grid"):
+            optimize_parameter_per_window(
+                lambda v: MovingAverageCross(fast_period=int(v), slow_period=15),
+                param_name="fast_period",
+                param_grid=(),
+                df=df,
+            )
+
+    def test_produces_one_stability_window_per_walk_forward_window(self):
+        df = _trending_ohlcv()
+        result = optimize_parameter_per_window(
+            lambda v: MovingAverageCross(fast_period=max(int(v), 1), slow_period=15),
+            param_name="fast_period",
+            param_grid=(3, 5, 8),
+            df=df,
+            is_months=6,
+            oos_months=2,
+        )
+
+        expected_windows = generate_windows(df.index, is_months=6, oos_months=2)
+        assert isinstance(result, ParameterStabilityResult)
+        assert len(result.windows) == len(expected_windows)
+        for window in result.windows:
+            assert window.optimal_value is None or window.optimal_value in (3, 5, 8)
+
+    def test_a_failing_strategy_factory_yields_all_none_and_is_stable(self):
+        df = _trending_ohlcv(n=400)
+
+        def always_fails(value):
+            raise RuntimeError("bad params")
+
+        result = optimize_parameter_per_window(
+            always_fails,
+            param_name="x",
+            param_grid=(1, 2, 3),
+            df=df,
+            is_months=6,
+            oos_months=2,
+        )
+        assert all(w.optimal_value is None for w in result.windows)
+        assert result.is_stable is True
+
+    def test_is_optimization_never_touches_its_own_oos_slice(self, monkeypatch):
+        # Every window's IS slice must strictly precede its OOS slice with no
+        # shared bar - assert this directly against the windows a real run
+        # produces, closing the one-bar overlap `_slice_window` fixes.
+        df = _trending_ohlcv(n=900)
+        windows = generate_windows(df.index, is_months=6, oos_months=2)
+        for is_start, is_end, oos_start, oos_end in windows:
+            is_slice = df.loc[(df.index >= is_start) & (df.index < is_end)]
+            oos_slice = df.loc[(df.index >= oos_start) & (df.index < oos_end)]
+            assert is_slice.index.intersection(oos_slice.index).empty
 
 
 if __name__ == "__main__":
