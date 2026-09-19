@@ -16,6 +16,7 @@ import pandas as pd
 
 from ..config import Settings, get_settings
 from ..data.loader import DataUnavailableError, load_prices
+from ..data.universe import DENYLIST
 
 log = logging.getLogger(__name__)
 
@@ -122,8 +123,12 @@ def load_frames(
 
 
 def _read_watchlist(settings: Settings) -> list[str]:
-    """Every ticker in `settings.watchlist_path`, one per line, uncapped.
-    Empty if the file doesn't exist."""
+    """Every ticker in `settings.watchlist_path`, one per line, uncapped,
+    with `data.universe.DENYLIST` symbols filtered out - those are known to
+    have broken/missing data in this repo's parquet store, and retrying
+    them against a live provider on every screener/sync poll just spams
+    failed downloads for tickers that can never succeed. Empty if the file
+    doesn't exist."""
     path = settings.watchlist_path
     if not path.exists():
         return []
@@ -131,7 +136,9 @@ def _read_watchlist(settings: Settings) -> list[str]:
     return [
         line.strip().upper()
         for line in path.read_text().splitlines()
-        if line.strip() and not line.strip().startswith("#")
+        if line.strip()
+        and not line.strip().startswith("#")
+        and line.strip().upper() not in DENYLIST
     ]
 
 
