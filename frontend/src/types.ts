@@ -271,6 +271,57 @@ export interface SignalMatrixResponse {
   warnings: string[];
 }
 
+// ---- Background scan jobs (POST /api/v1/scans) ----
+
+export type ScanJobStatus = "pending" | "running" | "completed" | "failed";
+
+// A setup returned by a background scan job - shaped like SignalMatrixRow
+// plus the fields the Unified Live Opportunity Dashboard needs for ranking
+// and portfolio-heat capping.
+export interface OpportunitySetup {
+  ticker: string;
+  strategy: string;
+  direction: Direction;
+  tradable: boolean;
+  as_of: string;
+  close: number;
+  entry_price: number | null;
+  stop_loss: number | null;
+  take_profit: number | null;
+  shares: number | null;
+  risk_amount: number | null;
+  reward_risk_ratio: number | null;
+  notional_value: number | null;
+  note: string | null;
+  win_probability: number | null;
+  win_probability_method: string | null;
+  win_probability_sample_size: number | null;
+  win_probability_confidence_low: number | null;
+  win_probability_confidence_high: number | null;
+  win_probability_note: string | null;
+  r_multiple: number;
+  setup_quality_score: number;
+  portfolio_heat_capped: boolean;
+  capped_reason: string | null;
+}
+
+export interface ScanJob {
+  job_id: string;
+  status: ScanJobStatus;
+  created_at: string;
+  completed_at: string | null;
+  error: string | null;
+  results: OpportunitySetup[] | null;
+}
+
+export interface StartScanResponse {
+  job_id: string;
+}
+
+export interface ListScansResponse {
+  jobs: ScanJob[];
+}
+
 // ---- Execution (Alpaca paper trading) ----
 
 export interface ExecutionOrderRequest {
@@ -428,4 +479,156 @@ export interface MaeMfeDistributionPoint {
 export interface MaeMfeDistributionResponse {
   points: MaeMfeDistributionPoint[];
   warnings: string[];
+}
+
+// ---- Point-in-time replay (backend/app/api/replay.py, schemas mirrored
+// verbatim from backend/app/api/schemas.py) ----
+
+export type ExecutionMode = "NEXT_OPEN" | "SAME_CLOSE_SLIPPAGE";
+
+export type LevelType = "PERCENTAGE" | "FIXED" | "ATR";
+
+export interface HistoricalDateScanRequest {
+  strategy: Strategy;
+  strategy_params?: Record<string, number>;
+  tickers?: string[] | null;
+  target_date: string;
+  account_equity?: number;
+  risk_per_trade_pct?: number;
+  earnings_blackout?: boolean;
+}
+
+// `SetupResponse` in schemas.py - identical shape to `ScreenerSetup` above
+// (same backend model), aliased so replay call sites read as what they are.
+export type HistoricalSetup = ScreenerSetup;
+
+export interface HistoricalDateScanResponse {
+  target_date: string;
+  setups: HistoricalSetup[];
+  scanned: number;
+  skipped: number;
+  skip_reasons: Record<string, number>;
+  warnings: string[];
+}
+
+export interface SimulateTradeExecutionRequest {
+  ticker: string;
+  entry_date: string;
+  sl_type: LevelType;
+  sl_value: number;
+  tp_type: LevelType;
+  tp_value: number;
+  direction?: 1 | -1;
+  account_equity?: number;
+  risk_per_trade_pct?: number;
+  execution_mode?: ExecutionMode;
+  slippage_pct?: number;
+  commission?: number;
+  fee_per_share?: number;
+  atr_slippage_multiple?: number;
+  impact_coefficient?: number;
+  avg_volume_lookback?: number;
+  // Walk the fill forward to a resolved exit (stop/target/regime/timeout)
+  // and populate realized_pnl_*/holding_period_days/exit_* below. Defaults
+  // true on the backend (backend/app/api/schemas.py SimulateTradeExecutionRequest).
+  resolve_exit?: boolean;
+  max_holding_period_days?: number;
+  use_regime_filter?: boolean;
+}
+
+export type ExitTrigger = "STOP" | "TARGET" | "REGIME" | "TIMEOUT";
+
+// Entry fill economics (spread + market impact -> fill price -> sized
+// stop/target/shares), plus - when `resolve_exit` (default true) walks the
+// trade forward - the realized outcome fields. Those are null when
+// resolve_exit=False or there were no bars after the fill to walk forward
+// on (backend/app/api/schemas.py SimulateTradeExecutionResponse, ~934).
+export interface SimulateTradeExecutionResponse {
+  ticker: string;
+  execution_mode: ExecutionMode;
+  fill_date: string;
+  fill_price: number;
+  reference_price: number;
+  slippage_pct_applied: number;
+  spread_pct: number;
+  market_impact_pct: number;
+  spread_variance_pct: number;
+  slippage_cost: number;
+  commission_cost: number;
+  total_cost: number;
+  shares: number;
+  stop_loss: number;
+  take_profit: number;
+  risk_amount: number;
+  reward_risk_ratio: number;
+  notional_value: number;
+  tradable: boolean;
+  note: string | null;
+  realized_pnl_dollars: number | null;
+  realized_pnl_pct: number | null;
+  holding_period_days: number | null;
+  exit_trigger: ExitTrigger | null;
+  mae_pct: number | null;
+  mfe_pct: number | null;
+  exit_date: string | null;
+  exit_price: number | null;
+}
+
+// ---- Raw bars (charting) - backend/app/api/replay.py GET /bars ----
+
+export interface Bar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface BarsResponse {
+  ticker: string;
+  bars: Bar[];
+}
+
+// ---- Journal: simulate (persist a resolved simulate-trade-execution
+// result as a closed MANUAL_SIMULATION entry) ----
+
+export interface JournalSimulateRequest {
+  ticker: string;
+  entry_date: string;
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  exit_date: string;
+  exit_price: number;
+  exit_trigger: ExitTrigger;
+  signal_strength?: number;
+  entry_thesis?: string;
+  post_mortem_note: string;
+}
+
+export interface JournalTradeResponse {
+  id: number;
+  ticker: string;
+  entry_date: string | null;
+  entry_price: number | null;
+  entry_thesis: string | null;
+  signal_strength: number | null;
+  stop_loss: number | null;
+  target_1: number | null;
+  target_2: number | null;
+  entry_status: string | null;
+  skip_reason: string | null;
+  actual_entry_date: string | null;
+  actual_entry_price: number | null;
+  exit_date: string | null;
+  exit_price: number | null;
+  exit_reason: string | null;
+  holding_days: number | null;
+  pnl: number | null;
+  pnl_pct: number | null;
+  r_multiple: number | null;
+  notes: string | null;
+  created_at: string | null;
+  source: string | null;
 }

@@ -160,6 +160,68 @@ class TestJournalTrades:
         assert trades[0]["exit_reason"] == "TP1"
 
 
+class TestJournalSimulate:
+    def _payload(self, **overrides):
+        payload = {
+            "ticker": "AAPL",
+            "entry_date": "2024-01-02",
+            "entry_price": 100.0,
+            "stop_loss": 95.0,
+            "take_profit": 130.0,
+            "exit_date": "2024-01-06",
+            "exit_price": 130.0,
+            "exit_trigger": "TARGET",
+            "post_mortem_note": "Would have taken this - clean breakout, held through noise.",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_persists_and_is_retrievable_with_manual_simulation_tag(
+        self, client, journal_settings
+    ):
+        response = client.post("/api/v1/journal/simulate", json=self._payload())
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ticker"] == "AAPL"
+        assert body["source"] == "MANUAL_SIMULATION"
+        assert body["entry_status"] == "TAKEN"
+        assert body["exit_reason"] == "TARGET"
+        assert body["exit_price"] == pytest.approx(130.0)
+        assert body["pnl"] == pytest.approx(30.0)
+        assert body["notes"] == self._payload()["post_mortem_note"]
+
+        listed = client.get("/api/v1/journal/trades").json()["trades"]
+        assert len(listed) == 1
+        assert listed[0]["source"] == "MANUAL_SIMULATION"
+        assert listed[0]["id"] == body["id"]
+
+    def test_appears_in_summary_alongside_live_trades(self, client, journal_settings):
+        _seed_closed_trade(journal_settings)  # a LIVE trade
+        client.post("/api/v1/journal/simulate", json=self._payload())
+
+        summary = client.get("/api/v1/journal/summary").json()
+        assert summary["total_trades"] == 2
+
+    def test_missing_post_mortem_note_is_422(self, client, journal_settings):
+        payload = self._payload()
+        del payload["post_mortem_note"]
+        response = client.post("/api/v1/journal/simulate", json=payload)
+        assert response.status_code == 422
+
+    def test_empty_post_mortem_note_is_422(self, client, journal_settings):
+        response = client.post(
+            "/api/v1/journal/simulate", json=self._payload(post_mortem_note="")
+        )
+        assert response.status_code == 422
+
+    def test_invalid_exit_trigger_is_422(self, client, journal_settings):
+        response = client.post(
+            "/api/v1/journal/simulate",
+            json=self._payload(exit_trigger="NOT_A_TRIGGER"),
+        )
+        assert response.status_code == 422
+
+
 class TestJournalMaeMfeDistribution:
     def test_no_completed_trades_returns_empty(self, client, journal_settings):
         response = client.get("/api/v1/journal/mae-mfe-distribution")

@@ -17,6 +17,7 @@ from ..quant.backtest import DEFAULT_INITIAL_CAPITAL
 from ..quant.engine import (
     DEFAULT_ACCOUNT_TIERS,
     DEFAULT_FEE_PER_SHARE,
+    DEFAULT_MAX_HOLDING_PERIOD_DAYS,
     EXECUTION_MODE_NEXT_OPEN,
     VALID_EXECUTION_MODES,
 )
@@ -273,6 +274,14 @@ class DataSyncStatusResponse(BaseModel):
     in_progress: bool
     started_at: str | None
     results: list[SyncResultResponse]
+
+
+class UniverseSyncResponse(BaseModel):
+    """`POST /api/v1/universe/sync` response."""
+
+    symbols: list[str]
+    synced_at: str
+    source_counts: dict[str, int]
 
 
 class MonteCarloRequest(BaseModel):
@@ -685,6 +694,29 @@ class HistoricalDateScanResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+# ---- Raw bars (charting) ----
+
+
+class Bar(BaseModel):
+    """One OHLCV bar."""
+
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class BarsResponse(BaseModel):
+    """`GET /api/v1/backtest/bars` - bars on or before `as_of` only, for the
+    Simulator UI's candlestick chart. Never carries a bar after `as_of` -
+    that is the whole point-in-time guarantee this endpoint exists for."""
+
+    ticker: str
+    bars: list[Bar]
+
+
 # ---- Execution simulation ----
 
 
@@ -719,6 +751,24 @@ class SimulateTradeExecutionRequest(BaseModel):
         default=DEFAULT_SLIPPAGE_LOOKBACK,
         ge=1,
         description="Trailing bar count averaged for the market-impact volume denominator.",
+    )
+    resolve_exit: bool = Field(
+        default=True,
+        description=(
+            "Walk the ticker's bars forward from the fill to resolve the "
+            "trade to a stop/target/regime/timeout exit, and populate the "
+            "realized_pnl_*/holding_period_days/exit_* response fields. "
+            "Set False to keep the prior entry-fill-only behavior."
+        ),
+    )
+    max_holding_period_days: int = Field(default=DEFAULT_MAX_HOLDING_PERIOD_DAYS, ge=1)
+    use_regime_filter: bool = Field(
+        default=True,
+        description=(
+            "For long trades, force a REGIME exit the first bar the macro "
+            "regime (quant.regime.MacroRegimeDetector) would have blocked "
+            "new longs. No effect on short trades (direction=-1)."
+        ),
     )
 
     @field_validator("ticker")
@@ -833,10 +883,37 @@ class JournalTradeResponse(BaseModel):
     r_multiple: float | None = None
     notes: str | None = None
     created_at: str | None = None
+    source: str | None = None
 
 
 class JournalTradesResponse(BaseModel):
     trades: list[JournalTradeResponse]
+
+
+class JournalSimulateRequest(BaseModel):
+    """`POST /api/v1/journal/simulate` body - persists one resolved
+    `simulate-trade-execution` result (see `SimulateTradeExecutionResponse`)
+    as a closed, `MANUAL_SIMULATION`-tagged journal entry via
+    `TradeJournal.log_signal` -> `log_entry` -> `log_exit`."""
+
+    ticker: str = Field(min_length=1)
+    entry_date: str = Field(description="Inclusive ISO date the position was filled on")
+    entry_price: float = Field(gt=0, description="The simulated fill_price")
+    stop_loss: float = Field(gt=0)
+    take_profit: float = Field(gt=0)
+    exit_date: str
+    exit_price: float = Field(gt=0)
+    exit_trigger: Literal["STOP", "TARGET", "REGIME", "TIMEOUT"]
+    signal_strength: float = Field(
+        default=0.0, description="Optional 0-100 confidence score for cohort analysis"
+    )
+    entry_thesis: str = Field(default="")
+    post_mortem_note: str = Field(min_length=1)
+
+    @field_validator("ticker")
+    @classmethod
+    def _upper_ticker(cls, value: str) -> str:
+        return value.strip().upper()
 
 
 class MaeMfeDistributionPoint(BaseModel):
@@ -881,3 +958,24 @@ class SimulateTradeExecutionResponse(BaseModel):
     notional_value: float
     tradable: bool
     note: str | None
+    realized_pnl_dollars: float | None = Field(
+        default=None,
+        description=(
+            "(exit_price - fill_price) * shares * direction. None if "
+            "resolve_exit=False or there were no bars after the fill to "
+            "walk forward on."
+        ),
+    )
+    realized_pnl_pct: float | None = None
+    holding_period_days: int | None = None
+    exit_trigger: Literal["STOP", "TARGET", "REGIME", "TIMEOUT"] | None = None
+    mae_pct: float | None = Field(
+        default=None,
+        description="Max adverse excursion vs. fill_price over the actual path from fill to exit_date.",
+    )
+    mfe_pct: float | None = Field(
+        default=None,
+        description="Max favorable excursion vs. fill_price over the actual path from fill to exit_date.",
+    )
+    exit_date: str | None = None
+    exit_price: float | None = None

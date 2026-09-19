@@ -33,7 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..config import Settings, get_settings
 from ..data.loader import DataUnavailableError, fetch_earnings_dates, load_prices
-from ..quant.engine import EXECUTION_MODE_NEXT_OPEN
+from ..quant.engine import EXECUTION_MODE_NEXT_OPEN, resolve_trade_exit
 from ..quant.indicators import wilder_atr
 from ..quant.risk import RiskManager
 from ..quant.screener import CatalystFilter
@@ -48,6 +48,7 @@ from ..quant.slippage_model import (
 from ..quant.strategies import build_strategy
 from .deps import load_frames, load_watchlist
 from .schemas import (
+    BarsResponse,
     HistoricalDateScanRequest,
     HistoricalDateScanResponse,
     SimulateTradeExecutionRequest,
@@ -55,6 +56,57 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api/v1/backtest", tags=["replay"])
+
+
+@router.get("/bars", response_model=BarsResponse)
+def get_bars(
+    ticker: str,
+    as_of: str,
+    lookback_days: int = 250,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Raw OHLCV bars for the Simulator UI's candlestick chart - bars on or
+    before `as_of` only, never after it, the same zero-lookahead guarantee
+    `historical-date-scan` gets from `load_frames`'s `end=` parameter.
+    """
+    try:
+        as_of_ts = pd.Timestamp(as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid as_of: {exc}") from exc
+    if lookback_days < 1:
+        raise HTTPException(status_code=422, detail="lookback_days must be at least 1")
+
+    try:
+        df = load_prices(
+            ticker,
+            data_dir=settings.data_dir,
+            allow_download=settings.allow_downloads,
+        )
+    except DataUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    # `end=as_of` is what makes this zero-lookahead: everything after it is
+    # sliced off before the lookback window is even applied.
+    window = df[df.index <= as_of_ts]
+    if window.empty:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No bars for {ticker.upper()} on or before {as_of}",
+        )
+    window = window.tail(lookback_days)
+
+    bars = [
+        {
+            "date": timestamp.strftime("%Y-%m-%d"),
+            "open": round(float(row["Open"]), 4),
+            "high": round(float(row["High"]), 4),
+            "low": round(float(row["Low"]), 4),
+            "close": round(float(row["Close"]), 4),
+            "volume": float(row["Volume"]),
+        }
+        for timestamp, row in window.iterrows()
+    ]
+    return {"ticker": ticker.upper(), "bars": bars}
 
 
 @router.post("/historical-date-scan", response_model=HistoricalDateScanResponse)
@@ -244,6 +296,45 @@ def simulate_trade_execution(
         else request.commission * notional_value
     )
 
+    note = order.rejection_reason
+    realized_pnl_dollars = realized_pnl_pct = None
+    holding_period_days = None
+    exit_trigger = exit_date = exit_price = None
+    mae_pct = mfe_pct = None
+
+    if request.resolve_exit:
+        try:
+            exit_resolution = resolve_trade_exit(
+                df,
+                fill_bar_index=fill_bar_index,
+                entry_price=order.entry_price,
+                stop_loss=order.stop_loss,
+                take_profit=order.take_profit,
+                direction=request.direction,
+                max_holding_period_days=request.max_holding_period_days,
+                use_regime_filter=request.use_regime_filter,
+            )
+        except ValueError:
+            # No bars after the fill to walk forward on (fill landed on the
+            # ticker's last available bar) - resolvable fields stay None
+            # rather than failing the whole request.
+            addendum = "No bars after the fill are available to resolve an exit."
+            note = f"{note}; {addendum}" if note else addendum
+        else:
+            exit_trigger = exit_resolution.exit_trigger
+            exit_date = exit_resolution.exit_date.strftime("%Y-%m-%d")
+            exit_price = round(exit_resolution.exit_price, 4)
+            holding_period_days = exit_resolution.holding_period_days
+            mae_pct = exit_resolution.mae_pct
+            mfe_pct = exit_resolution.mfe_pct
+            pnl_per_share = (exit_resolution.exit_price - order.entry_price) * (
+                1 if request.direction == 1 else -1
+            )
+            realized_pnl_dollars = round(pnl_per_share * order.shares, 2)
+            realized_pnl_pct = (
+                pnl_per_share / order.entry_price if order.entry_price else 0.0
+            )
+
     return {
         "ticker": request.ticker,
         "execution_mode": request.execution_mode,
@@ -264,5 +355,13 @@ def simulate_trade_execution(
         "reward_risk_ratio": round(order.reward_risk_ratio, 2),
         "notional_value": round(notional_value, 2),
         "tradable": not order.rejected and order.shares > 0,
-        "note": order.rejection_reason,
+        "note": note,
+        "realized_pnl_dollars": realized_pnl_dollars,
+        "realized_pnl_pct": realized_pnl_pct,
+        "holding_period_days": holding_period_days,
+        "exit_trigger": exit_trigger,
+        "mae_pct": mae_pct,
+        "mfe_pct": mfe_pct,
+        "exit_date": exit_date,
+        "exit_price": exit_price,
     }

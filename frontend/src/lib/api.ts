@@ -6,22 +6,32 @@ import type {
   AlpacaAccount,
   BacktestRequest,
   BacktestResponse,
+  BarsResponse,
   CloseAllPositionsResponse,
   DataSyncResponse,
   DataSyncStatusResponse,
   ExecutionOrderRequest,
   ExecutionOrderResponse,
   HealthResponse,
+  HistoricalDateScanRequest,
+  HistoricalDateScanResponse,
   JournalDecay,
+  JournalSimulateRequest,
   JournalSummary,
+  JournalTradeResponse,
   JournalTradesResponse,
+  ListScansResponse,
   MaeMfeDistributionResponse,
   OrderTicketRequest,
   OrderTicketsResponse,
   PortfolioHistory,
   Position,
+  ScanJob,
   ScreenerResponse,
   SignalMatrixResponse,
+  SimulateTradeExecutionRequest,
+  SimulateTradeExecutionResponse,
+  StartScanResponse,
   Strategy,
 } from "../types";
 
@@ -165,6 +175,32 @@ export function getSignalMatrix(
   );
 }
 
+// ---- Background scan jobs ----
+
+export interface StartScanParams {
+  strategies?: string[];
+  tickers?: string[];
+  account_equity?: number;
+  risk_per_trade_pct?: number;
+}
+
+export function startScan(
+  params: StartScanParams = {},
+): Promise<StartScanResponse> {
+  return request<StartScanResponse>("/api/v1/scans", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+export function getScanStatus(jobId: string): Promise<ScanJob> {
+  return request<ScanJob>(`/api/v1/scans/${encodeURIComponent(jobId)}`);
+}
+
+export function listScans(): Promise<ListScansResponse> {
+  return request<ListScansResponse>("/api/v1/scans");
+}
+
 export function submitOrder(
   body: ExecutionOrderRequest,
 ): Promise<ExecutionOrderResponse> {
@@ -247,6 +283,58 @@ export function getMaeMfeDistribution(): Promise<MaeMfeDistributionResponse> {
   return request<MaeMfeDistributionResponse>(
     "/api/v1/journal/mae-mfe-distribution",
   );
+}
+
+// ---- Point-in-time replay (Historical Simulator) ----
+
+export function postHistoricalDateScan(
+  body: HistoricalDateScanRequest,
+): Promise<HistoricalDateScanResponse> {
+  return request<HistoricalDateScanResponse>(
+    "/api/v1/backtest/historical-date-scan",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function postSimulateTradeExecution(
+  body: SimulateTradeExecutionRequest,
+): Promise<SimulateTradeExecutionResponse> {
+  return request<SimulateTradeExecutionResponse>(
+    "/api/v1/backtest/simulate-trade-execution",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export interface GetBarsParams {
+  ticker: string;
+  as_of: string;
+  lookback_days?: number;
+}
+
+export function getBars(params: GetBarsParams): Promise<BarsResponse> {
+  const search = new URLSearchParams({
+    ticker: params.ticker,
+    as_of: params.as_of,
+  });
+  if (params.lookback_days !== undefined) {
+    search.set("lookback_days", String(params.lookback_days));
+  }
+  return request<BarsResponse>(`/api/v1/backtest/bars?${search.toString()}`);
+}
+
+export function postJournalSimulate(
+  body: JournalSimulateRequest,
+): Promise<JournalTradeResponse> {
+  return request<JournalTradeResponse>("/api/v1/journal/simulate", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export { ApiError };

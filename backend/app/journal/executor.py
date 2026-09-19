@@ -31,6 +31,12 @@ class TradeJournal:
             # Ensure datetime columns
             df["entry_date"] = pd.to_datetime(df["entry_date"])
             df["exit_date"] = pd.to_datetime(df["exit_date"], errors="coerce")
+            # `source` is new - a journal CSV written before this field
+            # existed has no column for it at all, not just empty values.
+            # Every pre-existing row is a real trade this app or its
+            # trader logged, i.e. "LIVE", not a manual what-if simulation.
+            if "source" not in df.columns:
+                df["source"] = "LIVE"
             return df
 
         # Create empty journal
@@ -58,6 +64,7 @@ class TradeJournal:
                 "r_multiple": pd.Series(dtype="float64"),  # Risk multiples
                 "notes": pd.Series(dtype="str"),
                 "created_at": pd.Series(dtype="datetime64[ns]"),
+                "source": pd.Series(dtype="str"),
             }
         )
 
@@ -71,10 +78,18 @@ class TradeJournal:
         stop_loss: float,
         target_1: float,
         target_2: float,
+        source: str = "LIVE",
     ) -> int:
         """
         Log a trading signal (entry opportunity found)
         Returns trade_id for later updates
+
+        Args:
+            source: Where this trade originated - `"LIVE"` (default) for a
+                real signal/trade, `"MANUAL_SIMULATION"` for a resolved
+                point-in-time replay logged via `POST /api/v1/journal/
+                simulate`. Purely a tag: every other analysis method treats
+                both the same unless a caller filters on it.
         """
 
         trade_id = len(self.df) + 1
@@ -102,6 +117,7 @@ class TradeJournal:
             "r_multiple": None,
             "notes": "",
             "created_at": datetime.now(),
+            "source": source,
         }
 
         self.df = pd.concat([self.df, pd.DataFrame([new_trade])], ignore_index=True)

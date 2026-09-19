@@ -6,6 +6,7 @@ import { ScreenerGrid } from "./components/ScreenerGrid";
 import { SignalMatrixGrid } from "./components/SignalMatrixGrid";
 import { SyncStatusBanner } from "./components/SyncStatusBanner";
 import { AlertSettings } from "./components/alerts/AlertSettings";
+import { ScanProvider } from "./lib/ScanContext";
 import type { MacroRegime } from "./types";
 
 // Code-split: each pulls in a charting/table library (lightweight-charts,
@@ -27,18 +28,24 @@ const JournalDashboard = lazy(() =>
     default: m.JournalDashboard,
   })),
 );
+const Simulator = lazy(() => import("./views/Simulator"));
+const Dashboard = lazy(() =>
+  import("./views/Dashboard").then((m) => ({ default: m.Dashboard })),
+);
 
 function TabLoading() {
   return <div className="text-sm text-text-dim">Loading…</div>;
 }
 
 type View =
+  | "dashboard"
   | "screener"
   | "backtest"
   | "signals"
   | "portfolio"
   | "journal"
-  | "alerts";
+  | "alerts"
+  | "simulator";
 
 const REGIME_DISPLAY: Record<MacroRegime, { emoji: string; label: string }> = {
   BULL_TRENDING: { emoji: "🟢", label: "BULL_TRENDING" },
@@ -107,20 +114,23 @@ function StatusPill() {
 }
 
 const NAV_ITEMS: { view: View; label: string; testId: string }[] = [
+  { view: "dashboard", label: "Dashboard", testId: "nav-dashboard" },
   { view: "screener", label: "Live Screener", testId: "nav-live-screener" },
   { view: "signals", label: "Signal Matrix", testId: "nav-signal-matrix" },
   { view: "backtest", label: "Backtesting Studio", testId: "nav-backtest-studio" },
   { view: "portfolio", label: "Portfolio", testId: "nav-portfolio" },
   { view: "journal", label: "Trade Journal", testId: "nav-journal" },
   { view: "alerts", label: "Alerts", testId: "nav-alerts" },
+  { view: "simulator", label: "Historical Simulator", testId: "nav-simulator" },
 ];
 
 function App() {
-  const [view, setView] = useState<View>("screener");
+  const [view, setView] = useState<View>("dashboard");
   const [regime, setRegime] = useState<MacroRegime>("UNKNOWN");
   const [circuitBreakerActive, setCircuitBreakerActive] = useState(false);
 
   return (
+    <ScanProvider>
     <div className="min-h-screen bg-bg text-text">
       <Toaster
         theme="dark"
@@ -190,6 +200,19 @@ function App() {
           />
         </div>
         <AnimatePresence mode="wait">
+          {view === "dashboard" && (
+            <motion.div
+              key="dashboard"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <Suspense fallback={<TabLoading />}>
+                <Dashboard />
+              </Suspense>
+            </motion.div>
+          )}
           {view === "signals" && (
             <motion.div
               key="signals"
@@ -251,9 +274,23 @@ function App() {
               <AlertSettings />
             </motion.div>
           )}
+          {view === "simulator" && (
+            <motion.div
+              key="simulator"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <Suspense fallback={<TabLoading />}>
+                <Simulator />
+              </Suspense>
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
     </div>
+    </ScanProvider>
   );
 }
 
