@@ -442,3 +442,146 @@ class CircuitBreaker:
         drawdown = self.rolling_drawdown(equity_curve)
         latest = float(drawdown.iloc[-1])
         return math.isfinite(latest) and latest <= -self.max_drawdown_pct
+
+
+# ---------------------------------------------------------------------------
+# ATR position sizing & Chandelier Exit trailing stop
+#
+# Standalone, stateless companions to `RiskManager`/`CircuitBreaker` above:
+# `PositionSizer` is the direct `capital * risk% / (ATR * multiplier)`
+# formula as its own small object (no `account_equity`-bound instance state
+# to construct first), meant for the Order Ticket Drawer's live sizing
+# preview where the caller already has ATR off the chart and just wants
+# shares back for a chosen risk %. `RiskManager.volatility_parity_size`
+# does the same division but folds it into the broader order-building flow
+# (SL/TP resolution, fixed-risk floor, reward:risk gating) - use that one
+# when you already have a `RiskManager` and a full order to build, this one
+# when you don't.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PositionSizer:
+    """ATR-based position sizing: shares = (capital * risk%) / (ATR * multiplier).
+
+    Args:
+        account_capital: Total account capital/equity.
+        risk_pct: Fraction of `account_capital` to risk on a single trade,
+            e.g. `0.01` for 1%. UI risk-selector tiers are typically
+            `0.005`/`0.01`/`0.02` (0.5%/1%/2%).
+
+    Raises:
+        ValueError: if `account_capital` is not positive or `risk_pct` is
+            not in `(0, 1]`.
+    """
+
+    account_capital: float
+    risk_pct: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.account_capital) or self.account_capital <= 0:
+            raise ValueError("account_capital must be positive")
+        if not math.isfinite(self.risk_pct) or not 0 < self.risk_pct <= 1:
+            raise ValueError("risk_pct must be in (0, 1]")
+
+    @property
+    def risk_amount(self) -> float:
+        """Dollar amount at risk for one trade at this sizer's `risk_pct`."""
+        return self.account_capital * self.risk_pct
+
+    def shares(self, atr: float, atr_multiplier: float = 2.0) -> int:
+        """Whole shares such that `atr_multiplier * atr` of adverse move
+        costs exactly `risk_amount`.
+
+        Raises:
+            ValueError: if `atr` or `atr_multiplier` is not finite/positive
+                - a NaN ATR would otherwise slip past a bare `<= 0` check
+                and surface as an opaque "cannot convert float NaN to
+                integer" from the final `int(...)` cast.
+        """
+        if not math.isfinite(atr) or atr <= 0:
+            raise ValueError("atr must be finite and positive")
+        if not math.isfinite(atr_multiplier) or atr_multiplier <= 0:
+            raise ValueError("atr_multiplier must be finite and positive")
+
+        risk_per_share = atr * atr_multiplier
+        return int(self.risk_amount // risk_per_share)
+
+
+class ChandelierExitStop:
+    """Dynamic ATR trailing stop (Chandelier Exit): trails off the highest
+    high (long) / lowest low (short) over `atr_period` bars, offset by
+    `atr_multiplier * ATR` - the classic Chuck LeBeau construction.
+
+    Args:
+        atr_period: Lookback for both the rolling extreme and the ATR,
+            e.g. `22` (the traditional Chandelier Exit default).
+        atr_multiplier: ATR multiple subtracted from (long) / added to
+            (short) the rolling extreme, e.g. `3.0`.
+
+    Raises:
+        ValueError: if `atr_period < 2` or `atr_multiplier` is not positive.
+    """
+
+    def __init__(self, atr_period: int = 22, atr_multiplier: float = 3.0):
+        if atr_period < 2:
+            raise ValueError("atr_period must be at least 2")
+        if not math.isfinite(atr_multiplier) or atr_multiplier <= 0:
+            raise ValueError("atr_multiplier must be finite and positive")
+
+        self.atr_period = atr_period
+        self.atr_multiplier = atr_multiplier
+
+    def compute(self, df: pd.DataFrame, direction: int = 1) -> pd.Series:
+        """Per-bar Chandelier Exit stop level, indexed like `df`.
+
+        Args:
+            direction: `1` for a long position (stop trails below price,
+                off the rolling highest high), `-1` for a short (stop
+                trails above price, off the rolling lowest low).
+
+        Raises:
+            ValueError: if `df` is empty, missing High/Low/Close, or
+                `direction` is not `1`/`-1`.
+        """
+        from .indicators import wilder_atr  # local: avoids a module cycle
+
+        missing = [c for c in ("High", "Low", "Close") if c not in df.columns]
+        if missing:
+            raise ValueError(f"df is missing required column(s): {missing}")
+        if df.empty:
+            raise ValueError("df is empty")
+        if direction not in (1, -1):
+            raise ValueError("direction must be 1 (long) or -1 (short)")
+
+        atr = wilder_atr(df, self.atr_period) * self.atr_multiplier
+        if direction == 1:
+            highest_high = df["High"].rolling(
+                window=self.atr_period, min_periods=self.atr_period
+            ).max()
+            return highest_high - atr
+
+        lowest_low = df["Low"].rolling(
+            window=self.atr_period, min_periods=self.atr_period
+        ).min()
+        return lowest_low + atr
+
+    @staticmethod
+    def ratchet(current_stop: float, new_level: float, direction: int = 1) -> float:
+        """Advance a trailing stop toward `new_level`, never loosening it.
+
+        A trailing stop only ever moves in the position's favor - for a
+        long, up; for a short, down - regardless of what the raw Chandelier
+        level does bar to bar (it can dip on a lower high without the
+        position's actual stop giving any ground back). Callers hold the
+        running stop themselves and call this each new bar with that bar's
+        `compute()` output as `new_level`.
+
+        Raises:
+            ValueError: if `direction` is not `1`/`-1`.
+        """
+        if direction == 1:
+            return max(current_stop, new_level)
+        if direction == -1:
+            return min(current_stop, new_level)
+        raise ValueError("direction must be 1 (long) or -1 (short)")

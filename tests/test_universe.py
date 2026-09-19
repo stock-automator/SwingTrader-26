@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import requests
 
 from backend.app.data.universe import (
     DENYLIST,
@@ -187,6 +188,54 @@ class TestNeedsSync:
         manager.config_path.write_text(json.dumps({"symbols": ["AAPL"]}))
 
         assert manager.needs_sync() is True
+
+
+class TestFetchHeaders:
+    def test_fetch_tables_sends_browser_user_agent(self, manager, monkeypatch):
+        """Regression: Wikipedia (and similar constituent-list sources) can
+        403 the bare `python-requests/x.y` UA some hosts get flagged under.
+        `_fetch_tables` must fetch with a realistic browser User-Agent
+        rather than handing the URL straight to `pd.read_html`."""
+        captured: dict = {}
+
+        class _FakeResponse:
+            text = "<table><tr><th>Symbol</th></tr><tr><td>AAPL</td></tr></table>"
+
+            def raise_for_status(self):
+                pass
+
+        def fake_get(url, headers=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["timeout"] = timeout
+            return _FakeResponse()
+
+        monkeypatch.setattr(
+            "backend.app.data.universe.requests.get", fake_get
+        )
+
+        tables = manager._fetch_tables("https://en.wikipedia.org/wiki/Test")
+
+        assert captured["url"] == "https://en.wikipedia.org/wiki/Test"
+        assert "User-Agent" in captured["headers"]
+        assert "Mozilla" in captured["headers"]["User-Agent"]
+        assert captured["timeout"] is not None
+        assert tables[0]["Symbol"].tolist() == ["AAPL"]
+
+    def test_403_response_falls_back_to_static_list(self, manager, monkeypatch):
+        def fake_get(url, headers=None, timeout=None):
+            response = requests.Response()
+            response.status_code = 403
+            raise requests.HTTPError("403 Client Error", response=response)
+
+        monkeypatch.setattr(
+            "backend.app.data.universe.requests.get", fake_get
+        )
+
+        symbols = manager.fetch_sp500_constituents()
+
+        assert "AAPL" in symbols
+        assert len(symbols) > 50
 
 
 class TestSyncFallback:

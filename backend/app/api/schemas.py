@@ -979,3 +979,31 @@ class SimulateTradeExecutionResponse(BaseModel):
     )
     exit_date: str | None = None
     exit_price: float | None = None
+
+
+class MarketRegimeResponse(BaseModel):
+    """`GET /api/v1/market/regime` - top-down market health traffic light."""
+
+    state: Literal["BULL_CONFIRMED", "CAUTION_CHOP", "BEAR_DEFENSIVE"]
+    spy_alignment: Literal["BULLISH", "BEARISH", "NEUTRAL", "UNKNOWN"]
+    qqq_alignment: Literal["BULLISH", "BEARISH", "NEUTRAL", "UNKNOWN"]
+    vix_level: float | None
+    vix_regime: Literal["LOW", "NORMAL", "HIGH", "EXTREME", "UNKNOWN"]
+    breadth_pct: float | None
+    breadth_above: int
+    breadth_total: int
+    notes: list[str]
+
+
+class PositionSizerRequest(BaseModel):
+    """`POST /api/v1/position-sizer/preview` body."""
+
+    account_capital: float = Field(gt=0)
+    risk_pct: float = Field(gt=0, le=1, description="e.g. 0.01 for 1%")
+    atr: float = Field(gt=0)
+    atr_multiplier: float = Field(default=2.0, gt=0)
+
+
+class PositionSizerResponse(BaseModel):
+    shares: int
+    risk_amount: float

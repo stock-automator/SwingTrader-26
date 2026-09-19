@@ -1,7 +1,87 @@
 import { useEffect, useState } from "react";
-import { ApiError, getOrderTickets } from "../lib/api";
+import { ApiError, getOrderTickets, previewPositionSize } from "../lib/api";
 import { fmtCurrency, fmtNum } from "../lib/format";
-import type { OrderTicket, ScreenerSetup } from "../types";
+import type { OrderTicket, PositionSizerResponse, ScreenerSetup } from "../types";
+
+const RISK_PCT_OPTIONS = [0.005, 0.01, 0.02];
+const ATR_STOP_MULTIPLIER = 2.0;
+
+/** Live ATR position-sizing preview: shares = (capital * risk%) / (ATR * mult),
+ * backed by `PositionSizer` on the server (`POST /api/v1/position-sizer/preview`)
+ * so this never drifts from the risk engine's own sizing math. */
+function AtrPositionSizerPreview({
+  atr,
+  accountCapital,
+}: {
+  atr: number;
+  accountCapital: number;
+}) {
+  const [riskPct, setRiskPct] = useState(0.01);
+  const [preview, setPreview] = useState<PositionSizerResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    previewPositionSize({
+      account_capital: accountCapital,
+      risk_pct: riskPct,
+      atr,
+      atr_multiplier: ATR_STOP_MULTIPLIER,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setPreview(res);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [atr, accountCapital, riskPct]);
+
+  return (
+    <div
+      data-testid="atr-position-sizer"
+      className="rounded border border-border bg-panel p-3"
+    >
+      <div className="mb-2 text-sm font-semibold text-text">
+        ATR Position Sizer
+      </div>
+      <div className="mb-2 flex gap-1">
+        {RISK_PCT_OPTIONS.map((pct) => (
+          <button
+            key={pct}
+            data-testid={`risk-pct-${pct}`}
+            onClick={() => setRiskPct(pct)}
+            className={`rounded border px-2 py-1 text-xs ${
+              riskPct === pct
+                ? "border-accent bg-accent/20 text-text"
+                : "border-border bg-panel-alt text-text-dim hover:border-accent"
+            }`}
+          >
+            {(pct * 100).toFixed(1)}%
+          </button>
+        ))}
+      </div>
+      {error && <div className="text-xs text-short">{error}</div>}
+      {preview && !error && (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+          <dt className="text-text-faint">ATR (14)</dt>
+          <dd className="text-right">{fmtNum(atr, 2)}</dd>
+          <dt className="text-text-faint">Suggested Shares</dt>
+          <dd data-testid="atr-sizer-shares" className="text-right font-semibold">
+            {preview.shares}
+          </dd>
+          <dt className="text-text-faint">Risk Amount</dt>
+          <dd className="text-right">{fmtCurrency(preview.risk_amount)}</dd>
+        </dl>
+      )}
+    </div>
+  );
+}
 
 interface OrderTicketDrawerProps {
   setup: ScreenerSetup | null;
@@ -161,6 +241,12 @@ export function OrderTicketDrawer({
             tickets.map((t) => (
               <TicketCard key={t.account_equity} ticket={t} />
             ))}
+          {setup?.atr != null && (
+            <AtrPositionSizerPreview
+              atr={setup.atr}
+              accountCapital={accountTiers[0] ?? DEFAULT_ACCOUNT_TIERS[0]}
+            />
+          )}
         </div>
       </aside>
     </>

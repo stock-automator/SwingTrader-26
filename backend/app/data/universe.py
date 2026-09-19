@@ -40,10 +40,12 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +64,23 @@ SYNC_STALE_AFTER = timedelta(hours=24)
 #: disk, and re-included automatically if a future data provider fixes them
 #: and they're removed from this set.
 DENYLIST: frozenset[str] = frozenset({"BK", "CTRA", "K", "MMC", "WBA"})
+
+#: Realistic desktop-browser User-Agent for constituent-page fetches.
+#: Wikipedia (and other index-membership sources) will 403 the default
+#: `python-requests/x.y` UA some hosting providers get flagged under -
+#: this sidesteps that without doing anything more elaborate than what any
+#: real browser sends.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    )
+}
+
+#: Timeout for constituent-page fetches - short enough that a blocked/absent
+#: network (e.g. this repo's own test sandbox) fails fast into the static
+#: fallback rather than hanging the caller.
+_FETCH_TIMEOUT_SECONDS = 10
 
 #: Wikipedia's "List of S&P 500 companies" - the `Symbol` column of the
 #: first table on the page.
@@ -753,6 +772,23 @@ class UniverseManager:
     # Constituent fetching
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _fetch_tables(url: str) -> list[pd.DataFrame]:
+        """`pd.read_html` against `url`, fetched with a browser-like
+        User-Agent first rather than handed straight to `read_html`.
+
+        Wikipedia (and similar constituent-list sources) will 403 the bare
+        `python-requests/x.y` UA `read_html`'s default urllib backend sends
+        from some hosting providers/IP ranges - fetching the page ourselves
+        with `_BROWSER_HEADERS` and parsing the resulting HTML text sidesteps
+        that.
+        """
+        response = requests.get(
+            url, headers=_BROWSER_HEADERS, timeout=_FETCH_TIMEOUT_SECONDS
+        )
+        response.raise_for_status()
+        return pd.read_html(StringIO(response.text))
+
     def fetch_sp500_constituents(self) -> list[str]:
         """Current S&P 500 tickers, scraped from Wikipedia.
 
@@ -761,7 +797,7 @@ class UniverseManager:
         name, etc.
         """
         try:
-            tables = pd.read_html(_SP500_WIKI_URL)
+            tables = self._fetch_tables(_SP500_WIKI_URL)
             symbols_col = tables[0]["Symbol"]
             symbols = [sanitize_ticker(str(s)) for s in symbols_col.tolist()]
             symbols = [s for s in symbols if s]
@@ -786,7 +822,7 @@ class UniverseManager:
         different times, so both are tried before giving up.
         """
         try:
-            tables = pd.read_html(_NASDAQ100_WIKI_URL)
+            tables = self._fetch_tables(_NASDAQ100_WIKI_URL)
             symbols: list[str] | None = None
             for table in tables:
                 for column in ("Ticker", "Symbol"):

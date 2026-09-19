@@ -12,6 +12,8 @@ label each setup long or short, and exposes `atr` in the form
 """
 
 import math
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -289,3 +291,319 @@ class MacroRegimeDetector:
         trading outright the way the drawdown circuit breaker does.
         """
         return self.current_regime(df) in MACRO_BLOCKED_REGIMES
+
+
+# ---------------------------------------------------------------------------
+# Top-down market regime & breadth "traffic light"
+#
+# `MarketRegimeEngine` sits a level above `MacroRegimeDetector`: instead of
+# reading one index's own trend, it combines SPY *and* QQQ EMA alignment,
+# S&P 500 breadth (% of constituents above their own 50-EMA), and the VIX's
+# volatility regime into one global `MarketHealthState` meant to gate every
+# ticker's long setups at once (`GET /api/v1/market/regime`).
+# ---------------------------------------------------------------------------
+
+EMA_ALIGNMENT_BULLISH = "BULLISH"
+EMA_ALIGNMENT_BEARISH = "BEARISH"
+EMA_ALIGNMENT_NEUTRAL = "NEUTRAL"
+EMA_ALIGNMENT_UNKNOWN = "UNKNOWN"
+
+VIX_LOW = "LOW"
+VIX_NORMAL = "NORMAL"
+VIX_HIGH = "HIGH"
+VIX_EXTREME = "EXTREME"
+VIX_UNKNOWN = "UNKNOWN"
+
+#: Market Health "traffic light" states `MarketRegimeEngine.classify`
+#: returns - the single value the Dashboard's status badge renders.
+HEALTH_BULL_CONFIRMED = "BULL_CONFIRMED"
+HEALTH_CAUTION_CHOP = "CAUTION_CHOP"
+HEALTH_BEAR_DEFENSIVE = "BEAR_DEFENSIVE"
+
+#: VIX close-price breakpoints separating LOW/NORMAL/HIGH/EXTREME. Roughly:
+#: sub-15 is a complacent tape, 15-20 is the long-run "normal" range, 20-30
+#: is elevated/fearful, 30+ is crisis-level (2020 COVID crash, 2008 GFC).
+DEFAULT_VIX_LOW_MAX = 15.0
+DEFAULT_VIX_NORMAL_MAX = 20.0
+DEFAULT_VIX_HIGH_MAX = 30.0
+
+#: Breadth thresholds (% of universe above its own 50-EMA) gating
+#: `BULL_CONFIRMED` (must be at/above) and `BEAR_DEFENSIVE` (at/below).
+DEFAULT_BREADTH_BULL_THRESHOLD = 60.0
+DEFAULT_BREADTH_BEAR_THRESHOLD = 40.0
+
+
+@dataclass(frozen=True)
+class BreadthResult:
+    """S&P-500-style market breadth: what fraction of a universe is
+    trading above its own 50-EMA right now."""
+
+    pct_above_50ema: float
+    above: int
+    below: int
+    unscored: int
+
+    @property
+    def total_scored(self) -> int:
+        return self.above + self.below
+
+
+@dataclass(frozen=True)
+class MarketHealthReport:
+    """Full `GET /api/v1/market/regime` payload: the top-level traffic-light
+    state plus every metric that fed it, for the Dashboard badge's
+    tooltip."""
+
+    state: str
+    spy_alignment: str
+    qqq_alignment: str
+    vix_level: float | None
+    vix_regime: str
+    breadth_pct: float | None
+    breadth_above: int
+    breadth_total: int
+    notes: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "state": self.state,
+            "spy_alignment": self.spy_alignment,
+            "qqq_alignment": self.qqq_alignment,
+            "vix_level": self.vix_level,
+            "vix_regime": self.vix_regime,
+            "breadth_pct": self.breadth_pct,
+            "breadth_above": self.breadth_above,
+            "breadth_total": self.breadth_total,
+            "notes": self.notes,
+        }
+
+
+class MarketRegimeEngine:
+    """Top-down market health classifier: SPY/QQQ 50/200-EMA alignment +
+    S&P 500 breadth + VIX volatility regime -> one `MarketHealthReport`.
+
+    Every method here is a pure function of the frames/values passed in -
+    no I/O - so it can be unit tested without a network or a live universe.
+    `GET /api/v1/market/regime` (`api/market.py`) is the thin adapter that
+    resolves those inputs via `data.loader`/`api.deps` and calls this.
+
+    Args:
+        ema_fast_period: Faster trend EMA, e.g. 50.
+        ema_slow_period: Slower trend EMA, e.g. 200.
+        breadth_ema_period: EMA period each breadth constituent is scored
+            against, e.g. 50 (same period as `ema_fast_period` by default,
+            but independently configurable).
+        breadth_bull_threshold: Minimum breadth %% for `BULL_CONFIRMED`.
+        breadth_bear_threshold: Breadth %% at/below which `BEAR_DEFENSIVE`
+            is forced regardless of trend/VIX.
+        vix_low_max / vix_normal_max / vix_high_max: VIX close-price
+            breakpoints - see the `DEFAULT_VIX_*` constants.
+    """
+
+    def __init__(
+        self,
+        ema_fast_period: int = 50,
+        ema_slow_period: int = 200,
+        breadth_ema_period: int = 50,
+        breadth_bull_threshold: float = DEFAULT_BREADTH_BULL_THRESHOLD,
+        breadth_bear_threshold: float = DEFAULT_BREADTH_BEAR_THRESHOLD,
+        vix_low_max: float = DEFAULT_VIX_LOW_MAX,
+        vix_normal_max: float = DEFAULT_VIX_NORMAL_MAX,
+        vix_high_max: float = DEFAULT_VIX_HIGH_MAX,
+    ):
+        if ema_fast_period < 2:
+            raise ValueError("ema_fast_period must be at least 2")
+        if ema_slow_period <= ema_fast_period:
+            raise ValueError("ema_slow_period must be greater than ema_fast_period")
+        if breadth_ema_period < 2:
+            raise ValueError("breadth_ema_period must be at least 2")
+        if not 0 <= breadth_bear_threshold < breadth_bull_threshold <= 100:
+            raise ValueError(
+                "require 0 <= breadth_bear_threshold < breadth_bull_threshold <= 100"
+            )
+        if not 0 < vix_low_max < vix_normal_max < vix_high_max:
+            raise ValueError("require 0 < vix_low_max < vix_normal_max < vix_high_max")
+
+        self.ema_fast_period = ema_fast_period
+        self.ema_slow_period = ema_slow_period
+        self.breadth_ema_period = breadth_ema_period
+        self.breadth_bull_threshold = breadth_bull_threshold
+        self.breadth_bear_threshold = breadth_bear_threshold
+        self.vix_low_max = vix_low_max
+        self.vix_normal_max = vix_normal_max
+        self.vix_high_max = vix_high_max
+
+    # ------------------------------------------------------------------
+    # Per-index EMA alignment
+    # ------------------------------------------------------------------
+
+    def ema_alignment(self, df: pd.DataFrame) -> str:
+        """Trend alignment for one index (SPY/QQQ): `BULLISH` when the fast
+        EMA sits above the slow EMA *and* price is above the fast EMA,
+        `BEARISH` on the mirror condition, else `NEUTRAL`. `UNKNOWN` if
+        there isn't enough history for the slow EMA yet.
+        """
+        if df is None or df.empty or "Close" not in df.columns:
+            return EMA_ALIGNMENT_UNKNOWN
+        if len(df) < self.ema_slow_period:
+            return EMA_ALIGNMENT_UNKNOWN
+
+        close = df["Close"]
+        ema_fast = close.ewm(span=self.ema_fast_period, adjust=False).mean()
+        ema_slow = close.ewm(span=self.ema_slow_period, adjust=False).mean()
+
+        last_close = float(close.iloc[-1])
+        last_fast = float(ema_fast.iloc[-1])
+        last_slow = float(ema_slow.iloc[-1])
+        if any(math.isnan(v) for v in (last_close, last_fast, last_slow)):
+            return EMA_ALIGNMENT_UNKNOWN
+
+        if last_fast > last_slow and last_close > last_fast:
+            return EMA_ALIGNMENT_BULLISH
+        if last_fast < last_slow and last_close < last_fast:
+            return EMA_ALIGNMENT_BEARISH
+        return EMA_ALIGNMENT_NEUTRAL
+
+    # ------------------------------------------------------------------
+    # VIX volatility regime
+    # ------------------------------------------------------------------
+
+    def vix_regime(self, vix_level: float | None) -> str:
+        """Bucket a VIX closing level into LOW/NORMAL/HIGH/EXTREME.
+
+        `None` (VIX unavailable) maps to `UNKNOWN` - fails open, the same
+        convention `MacroRegimeDetector.current_regime` uses for
+        insufficient history.
+        """
+        if vix_level is None or not math.isfinite(vix_level):
+            return VIX_UNKNOWN
+        if vix_level < self.vix_low_max:
+            return VIX_LOW
+        if vix_level < self.vix_normal_max:
+            return VIX_NORMAL
+        if vix_level < self.vix_high_max:
+            return VIX_HIGH
+        return VIX_EXTREME
+
+    # ------------------------------------------------------------------
+    # Breadth
+    # ------------------------------------------------------------------
+
+    def _is_above_ema(self, df: pd.DataFrame) -> bool | None:
+        """Whether the latest close is above its own `breadth_ema_period`
+        EMA. `None` if the ticker has too little history to score."""
+        if df is None or df.empty or "Close" not in df.columns:
+            return None
+        if len(df) < self.breadth_ema_period:
+            return None
+
+        close = df["Close"]
+        ema = close.ewm(span=self.breadth_ema_period, adjust=False).mean()
+        last_close = float(close.iloc[-1])
+        last_ema = float(ema.iloc[-1])
+        if math.isnan(last_close) or math.isnan(last_ema):
+            return None
+        return last_close > last_ema
+
+    def compute_breadth(
+        self, frames: dict[str, pd.DataFrame], max_workers: int = 16
+    ) -> BreadthResult:
+        """Percentage of `frames` currently trading above their own 50-EMA.
+
+        Scored across a bounded `ThreadPoolExecutor` (matching
+        `api.deps.load_frames`'s concurrency model) rather than a serial
+        loop - each per-ticker EMA is cheap, but a several-hundred-name
+        universe still adds up serially. Frames with too little history are
+        excluded from the percentage (`unscored`), not counted as "below".
+        """
+        if not frames:
+            return BreadthResult(pct_above_50ema=0.0, above=0, below=0, unscored=0)
+
+        workers = max(1, min(max_workers, len(frames)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(self._is_above_ema, frames.values()))
+
+        above = sum(1 for r in results if r is True)
+        below = sum(1 for r in results if r is False)
+        unscored = sum(1 for r in results if r is None)
+        total_scored = above + below
+        pct = (above / total_scored * 100.0) if total_scored else 0.0
+
+        return BreadthResult(
+            pct_above_50ema=pct, above=above, below=below, unscored=unscored
+        )
+
+    # ------------------------------------------------------------------
+    # Top-level classification
+    # ------------------------------------------------------------------
+
+    def classify(
+        self,
+        spy_df: pd.DataFrame | None,
+        qqq_df: pd.DataFrame | None,
+        vix_level: float | None,
+        breadth: BreadthResult | None,
+    ) -> MarketHealthReport:
+        """Combine SPY/QQQ alignment, VIX regime, and breadth into one
+        `MarketHealthReport`.
+
+        Precedence (first match wins), most-defensive first - any single
+        strongly bearish signal is enough to force `BEAR_DEFENSIVE` even if
+        the others look fine, the same "any gate fails -> reject" posture
+        `RiskManager.build_risk_managed_order` takes for trade entries:
+
+        1. `BEAR_DEFENSIVE` - SPY or QQQ in bearish EMA alignment, or VIX in
+           `EXTREME`, or breadth at/below `breadth_bear_threshold`.
+        2. `BULL_CONFIRMED` - SPY *and* QQQ bullish, VIX not `HIGH`/
+           `EXTREME`, and breadth at/above `breadth_bull_threshold`.
+        3. `CAUTION_CHOP` - everything else (mixed signals).
+        """
+        notes: list[str] = []
+        spy_alignment = self.ema_alignment(spy_df)
+        qqq_alignment = self.ema_alignment(qqq_df)
+        vix_bucket = self.vix_regime(vix_level)
+        breadth = breadth or BreadthResult(
+            pct_above_50ema=0.0, above=0, below=0, unscored=0
+        )
+        breadth_pct = breadth.pct_above_50ema if breadth.total_scored else None
+
+        def _report(state: str) -> MarketHealthReport:
+            return MarketHealthReport(
+                state=state,
+                spy_alignment=spy_alignment,
+                qqq_alignment=qqq_alignment,
+                vix_level=vix_level,
+                vix_regime=vix_bucket,
+                breadth_pct=breadth_pct,
+                breadth_above=breadth.above,
+                breadth_total=breadth.total_scored,
+                notes=notes,
+            )
+
+        bearish_alignment = EMA_ALIGNMENT_BEARISH in (spy_alignment, qqq_alignment)
+        if bearish_alignment:
+            notes.append("SPY/QQQ EMA alignment is bearish")
+        if vix_bucket == VIX_EXTREME:
+            notes.append(f"VIX regime is EXTREME ({vix_level})")
+        if breadth_pct is not None and breadth_pct <= self.breadth_bear_threshold:
+            notes.append(
+                f"Breadth {breadth_pct:.1f}% at/below the "
+                f"{self.breadth_bear_threshold:.0f}% bear threshold"
+            )
+        if bearish_alignment or vix_bucket == VIX_EXTREME or (
+            breadth_pct is not None and breadth_pct <= self.breadth_bear_threshold
+        ):
+            return _report(HEALTH_BEAR_DEFENSIVE)
+
+        bullish_alignment = spy_alignment == EMA_ALIGNMENT_BULLISH and (
+            qqq_alignment == EMA_ALIGNMENT_BULLISH
+        )
+        vix_calm = vix_bucket in (VIX_LOW, VIX_NORMAL)
+        breadth_strong = (
+            breadth_pct is not None and breadth_pct >= self.breadth_bull_threshold
+        )
+        if bullish_alignment and vix_calm and breadth_strong:
+            return _report(HEALTH_BULL_CONFIRMED)
+
+        notes.append("Mixed signals: neither confirmed bull nor defensive bear")
+        return _report(HEALTH_CAUTION_CHOP)

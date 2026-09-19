@@ -14,6 +14,7 @@ import { useScanContext } from "../lib/ScanContext";
 import { useOpportunityFeed } from "../lib/useOpportunityFeed";
 import { fmtNum } from "../lib/format";
 import { OrderTicketDrawer } from "../components/OrderTicketDrawer";
+import { MarketRegimeBadge } from "../components/common/MarketRegimeBadge";
 import { STRATEGIES, type Direction, type OpportunitySetup, type ScreenerSetup } from "../types";
 
 const STRATEGY_LABELS: Record<string, string> = Object.fromEntries(
@@ -263,6 +264,7 @@ export function Dashboard() {
           {rankedSetups.length} setups · portfolio heat cap {MAX_ACTIVE_SETUPS} setups ({MAX_PORTFOLIO_HEAT_PCT}% @ {RISK_PER_SETUP_PCT}%/setup)
         </div>
         <div className="ml-auto flex items-center gap-3">
+          <MarketRegimeBadge />
           <ScanStatusPill />
           <button
             onClick={refresh}

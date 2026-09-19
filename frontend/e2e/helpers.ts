@@ -32,4 +32,22 @@ export async function mockCoreRoutes(page: Page) {
       json: { generated_at: "2026-01-01T00:00:00Z", rows: [], scanned: 0, warnings: [] },
     }),
   );
+  // Mounted on every view via the Dashboard's `MarketRegimeBadge` - mocked
+  // here so every spec gets a deterministic traffic-light state instead of
+  // a failed-fetch "UNAVAILABLE" badge.
+  await page.route(`${API_BASE}/api/v1/market/regime`, (route) =>
+    route.fulfill({
+      json: {
+        state: "CAUTION_CHOP",
+        spy_alignment: "NEUTRAL",
+        qqq_alignment: "NEUTRAL",
+        vix_level: 16.5,
+        vix_regime: "NORMAL",
+        breadth_pct: 50.0,
+        breadth_above: 250,
+        breadth_total: 500,
+        notes: [],
+      },
+    }),
+  );
 }

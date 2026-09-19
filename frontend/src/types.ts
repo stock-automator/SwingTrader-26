@@ -40,6 +40,75 @@ export interface HealthResponse {
   allow_downloads: boolean;
 }
 
+// ---- Top-down market health traffic light (GET /api/v1/market/regime) ----
+
+export type MarketHealthState = "BULL_CONFIRMED" | "CAUTION_CHOP" | "BEAR_DEFENSIVE";
+
+export type EmaAlignment = "BULLISH" | "BEARISH" | "NEUTRAL" | "UNKNOWN";
+
+export type VixRegime = "LOW" | "NORMAL" | "HIGH" | "EXTREME" | "UNKNOWN";
+
+export interface PositionSizerResponse {
+  shares: number;
+  risk_amount: number;
+}
+
+export interface MarketRegimeResponse {
+  state: MarketHealthState;
+  spy_alignment: EmaAlignment;
+  qqq_alignment: EmaAlignment;
+  vix_level: number | null;
+  vix_regime: VixRegime;
+  breadth_pct: number | null;
+  breadth_above: number;
+  breadth_total: number;
+  notes: string[];
+}
+
+// ---- Order routing (POST /api/v1/orders/*) ----
+
+export interface RoutedOrder {
+  order_id: string;
+  broker: "PAPER" | "ALPACA";
+  ticker: string;
+  side: "buy" | "sell";
+  order_type: "MARKET" | "LIMIT";
+  qty: number;
+  limit_price: number | null;
+  status: "PENDING" | "FILLED" | "CANCELLED" | "REJECTED";
+  fill_price: number | null;
+  broker_order_id: string | null;
+  error: string | null;
+  submitted_at: string | null;
+  updated_at: string | null;
+}
+
+// ---- WS /ws/v1/live-feed ----
+
+export interface LiveFeedRegimeEvent extends MarketRegimeResponse {
+  type: "regime";
+}
+
+export interface LiveFeedSignalEvent extends ScreenerResponse {
+  type: "signal";
+}
+
+export interface LiveFeedOrderUpdateEvent {
+  type: "order_update";
+  orders: RoutedOrder[];
+}
+
+export interface LiveFeedErrorEvent {
+  type: "error";
+  detail: string;
+}
+
+export type LiveFeedEvent =
+  | LiveFeedRegimeEvent
+  | LiveFeedSignalEvent
+  | LiveFeedOrderUpdateEvent
+  | LiveFeedErrorEvent;
+
 // ---- Screener ----
 
 export type Direction = "LONG" | "SHORT" | "EXIT_LONG" | "FLAT";
