@@ -109,6 +109,8 @@ No orphaned components, views, or tabs. Every file under `components/` is import
 3. **`data/raw/*.parquet`** (502 files, 74MB tracked in git) — is committing the warm cache intentional, or should this be gitignored (and, if so, should the already-tracked files be removed from git in a follow-up, out of scope for this sprint)? Not proposing any action here without explicit direction — untracking 74MB of history-bearing binary files is a bigger call than a doc/dead-code cleanup.
 4. **`backend/app/data/agent.py`, `analytics/console.py`, `analytics/llm_reporter.py`** — confirmed as intentional standalone tools; default plan is to keep them and only fix their stale doc references. Flag if any should actually be retired.
 5. **`requirements-test.txt`** lists `black`, `isort`, `bandit`, `safety`, `watchdog` — none appear invoked by `pytest.ini`, `.flake8`, or anything under `.github/`, and no `.pre-commit-config.yaml` exists. Likely unused tooling deps, but lower confidence — worth confirming before dropping.
+   - **Correction (post-merge CI failure):** this research pass missed `.github/workflows/ci.yml`, which runs `black --check backend/ tests/` and `isort --check-only backend/ tests/` directly in its `lint` job. `black` and `isort` are restored. `bandit`/`safety`/`watchdog` remain removed — confirmed absent from `ci.yml` and `deploy.yml` too.
+   - **Separately discovered (pre-existing, unrelated to this sprint's changes):** neither `requirements.txt` nor `requirements-test.txt` has ever listed `httpx`, which `starlette.testclient.TestClient` requires at import time — 13 test files use `TestClient`. This was masked on developer machines where `httpx` was already present from some other install, but fails collection on a clean CI install. Added `httpx` to `requirements-test.txt` (test-only: nothing under `backend/app/` imports it directly, only `tests/`).
 
 ## 8. Phase 2 checklist
 
@@ -116,7 +118,7 @@ No orphaned components, views, or tabs. Every file under `components/` is import
 - [ ] Remove `scikit-learn` from `requirements.txt`
 - [ ] Remove `listScans()` from `frontend/src/lib/api.ts` *(pending answer to §7.1)*
 - [ ] Remove `results/archive/`, `results/current/` *(pending answer to §7.2)*
-- [ ] Remove unused test-tooling deps from `requirements-test.txt` *(pending answer to §7.5)*
+- [x] Remove unused test-tooling deps from `requirements-test.txt` — `bandit`/`safety`/`watchdog` dropped; `black`/`isort` restored after discovering `ci.yml`'s `lint` job invokes them directly; `httpx` added (pre-existing gap, needed by `TestClient`)
 
 **Documentation fixes:**
 - [ ] Add the 14 missing endpoints to `docs/api.md` (order-ticket, data-sync, scans, universe, market, risk, orders, live-feed WS)

@@ -16,9 +16,11 @@ views in both READMEs) and a handful of small, unambiguous cleanups.
 
 - `scikit-learn` dependency (`requirements.txt`) — unused, no `import
   sklearn` anywhere in the codebase.
-- `black`, `isort`, `bandit`, `safety`, `watchdog` (`requirements-test.txt`)
-  — not invoked by `pytest.ini`, `.flake8`, CI, or any pre-commit config;
-  `flake8` was kept since `.flake8` actively configures it.
+- `bandit`, `safety`, `watchdog` (`requirements-test.txt`) — not invoked by
+  `pytest.ini`, `.flake8`, `.github/workflows/`, or any pre-commit config.
+  (`black` and `isort` were briefly removed too, then restored — see "CI
+  fix" below; `flake8` was kept throughout since `.flake8` actively
+  configures it.)
 - `listScans()` and the now-unused `ListScansResponse` import
   (`frontend/src/lib/api.ts`) — defined, never called from any
   component/view/hook.
@@ -63,6 +65,34 @@ views in both READMEs) and a handful of small, unambiguous cleanups.
 - No test or business logic was modified — Phase 2 only removed confirmed-
   dead code/dependencies and fixed documentation; the full suite was
   already green before and after.
+
+### CI fix (post-review correction, same PR)
+
+The first push of this branch broke GitHub Actions CI, caught by the repo
+owner reviewing the pipeline run rather than by this sprint's own
+verification (which only ran suites locally):
+
+- **`lint` job failure** — `black: command not found`. Cause: the initial
+  cleanup pass removed `black`/`isort` from `requirements-test.txt` on the
+  premise that nothing invoked them; that check missed
+  `.github/workflows/ci.yml`, whose `lint` job runs `black --check backend/
+  tests/` and `isort --check-only backend/ tests/` directly. Both are
+  restored. (The codebase was already fully `black`/`isort`-compliant, so
+  restoring the checks doesn't surface any new formatting failures.)
+- **`test` job failure (both Python 3.11 and 3.12 matrix legs)** — pytest
+  collection errored on every `test_*_api.py` file:
+  `starlette.testclient` requires an HTTP client package to be installed,
+  and it isn't listed in either requirements file. This is a **pre-existing
+  gap predating this sprint** (confirmed via `git show main:requirements.txt`
+  — never listed on `main` either); it was masked locally because
+  developer machines already had it installed from some other project, and
+  only surfaces on CI's clean install. `httpx` (the real package
+  `starlette.testclient` depends on — the CI log's `pip install httpx2`
+  is not a real published package, so it was not installed verbatim) is
+  now in `requirements-test.txt`, since it's needed only by
+  `tests/test_*_api.py`'s `TestClient` usage, not by `backend/app/` itself.
+- `docs/SPRINT_6_AUDIT.md` §5 and its Phase 2 checklist item are annotated
+  with both corrections.
 
 ### Deferred (flagged in `docs/SPRINT_6_AUDIT.md`, out of scope for this
 ### surgical pass)
