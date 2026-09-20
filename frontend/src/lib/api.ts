@@ -20,7 +20,6 @@ import type {
   JournalSummary,
   JournalTradeResponse,
   JournalTradesResponse,
-  ListScansResponse,
   MaeMfeDistributionResponse,
   MarketRegimeResponse,
   OrderTicketRequest,
@@ -221,10 +220,6 @@ export function startScan(
 
 export function getScanStatus(jobId: string): Promise<ScanJob> {
   return request<ScanJob>(`/api/v1/scans/${encodeURIComponent(jobId)}`);
-}
-
-export function listScans(): Promise<ListScansResponse> {
-  return request<ListScansResponse>("/api/v1/scans");
 }
 
 export function submitOrder(

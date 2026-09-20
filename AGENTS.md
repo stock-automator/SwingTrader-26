@@ -150,12 +150,12 @@ class Order:
    - assertions that inactive (`signal == 0`) rows have NaN SL/TP values,
    - at least one behavioral test (e.g. "no signals during indicator warm-up").
 5. Run `pytest tests/test_<your_strategy_name>.py -v` and
-   `pytest tests/ -v --cov=src` before considering the strategy done.
+   `pytest tests/ -v --cov=backend` before considering the strategy done.
 6. Optionally smoke-test it end-to-end:
    ```python
-   from src.core.risk import RiskManager
-   from src.engine.backtester import run_backtest
-   from src.strategies.<your_strategy_name> import <YourStrategy>
+   from backend.app.quant.risk import RiskManager
+   from backend.app.quant.engine import run_backtest
+   from backend.app.quant.strategies.<your_strategy_name> import <YourStrategy>
 
    result = run_backtest(<YourStrategy>(), df, RiskManager(account_equity=5000))
    print(result.stats)
@@ -331,7 +331,7 @@ separation of concerns in §1.
   state machine (entry / SL exit / TP exit) deterministically.
 - `analytics/llm_reporter.py`: mock `requests.post` - tests must never
   require a live Ollama server.
-- Run the full suite with `pytest tests/ -v --cov=src` before considering
+- Run the full suite with `pytest tests/ -v --cov=backend` before considering
   work complete.
 
 ## 8. Code Review Workflow
@@ -353,7 +353,7 @@ Note that this separation is a convention, not a sandbox: the reviewer's
 toolset is `Read`, `Grep`, `Glob`, `Bash`, and `Bash` can write. It may
 legitimately mutate the tree while probing - e.g. flipping an index to check
 whether a test actually fails - so after a review run, confirm the working
-tree is clean (`git status --porcelain src/ tests/`) before trusting the
+tree is clean (`git status --porcelain backend/ tests/`) before trusting the
 diff you are about to merge.
 
 It checks typing/contract compliance against `BaseStrategy` and

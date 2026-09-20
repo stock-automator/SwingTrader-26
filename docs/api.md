@@ -657,6 +657,293 @@ failing the whole response.
 
 ---
 
+## `POST /api/v1/order-ticket`
+
+Turns one already-resolved setup (entry/stop/target, as read off the
+screener grid or a backtest) into broker-ready tickets side-by-side across
+account-size tiers ($1k/$5k/$10k by default), each sized and gated by
+`RiskManager.build_risk_managed_order`. Stateless — the caller supplies the
+setup's own numbers, so this never touches price data itself.
+
+### Request body
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `ticker` | string | — | Required |
+| `entry_price` | float | — | Required, `> 0` |
+| `sl_type` / `sl_value` | string / float | — | Required, `sl_value > 0` |
+| `tp_type` / `tp_value` | string / float | — | Required, `tp_value > 0` |
+| `atr` | float \| null | `null` | `> 0` if provided; needed for ATR-based sizing |
+| `direction` | int | `1` | `1` (long) or `-1` (short) |
+| `order_type` | string | `"MARKET"` | Passed through to the ticket, not validated against a broker |
+| `account_tiers` | float[] | `[1000, 5000, 10000]` | One ticket per tier |
+
+### Response body
+
+```json
+{
+  "tickets": [
+    { "ticker": "AAPL", "account_equity": 1000.0, "order_type": "MARKET",
+      "entry_price": 231.42, "stop_loss": 225.1, "take_profit": 240.0,
+      "quantity": 3, "notional_value": 694.26, "risk_amount": 20.0,
+      "reward_risk_ratio": 2.9, "tradable": true, "note": null }
+  ],
+  "min_reward_risk_ratio": 2.5
+}
+```
+
+A tier too small to size even 1 share comes back `tradable: false` with a
+`note`, not omitted from `tickets` — the UI shows every tier it asked for.
+
+---
+
+## `POST /api/v1/data/sync` / `GET /api/v1/data/sync/status`
+
+Background-executed Parquet cache refresh (staleness check + corporate-action
+reconciliation) via `quant/data/parquet_manager.py`. The sync itself can take
+seconds to minutes for a full watchlist, so `POST /sync` queues it with
+FastAPI's `BackgroundTasks` and answers `202` immediately; `GET /sync/status`
+reports on the most recently started run. State is in-process only (a module
+global), not persisted — it resets on server restart.
+
+### `POST /api/v1/data/sync`
+
+Body: `{"tickers": ["AAPL", "MSFT"]}` — omit or `null` to sync the full
+watchlist. `422` if the body is empty and the watchlist is also empty.
+
+```json
+{ "status": "started", "tickers": ["AAPL", "MSFT"] }
+```
+
+### `GET /api/v1/data/sync/status`
+
+```json
+{
+  "in_progress": true,
+  "started_at": "2026-09-20T14:03:00+00:00",
+  "results": [
+    { "ticker": "AAPL", "status": "synced", "rows_added": 3,
+      "corporate_action": null, "error": null }
+  ]
+}
+```
+
+`results` fills in incrementally as each ticker finishes, so polling mid-run
+shows partial progress, not just a final snapshot.
+
+---
+
+## `/api/v1/scans` — asynchronous background scanning (DuckDB-backed)
+
+Deliberately a separate path from `GET /api/v1/screener/live` / `WS
+/ws/screener`, which stay synchronous/single-strategy/in-memory for backward
+compatibility. This router runs one or more strategies across the full
+watchlist in the background and persists results to DuckDB
+(`backend/app/db/session.py`'s `scan_jobs`/`scan_results` tables), so a job
+survives past the request/response cycle and can be polled or listed later.
+
+### `POST /api/v1/scans`
+
+Body: `strategies` (string[] \| null, omit for every registered strategy),
+`tickers` (string[] \| null, override the watchlist), `account_equity`
+(float, default `1000.0`, `> 0`), `risk_per_trade_pct` (float, default
+`0.02`, `(0, 1]`), `earnings_blackout` (bool, default `false`). Returns
+`202` with `{"job_id": "..."}` immediately; the scan runs after the response
+is sent. `422` on an unknown strategy id.
+
+### `GET /api/v1/scans/{job_id}`
+
+```json
+{
+  "job_id": "a1b2c3...", "status": "completed",
+  "params": { "strategies": ["donchian_breakout"], "...": "..." },
+  "created_at": "2026-09-20T14:00:00+00:00",
+  "completed_at": "2026-09-20T14:00:04+00:00",
+  "error": null,
+  "results": [
+    { "ticker": "AAPL", "strategy": "donchian_breakout", "direction": "LONG",
+      "entry": 231.42, "stop": 225.1, "target": 240.0,
+      "win_probability": null, "r_multiple": 2.9,
+      "trigger_reason": "donchian_breakout BULL_TREND signal",
+      "payload": { "...": "full Setup.as_dict(), nothing is dropped" } }
+  ]
+}
+```
+
+`status` is one of `pending` / `running` / `completed` / `failed`; `results`
+is `null` until `completed`. `win_probability` is always `null` today —
+nothing in `quant.setups.Setup` currently computes one; persisted as `NULL`
+rather than fabricated. `404` for an unknown `job_id`.
+
+### `GET /api/v1/scans`
+
+Most recent jobs first, capped at 50 — job summaries only (no `results` or
+`params`), for a job-history list view:
+
+```json
+{ "job_id": "a1b2c3...", "status": "completed", "created_at": "...", "completed_at": "...", "error": null }
+```
+
+---
+
+## `/api/v1/universe/*` — dynamic S&P 500 + Nasdaq-100 universe
+
+`backend/app/data/universe.py`'s `UniverseManager` fetches, sanitizes,
+dedupes, and DENYLIST-filters the trading universe, persisting to
+`config/universe.json` (gitignored, generated). This router only exposes it
+over HTTP.
+
+### `POST /api/v1/universe/sync`
+
+Runs a fresh sync (network/Wikipedia fetch + parquet scan) off the event
+loop via `asyncio.to_thread`.
+
+### `GET /api/v1/universe/symbols`
+
+Returns the current `config/universe.json` contents, syncing first if the
+universe has never been synced or is more than 24h stale — no "call sync
+once before this ever works" step to remember on a fresh checkout.
+
+Both return the same shape:
+
+```json
+{
+  "symbols": ["AAPL", "MSFT", "..."],
+  "synced_at": "2026-09-20T14:00:00+00:00",
+  "source_counts": { "sp500": 503, "nasdaq100": 101 }
+}
+```
+
+---
+
+## `GET /api/v1/market/regime`
+
+Top-down market health "traffic light" for the Dashboard's regime badge.
+Resolves SPY/QQQ bars, the VIX's latest close, and a breadth universe (every
+cached ticker, capped at 500) through `quant/regime.py`'s
+`MarketRegimeEngine`. Any one input being unavailable (no network, an
+uncached VIX) degrades that piece to `None`/`UNKNOWN` rather than 500ing the
+whole endpoint — a top-level status badge should always render *something*.
+
+```json
+{
+  "state": "BULL_CONFIRMED",
+  "spy_alignment": "BULLISH",
+  "qqq_alignment": "BULLISH",
+  "vix_level": 14.2,
+  "vix_regime": "LOW",
+  "breadth_pct": 68.4,
+  "breadth_above": 342,
+  "breadth_total": 500,
+  "notes": []
+}
+```
+
+`state` is one of `BULL_CONFIRMED` / `CAUTION_CHOP` / `BEAR_DEFENSIVE`.
+
+---
+
+## `POST /api/v1/position-sizer/preview`
+
+Live ATR position-sizing preview for the Order Ticket Drawer's
+risk-percentage selector. Stateless, like `POST /api/v1/order-ticket`: the
+caller supplies ATR and the chosen risk %, this returns whole shares via
+`quant.risk.PositionSizer` — the same class the rest of the risk engine's
+ATR-multiple sizing is built on, so the UI preview and the backend's own
+sizing math can never drift apart.
+
+### Request body
+
+| Field | Type | Notes |
+|---|---|---|
+| `account_capital` | float | `> 0` |
+| `risk_pct` | float | `(0, 1]`, e.g. `0.01` for 1% |
+| `atr` | float | `> 0` |
+| `atr_multiplier` | float | Default `2.0`, `> 0` |
+
+```json
+{ "shares": 48, "risk_amount": 20.0 }
+```
+
+---
+
+## `/api/v1/orders/*` — broker-agnostic order routing
+
+Decoupled from `/api/v1/execution/*` (Alpaca paper trading only). Every
+route here goes through `execution/broker.py`'s `ExecutionBroker` —
+`PaperBroker` by default, or `AlpacaBroker` when `{"broker": "ALPACA"}` is
+requested — and persists the result to DuckDB's `routed_orders` table
+rather than in-process memory, so order state survives a process restart.
+
+### `POST /api/v1/orders/submit`
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `broker` | string | `"PAPER"` | `"PAPER"` or `"ALPACA"` |
+| `ticker` | string | — | Required |
+| `side` | string | — | `"buy"` or `"sell"` |
+| `qty` | float | — | `> 0` |
+| `order_type` | string | `"MARKET"` | `"MARKET"` or `"LIMIT"` |
+| `limit_price` | float \| null | `null` | — |
+| `reference_price` | float \| null | `null` | Required for `broker="PAPER"` + `order_type="MARKET"` (the quote it fills against); ignored by `ALPACA`, which prices its own fill |
+
+```json
+{
+  "order_id": "a1b2c3...", "broker": "PAPER", "ticker": "AAPL", "side": "buy",
+  "order_type": "MARKET", "qty": 10.0, "limit_price": null,
+  "status": "FILLED", "fill_price": 231.42, "broker_order_id": null,
+  "error": null, "submitted_at": "2026-09-20T14:00:00+00:00",
+  "updated_at": "2026-09-20T14:00:00+00:00"
+}
+```
+
+`422` for an unknown `broker`, a `PAPER` `MARKET` order missing
+`reference_price`, or a `ValueError` from the broker.
+
+### `POST /api/v1/orders/cancel/{order_id}`
+
+Cancels a still-`PENDING` order (same response shape as `submit`). `404` if
+`order_id` is unknown; `422` if it isn't `PENDING` or the broker declines.
+
+### `GET /api/v1/orders/active`
+
+Every order still `PENDING`: `{"orders": [ "...RoutedOrderResponse" ]}`.
+`PaperBroker` fills synchronously, so only `AlpacaBroker` orders
+realistically land here.
+
+---
+
+## `WS /ws/v1/live-feed`
+
+Unified real-time push feed for the frontend's `useWebSocket` hook: market
+regime, screener setup triggers, and order fill/cancel updates multiplexed
+over one socket instead of three. Same polling convention as `/ws/screener`
+— one round pushed immediately on connect, then every
+`settings.ws_poll_seconds` until the client disconnects.
+
+### Query parameters
+
+Same as `GET /api/v1/screener/live`: `strategy`, `account_equity`,
+`risk_per_trade_pct`, `earnings_blackout`.
+
+### Frames
+
+Each frame is tagged `"type"` so the client can route it without three
+separate sockets:
+
+```json
+{"type": "regime", "...": "MarketRegimeResponse shape"}
+{"type": "signal", "...": "GET /api/v1/screener/live shape"}
+{"type": "order_update", "orders": ["...RoutedOrderResponse, only orders changed since the last push"]}
+{"type": "error", "detail": "Unknown strategy 'not_real'. Available: ..."}
+```
+
+An `error` frame (e.g. an unknown `strategy` query param on one poll tick)
+does not close the socket — the same "don't force a reconnect over one bad
+frame" posture `/ws/screener` takes.
+
+---
+
 ## Strategy registry
 
 Valid values for `strategy` / the `strategy` query param, from
