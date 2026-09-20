@@ -30,11 +30,7 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from starlette.concurrency import run_in_threadpool
 
 from ..config import Settings, get_settings
-from ..data.loader import cached_tickers
-from .deps import load_frames
-from .market import MAX_BREADTH_UNIVERSE, QQQ_TICKER, SPY_TICKER
-from .market import _engine as _regime_engine
-from .market import _latest_vix_level, _safe_load_prices
+from .market import get_cached_regime_report
 from .orders import list_orders_updated_since
 from .screener import DEFAULT_SCREENER_EQUITY, DEFAULT_STRATEGY, _scan
 
@@ -48,18 +44,10 @@ def _utcnow_iso() -> str:
 
 
 def _build_regime_event(settings: Settings) -> dict[str, Any]:
-    spy_df = _safe_load_prices(SPY_TICKER, settings)
-    qqq_df = _safe_load_prices(QQQ_TICKER, settings)
-    vix_level = _latest_vix_level(settings)
-
-    universe = cached_tickers(settings.data_dir)[:MAX_BREADTH_UNIVERSE]
-    frames, _warnings = load_frames(universe, settings) if universe else ({}, [])
-    breadth = _regime_engine.compute_breadth(
-        frames, max_workers=settings.screener_max_workers
-    )
-
-    report = _regime_engine.classify(spy_df, qqq_df, vix_level, breadth)
-    return {"type": "regime", **report.as_dict()}
+    """Same `MarketHealthReport` `GET /api/v1/market/regime` returns, via
+    `market.get_cached_regime_report` - shared with the REST endpoint's own
+    cache rather than each poll tick running its own full breadth scan."""
+    return {"type": "regime", **get_cached_regime_report(settings)}
 
 
 def _build_signal_event(

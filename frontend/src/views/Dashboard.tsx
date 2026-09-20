@@ -8,7 +8,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDown, ArrowUp, ArrowUpDown, Ticket } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, Ticket } from "lucide-react";
 import { toast } from "sonner";
 import { useScanContext } from "../lib/ScanContext";
 import { useOpportunityFeed } from "../lib/useOpportunityFeed";
@@ -269,8 +269,9 @@ export function Dashboard() {
           <button
             onClick={refresh}
             disabled={loading}
-            className="rounded border border-border bg-panel-alt px-3 py-1.5 text-xs text-text hover:border-accent disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded border border-border bg-panel-alt px-3 py-1.5 text-xs text-text hover:border-accent disabled:opacity-50"
           >
+            <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
             {loading ? "Refreshing…" : "Refresh"}
           </button>
         </div>

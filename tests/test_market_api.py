@@ -24,8 +24,10 @@ def client() -> TestClient:
 @pytest.fixture(autouse=True)
 def _clear_overrides():
     app.dependency_overrides[get_settings] = lambda: Settings(allow_downloads=False)
+    market_module.reset_regime_cache_for_tests()
     yield
     app.dependency_overrides.pop(get_settings, None)
+    market_module.reset_regime_cache_for_tests()
 
 
 def _trending_frame(start: float, drift: float, n: int = 260) -> pd.DataFrame:

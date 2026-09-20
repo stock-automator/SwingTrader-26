@@ -223,7 +223,8 @@ export function OrderTicketDrawer({
           </div>
           <button
             onClick={onClose}
-            className="rounded px-2 py-1 text-sm text-text-dim hover:text-text"
+            aria-label="Close order ticket"
+            className="flex h-11 w-11 items-center justify-center rounded text-base text-text-dim hover:text-text"
           >
             ✕
           </button>

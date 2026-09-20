@@ -17,29 +17,34 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from ..config import Settings, get_settings
 from ..data.universe import UniverseManager
 from .schemas import UniverseSyncResponse
 
 router = APIRouter(prefix="/api/v1/universe", tags=["universe"])
 
 
+def _manager(settings: Settings) -> UniverseManager:
+    return UniverseManager(max_workers=settings.screener_max_workers)
+
+
 @router.post("/sync", response_model=UniverseSyncResponse)
-async def sync_universe() -> dict:
+async def sync_universe(settings: Settings = Depends(get_settings)) -> dict:
     """Runs `UniverseManager.sync()` - network/Wikipedia fetch + parquet
     scan - off the event loop via `asyncio.to_thread`, so this endpoint
     doesn't block other requests while it runs."""
-    manager = UniverseManager()
+    manager = _manager(settings)
     result = await asyncio.to_thread(manager.sync)
     return result.as_dict()
 
 
 @router.get("/symbols", response_model=UniverseSyncResponse)
-async def get_universe_symbols() -> dict:
+async def get_universe_symbols(settings: Settings = Depends(get_settings)) -> dict:
     """Current `config/universe.json` contents, syncing first if the
     universe has never been synced or is more than 24h stale."""
-    manager = UniverseManager()
+    manager = _manager(settings)
     if manager.needs_sync():
         result = await asyncio.to_thread(manager.sync)
         return result.as_dict()

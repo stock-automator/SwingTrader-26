@@ -93,6 +93,24 @@ def _create_tables(conn: duckdb.DuckDBPyConnection) -> None:
             updated_at TIMESTAMP
         )
         """)
+    # `job_id`/`order_id` PKs above already give scan_jobs/routed_orders a
+    # lookup index for free. The three indexes below cover the remaining
+    # hot filter columns that don't have one: scan_results has no PK at all
+    # (api/scans.py::_fetch_results filters it by job_id on every job-status
+    # poll), and routed_orders is filtered by status (_fetch_active_orders)
+    # and range-scanned by updated_at (list_orders_updated_since, polled
+    # every settings.ws_poll_seconds by the live-feed WebSocket).
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_scan_results_job_id " "ON scan_results(job_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_routed_orders_status "
+        "ON routed_orders(status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_routed_orders_updated_at "
+        "ON routed_orders(updated_at)"
+    )
 
 
 def _get_shared_connection_locked() -> duckdb.DuckDBPyConnection:

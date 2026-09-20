@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { getLiveScreener, screenerWebSocketUrl } from "../lib/api";
 import { fmtInt, fmtNum, fmtPct } from "../lib/format";
 import {
@@ -205,8 +206,9 @@ export function ScreenerGrid({ onRegimeChange }: ScreenerGridProps = {}) {
         <button
           onClick={fetchOnce}
           disabled={loading}
-          className="rounded border border-border bg-panel-alt px-3 py-1.5 text-sm text-text hover:border-accent disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded border border-border bg-panel-alt px-3 py-1.5 text-sm text-text hover:border-accent disabled:opacity-50"
         >
+          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           {loading ? "Scanning…" : "Rescan"}
         </button>
         <div className="ml-auto flex items-center gap-3">

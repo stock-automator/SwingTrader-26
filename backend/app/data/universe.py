@@ -13,9 +13,10 @@ deduped, and filtered down to symbols this repo can actually trade.
 4. Drops a small denylist of symbols known to have broken/zero-bar data in
    this repo's parquet store (`DENYLIST`).
 5. Drops any symbol whose `data/raw/{TICKER}.parquet` is missing or has zero
-   rows from the *active* list - see `purge_broken_symbols`. This never
-   deletes or edits a parquet file; it only decides what goes in
-   `config/universe.json`.
+   rows from the *active* list - see `purge_broken_symbols`, checked across
+   a bounded thread pool since this step alone is 500+ per-symbol disk
+   reads. This never deletes or edits a parquet file; it only decides what
+   goes in `config/universe.json`.
 6. Writes the result to `config/universe.json`.
 
 Price data itself (the actual OHLCV bars for each active symbol) is not
@@ -38,6 +39,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from io import StringIO
@@ -763,10 +765,15 @@ class UniverseManager:
         config_path: Path | str = DEFAULT_CONFIG_PATH,
         data_dir: Path | str = DEFAULT_DATA_DIR,
         denylist: frozenset[str] = DENYLIST,
+        max_workers: int = 16,
     ) -> None:
         self.config_path = Path(config_path)
         self.data_dir = Path(data_dir)
         self.denylist = denylist
+        #: `purge_broken_symbols` thread-pool size - matches the default of
+        #: `Settings.screener_max_workers` (`api.deps.load_frames`'s own
+        #: bound) so this module doesn't invent a second concurrency knob.
+        self.max_workers = max_workers
 
     # ------------------------------------------------------------------
     # Constituent fetching
@@ -868,8 +875,21 @@ class UniverseManager:
     def purge_broken_symbols(self, symbols: list[str]) -> list[str]:
         """`symbols` minus anything with a missing or zero-row parquet
         cache file. Purely a filter over `data_dir` - never writes or
-        deletes any parquet file."""
-        return [s for s in symbols if self._has_usable_data(s)]
+        deletes any parquet file.
+
+        Checked across a bounded `ThreadPoolExecutor` (matching
+        `quant.regime.MarketRegimeEngine.compute_breadth`'s concurrency
+        model) rather than a serial loop - each per-symbol check is a cheap
+        parquet-metadata read, but a full S&P 500 + Nasdaq-100 union still
+        adds up to 500+ synchronous disk reads serially. Order is preserved
+        regardless of completion order.
+        """
+        if not symbols:
+            return []
+        workers = max(1, min(self.max_workers, len(symbols)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            usable = list(pool.map(self._has_usable_data, symbols))
+        return [s for s, ok in zip(symbols, usable) if ok]
 
     def _sanitize_and_dedupe(self, symbols: list[str]) -> list[str]:
         seen: dict[str, None] = {}

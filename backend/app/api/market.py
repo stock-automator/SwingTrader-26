@@ -18,6 +18,9 @@ consistent with a top-level status badge that should always render
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, Depends
@@ -41,10 +44,24 @@ VIX_TICKER = "^VIX"
 #: thread-pool fan-out (see `quant.regime.MarketRegimeEngine.compute_breadth`).
 MAX_BREADTH_UNIVERSE = 500
 
+#: How long a computed regime report may be reused before recomputing.
+#: Regime state changes on the order of minutes, not seconds, relative to
+#: how often it's actually polled (the Dashboard badge, plus `WS
+#: /ws/v1/live-feed`'s own `settings.ws_poll_seconds`-interval poll loop in
+#: `api/ws.py`) - a short TTL lets concurrent/rapid callers (multiple
+#: browser tabs, the WS loop overlapping a REST poll) share one breadth
+#: scan across the whole cached universe instead of each recomputing it
+#: independently. Deliberately shorter than the default `ws_poll_seconds`
+#: (15s) so each WS tick still gets a mostly-fresh computation.
+REGIME_CACHE_TTL_SECONDS = 10.0
+
 #: Module-level: stateless and cheap to construct, but every request
 #: reusing one instance avoids re-validating its (fixed) thresholds on
 #: every poll.
 _engine = MarketRegimeEngine()
+
+_regime_cache_lock = threading.Lock()
+_regime_cache: dict[str, Any] = {"report": None, "computed_at": 0.0}
 
 
 def _safe_load_prices(ticker: str, settings: Settings) -> pd.DataFrame | None:
@@ -67,10 +84,7 @@ def _latest_vix_level(settings: Settings) -> float | None:
     return float(vix_df["Close"].iloc[-1])
 
 
-@router.get("/regime", response_model=MarketRegimeResponse)
-def get_market_regime(settings: Settings = Depends(get_settings)) -> dict:
-    """SPY/QQQ EMA alignment + S&P 500 breadth + VIX regime -> one
-    `MarketHealthReport`, for the Dashboard's traffic-light badge."""
+def _compute_regime_report(settings: Settings) -> dict:
     spy_df = _safe_load_prices(SPY_TICKER, settings)
     qqq_df = _safe_load_prices(QQQ_TICKER, settings)
     vix_level = _latest_vix_level(settings)
@@ -81,3 +95,41 @@ def get_market_regime(settings: Settings = Depends(get_settings)) -> dict:
 
     report = _engine.classify(spy_df, qqq_df, vix_level, breadth)
     return report.as_dict()
+
+
+def get_cached_regime_report(settings: Settings) -> dict:
+    """`_compute_regime_report`, reused across calls within
+    `REGIME_CACHE_TTL_SECONDS` - shared by `GET /regime` and `WS
+    /ws/v1/live-feed`'s poll loop (`api/ws.py`) so both read paths hit one
+    cache instead of each running their own full breadth scan."""
+    now = time.monotonic()
+    with _regime_cache_lock:
+        cached_report = _regime_cache["report"]
+        if (
+            cached_report is not None
+            and (now - _regime_cache["computed_at"]) < REGIME_CACHE_TTL_SECONDS
+        ):
+            return cached_report
+
+    report = _compute_regime_report(settings)
+    with _regime_cache_lock:
+        _regime_cache["report"] = report
+        _regime_cache["computed_at"] = time.monotonic()
+    return report
+
+
+def reset_regime_cache_for_tests() -> None:
+    """Clears the cached regime report so the next call recomputes from
+    scratch. Test-only - mirrors `db.session.reset_for_tests`; without it,
+    tests that monkeypatch fresh SPY/QQQ/VIX/breadth inputs per-test would
+    otherwise see a previous test's still-warm cached report."""
+    with _regime_cache_lock:
+        _regime_cache["report"] = None
+        _regime_cache["computed_at"] = 0.0
+
+
+@router.get("/regime", response_model=MarketRegimeResponse)
+def get_market_regime(settings: Settings = Depends(get_settings)) -> dict:
+    """SPY/QQQ EMA alignment + S&P 500 breadth + VIX regime -> one
+    `MarketHealthReport`, for the Dashboard's traffic-light badge."""
+    return get_cached_regime_report(settings)
