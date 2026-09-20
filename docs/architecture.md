@@ -8,7 +8,9 @@ FastAPI, both rendered by one React frontend.
 ## Data flow
 
 ```
-                    data/raw/<TICKER>.parquet  (yfinance cache, gitignored)
+                    data/raw/<TICKER>.parquet  (yfinance cache; the initial
+                                universe snapshot is tracked in git, new
+                                tickers/refreshes beyond that are gitignored)
                                 │
                                 │  cache hit ──► use it
                                 │  cache miss ─► live yfinance fetch (if ALLOW_DOWNLOADS)

@@ -1,5 +1,82 @@
 # Sprint Changelog
 
+## Sprint 6.1 — Audit, Dead-Code Cleanup & Documentation Sync (2026-09-20)
+
+Branch: `feature/sprint-6.1-audit-cleanup`.
+
+Phase 1 was a read-only audit of the full repository (backend, frontend,
+docs, config); findings are recorded in `docs/SPRINT_6_AUDIT.md`. Phase 2
+applied the surgical cleanup that audit called for. Headline finding: there
+was no large body of dead code to remove — every route, strategy, and
+frontend view is live and reachable. The real gaps were a documentation-drift
+problem (14 undocumented endpoints, stale pre-refactor paths, two missing
+views in both READMEs) and a handful of small, unambiguous cleanups.
+
+### Removed
+
+- `scikit-learn` dependency (`requirements.txt`) — unused, no `import
+  sklearn` anywhere in the codebase.
+- `black`, `isort`, `bandit`, `safety`, `watchdog` (`requirements-test.txt`)
+  — not invoked by `pytest.ini`, `.flake8`, CI, or any pre-commit config;
+  `flake8` was kept since `.flake8` actively configures it.
+- `listScans()` and the now-unused `ListScansResponse` import
+  (`frontend/src/lib/api.ts`) — defined, never called from any
+  component/view/hook.
+- `results/archive/` and `results/current/` — pre-refactor CLI-era output
+  directories; confirmed nothing under `backend/app/` writes to either path
+  anymore (the only current writer, `journal/executor.py`'s
+  `export_summary`, targets `results/trade_journal_summary.json` directly).
+  Both were already gitignored (`/results/`), so this is a local cleanup
+  only and won't appear in the PR diff.
+
+### Documentation fixes
+
+- `docs/api.md` — added the 14 endpoints across 8 routers that had zero
+  coverage despite being live since Sprint 4/5: order-ticket, data-sync
+  (×2), scans (×3), universe (×2), market/regime, position-sizer, orders
+  (×3), and the live-feed WebSocket.
+- `README.md` / `frontend/README.md` — both "views" sections listed only 6
+  of the app's 8 tabs; added **Dashboard** and **Historical Simulator**
+  (shipped Sprint 4, PR #10) to both, including the nav-overview screenshot
+  alt text and a "six tabs" → "eight tabs" correction in `README.md`.
+- `AGENTS.md` — fixed three literal, copy-pasteable commands/imports still
+  pointing at the pre-refactor `src/` layout that its own path-translation
+  table (added in a prior session) didn't cover: the "Adding a New
+  Strategy" worked example (`pytest --cov=src`, `from src.core.risk import
+  RiskManager`) and the Code Review Workflow's `git status --porcelain
+  src/ tests/`. The broader doc-wide `src/` → `backend/app/` rewrite
+  remains an explicitly-deferred fast-follow (per the doc's own header),
+  not done here.
+- `docs/architecture.md` — corrected the claim that `data/raw/*.parquet` is
+  entirely gitignored; the initial universe snapshot (502 files, 74MB) is
+  actually tracked in git, with `/data/` in `.gitignore` only affecting
+  files added since.
+- `README.md` — updated the stale "687 passing" test-count badge and prose
+  to the current count (848).
+
+### Verification
+
+- Backend: `pytest tests/` — **848 passed**, 0 failed.
+- Frontend: `npm run build` (tsc + vite) clean; `npm run lint` (oxlint) —
+  only a pre-existing warning, unrelated to this change; `npx playwright
+  test` — **20 passed**, 0 failed.
+- No test or business logic was modified — Phase 2 only removed confirmed-
+  dead code/dependencies and fixed documentation; the full suite was
+  already green before and after.
+
+### Deferred (flagged in `docs/SPRINT_6_AUDIT.md`, out of scope for this
+### surgical pass)
+
+- `data/universe.py::sync_universe` does fully sequential per-ticker
+  fetches — a real parallelization opportunity, but a feature-level change.
+- Two independent yfinance fetch paths (`data/loader.py` vs
+  `quant/data/parquet_manager.py`) have duplicated retry/adjustment logic
+  that will drift over time; worth consolidating in a future sprint.
+- `frontend/e2e/backtest.spec.ts` doesn't exist — Backtesting Studio's
+  form-submit → results flow has no dedicated E2E spec, only the shallow
+  tab-renders check in `smoke.spec.ts`. Not required for the 100%-pass goal
+  (nothing is failing), but the clearest coverage gap for a future sprint.
+
 ## Sprint 5 — Execution, Risk & Regime (2026-09-19)
 
 Branch: `feature/sprint-5-execution-risk-regime` (worktree at

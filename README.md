@@ -11,7 +11,7 @@ S&P 500?*
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)]()
 [![FastAPI](https://img.shields.io/badge/backend-FastAPI-009485)]()
 [![React](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB)]()
-[![Tests](https://img.shields.io/badge/tests-687%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-848%20passing-brightgreen)]()
 [![E2E](https://img.shields.io/badge/e2e-11%20passing-brightgreen)]()
 
 [What is this?](#what-is-this) •
@@ -34,21 +34,24 @@ SwingTrader is two things working together:
    turned into?" by comparing the strategy's results against **buying and
    holding the stock** and against **the S&P 500 (SPY)** — same starting
    dollar amount, same dates, so the comparison is fair.
-2. A **frontend** (React) — a dark, terminal-style web app with six tabs:
-   a **Live Screener** that scans a watchlist for buy/sell setups, a
-   **Signal Matrix** ranking actionable setups across every strategy at
-   once, a **Backtesting Studio** where you pick a strategy, a ticker, and
-   a date range and get back charts and numbers, a **Portfolio** dashboard
-   for the Alpaca paper account (equity, positions, emergency close-all),
-   a **Trade Journal** with MAE/MFE and win-rate/expectancy decay charts,
-   and an **Alerts** tab to configure Telegram/Discord/webhook channels
-   from the browser.
+2. A **frontend** (React) — a dark, terminal-style web app with eight tabs:
+   a **Dashboard** summarizing today's actionable setups and the current
+   market regime, a **Live Screener** that scans a watchlist for buy/sell
+   setups, a **Signal Matrix** ranking actionable setups across every
+   strategy at once, a **Backtesting Studio** where you pick a strategy, a
+   ticker, and a date range and get back charts and numbers, a
+   **Portfolio** dashboard for the Alpaca paper account (equity, positions,
+   emergency close-all), a **Trade Journal** with MAE/MFE and
+   win-rate/expectancy decay charts, an **Alerts** tab to configure
+   Telegram/Discord/webhook channels from the browser, and a **Historical
+   Simulator** for replaying a past date's scan and simulating trade
+   execution against it.
 
 You do not need to know how to trade, or write any code, to run this and
 click around it. The sections below assume you've never set up a project
 like this before.
 
-<img src="docs/media/screenshots/nav-overview.jpg" alt="SwingTrader's six tabs: Live Screener, Signal Matrix, Backtesting Studio, Portfolio, Trade Journal, Alerts" width="900">
+<img src="docs/media/screenshots/nav-overview.jpg" alt="SwingTrader's eight tabs: Dashboard, Live Screener, Signal Matrix, Backtesting Studio, Portfolio, Trade Journal, Alerts, Historical Simulator" width="900">
 
 ---
 
@@ -216,7 +219,7 @@ pip install -r requirements-test.txt
 pytest tests/ -v
 ```
 
-You should see `687 passed`. This isn't required to use the app — it's how
+You should see `848 passed`. This isn't required to use the app — it's how
 you'd confirm nothing is broken if you change any code. For the frontend's
 Playwright end-to-end suite (tab switching, filtering, paper-trade
 submission, modal confirmations, error toasts — all against a mocked
