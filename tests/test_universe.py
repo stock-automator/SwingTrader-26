@@ -210,9 +210,7 @@ class TestFetchHeaders:
             captured["timeout"] = timeout
             return _FakeResponse()
 
-        monkeypatch.setattr(
-            "backend.app.data.universe.requests.get", fake_get
-        )
+        monkeypatch.setattr("backend.app.data.universe.requests.get", fake_get)
 
         tables = manager._fetch_tables("https://en.wikipedia.org/wiki/Test")
 
@@ -228,9 +226,7 @@ class TestFetchHeaders:
             response.status_code = 403
             raise requests.HTTPError("403 Client Error", response=response)
 
-        monkeypatch.setattr(
-            "backend.app.data.universe.requests.get", fake_get
-        )
+        monkeypatch.setattr("backend.app.data.universe.requests.get", fake_get)
 
         symbols = manager.fetch_sp500_constituents()
 

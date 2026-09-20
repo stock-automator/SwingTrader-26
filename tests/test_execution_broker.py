@@ -48,9 +48,7 @@ class TestPaperBrokerSubmit:
 
     def test_limit_order_fills_at_limit_price_exactly(self):
         broker = PaperBroker(spread_bps=50.0)
-        result = broker.submit(
-            "AAPL", "buy", 10, order_type="LIMIT", limit_price=101.5
-        )
+        result = broker.submit("AAPL", "buy", 10, order_type="LIMIT", limit_price=101.5)
         assert result.status == STATUS_FILLED
         assert result.fill_price == 101.5
 
@@ -75,7 +73,9 @@ class TestPaperBrokerSubmit:
         assert broker.cancel(result.broker_order_id) is False
 
 
-def _fake_client(configured=True, submit_result=None, cancel_result=True, submit_raises=None):
+def _fake_client(
+    configured=True, submit_result=None, cancel_result=True, submit_raises=None
+):
     client = SimpleNamespace()
     client.is_configured = configured
 

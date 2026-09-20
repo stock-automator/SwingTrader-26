@@ -44,7 +44,9 @@ class TestMarketRegimeEndpoint:
             raise DataUnavailableError(ticker)
 
         monkeypatch.setattr(market_module, "load_prices", fake_load_prices)
-        monkeypatch.setattr(market_module, "cached_tickers", lambda data_dir: ["A", "B"])
+        monkeypatch.setattr(
+            market_module, "cached_tickers", lambda data_dir: ["A", "B"]
+        )
         monkeypatch.setattr(
             market_module,
             "load_frames",
@@ -85,9 +87,9 @@ class TestMarketRegimeEndpoint:
         monkeypatch.setattr(
             market_module,
             "load_prices",
-            lambda ticker, **kw: _trending_frame(500, -1.0)
-            if ticker in ("SPY", "QQQ")
-            else None,
+            lambda ticker, **kw: (
+                _trending_frame(500, -1.0) if ticker in ("SPY", "QQQ") else None
+            ),
         )
         monkeypatch.setattr(
             market_module, "cached_tickers", lambda data_dir: ["A", "B", "C"]

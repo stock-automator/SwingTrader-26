@@ -590,8 +590,10 @@ class MarketRegimeEngine:
                 f"Breadth {breadth_pct:.1f}% at/below the "
                 f"{self.breadth_bear_threshold:.0f}% bear threshold"
             )
-        if bearish_alignment or vix_bucket == VIX_EXTREME or (
-            breadth_pct is not None and breadth_pct <= self.breadth_bear_threshold
+        if (
+            bearish_alignment
+            or vix_bucket == VIX_EXTREME
+            or (breadth_pct is not None and breadth_pct <= self.breadth_bear_threshold)
         ):
             return _report(HEALTH_BEAR_DEFENSIVE)
 
