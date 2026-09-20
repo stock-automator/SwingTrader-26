@@ -342,5 +342,88 @@ class TestBuildOrderTickets:
         assert tickets[0].account_equity == 2_500.0
 
 
+class TestShortDirection:
+    """Tests for the `direction` parameter enabling short positions."""
+
+    def test_direction_none_is_long_only(self, tradeable_data):
+        """direction=None (default) should behave exactly as before: long-only."""
+        strategy = MovingAverageCross(fast_period=5, slow_period=15, sl_pct=0.10)
+        risk_manager = RiskManager(account_equity=5000.0, risk_per_trade_pct=0.02)
+
+        result = run_backtest(strategy, tradeable_data, risk_manager, direction=None)
+
+        # All trades should be long (positive Size in backtesting convention).
+        if len(result.trades) > 0:
+            assert (result.trades["Size"] > 0).all()
+
+    def test_direction_one_is_long_only(self, tradeable_data):
+        """direction=1 should behave exactly as direction=None: long-only."""
+        strategy = MovingAverageCross(fast_period=5, slow_period=15, sl_pct=0.10)
+        risk_manager = RiskManager(account_equity=5000.0, risk_per_trade_pct=0.02)
+
+        result = run_backtest(strategy, tradeable_data, risk_manager, direction=1)
+
+        if len(result.trades) > 0:
+            assert (result.trades["Size"] > 0).all()
+
+    def test_direction_minus_one_allows_shorts(self, tradeable_data):
+        """A strategy that signals -1 (sell) should open shorts when direction=-1."""
+
+        # Create a simple strategy that always signals -1 (sell/short).
+        class AlwaysShortStrategy:
+            def __init__(self):
+                self.name = "AlwaysShort"
+
+            def generate_signals(self, df):
+                signals = pd.DataFrame(index=df.index)
+                signals["signal"] = -1  # Always signal short
+                signals["sl_type"] = "PERCENTAGE"
+                signals["sl_value"] = 0.05
+                signals["tp_type"] = "PERCENTAGE"
+                signals["tp_value"] = 0.10
+                return signals
+
+        strategy = AlwaysShortStrategy()
+        risk_manager = RiskManager(account_equity=5000.0, risk_per_trade_pct=0.02)
+
+        # With direction=-1, should open shorts.
+        result = run_backtest(strategy, tradeable_data, risk_manager, direction=-1)
+
+        # Should have trades (shorts opened).
+        assert len(result.trades) > 0
+
+    def test_direction_minus_one_closes_longs_on_one_signal(self, tradeable_data):
+        """When direction=-1, signal=1 should close an open short."""
+
+        # Strategy that signals -1 for first half, then 1 for second half.
+        class FlipStrategy:
+            def __init__(self):
+                self.name = "Flip"
+
+            def generate_signals(self, df):
+                mid = len(df) // 2
+                signals = pd.DataFrame(index=df.index)
+                signals["signal"] = 0
+                signals.iloc[:mid, signals.columns.get_loc("signal")] = (
+                    -1
+                )  # Short first half
+                signals.iloc[mid:, signals.columns.get_loc("signal")] = (
+                    1  # Close/exit second half
+                )
+                signals["sl_type"] = "PERCENTAGE"
+                signals["sl_value"] = 0.05
+                signals["tp_type"] = "PERCENTAGE"
+                signals["tp_value"] = 0.10
+                return signals
+
+        strategy = FlipStrategy()
+        risk_manager = RiskManager(account_equity=5000.0, risk_per_trade_pct=0.02)
+
+        result = run_backtest(strategy, tradeable_data, risk_manager, direction=-1)
+
+        # Should have at least one trade (short opened and closed).
+        assert len(result.trades) > 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -109,6 +109,7 @@ def run_backtest(
     fee_per_share: float = 0.0,
     atr_slippage_multiple: float = 0.0,
     execution_mode: str = EXECUTION_MODE_NEXT_OPEN,
+    direction: int | None = None,
 ) -> BacktestResult:
     """Simulate `strategy` over historical `df` with realistic costs.
 
@@ -134,6 +135,10 @@ def run_backtest(
             this function - fills at the bar *after* the signal) or
             `SAME_CLOSE_SLIPPAGE` (fills at the signal's own bar close, via
             `backtesting.py`'s `trade_on_close`).
+        direction: `1` for long-only (the default, existing behaviour),
+            `-1` to also allow short entries (`signal == -1` opens a short
+            when flat, `signal == 1` closes an open short). When `None` the
+            engine stays long-only exactly as before this parameter was added.
 
     Raises:
         ValueError: if `df` is missing a required OHLCV column, or
@@ -166,6 +171,8 @@ def run_backtest(
 
     bt_df = df[list(REQUIRED_OHLCV_COLUMNS)].copy()
 
+    _direction = direction
+
     class _SignalAdapter(Strategy):
         def init(self):
             pass
@@ -175,12 +182,29 @@ def run_backtest(
             sig = signal[i]
 
             if self.position:
-                if sig == -1:
+                # Close on opposite signal: long closes on -1, short closes on 1.
+                if _direction == 1 and sig == -1:
                     self.position.close()
+                    return
+                if _direction == -1 and sig == 1:
+                    self.position.close()
+                    return
+                if _direction is None and sig == -1:
+                    self.position.close()
+                    return
+                # Same-direction signal while already in: skip (no re-entry).
                 return
 
-            if sig != 1:
-                return
+            # No position: look for an entry signal.
+            if _direction == 1:
+                if sig != 1:
+                    return
+            elif _direction == -1:
+                if sig != -1:
+                    return
+            else:  # _direction is None: long-only
+                if sig != 1:
+                    return
 
             entry_price = float(self.data.Close[-1])
             atr_value = float(atr[i]) if atr is not None else None
@@ -191,12 +215,19 @@ def run_backtest(
                 sl_value=float(sl_value[i]),
                 tp_type=tp_type[i],
                 tp_value=float(tp_value[i]),
-                direction=1,
+                direction=_direction if _direction is not None else 1,
                 atr=atr_value,
             )
 
             if order.shares > 0:
-                self.buy(size=order.shares, sl=order.stop_loss, tp=order.take_profit)
+                if _direction == -1:
+                    self.sell(
+                        size=order.shares, sl=order.stop_loss, tp=order.take_profit
+                    )
+                else:
+                    self.buy(
+                        size=order.shares, sl=order.stop_loss, tp=order.take_profit
+                    )
 
     commission_param = (
         (lambda size, price: abs(size) * fee_per_share)
