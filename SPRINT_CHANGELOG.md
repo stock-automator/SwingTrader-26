@@ -289,3 +289,35 @@ Branch: `feature/sprint-5-execution-risk-regime` (worktree at
   poll-and-diff model, once a message-queue layer is in place.
 - Replace the Wikipedia-scrape universe source with a maintained constituents
   API/dataset now that a second scraping fragility class (403s) has surfaced.
+
+## Sprint 7 — Deploy Workflow GHCR Fix (2026-09-20)
+
+Branch: `sprint-7/deploy-workflow-fix` → PR #15 → merged to main as `25749bd`.
+
+### Core Change
+
+**Fix GHCR image naming in `.github/workflows/deploy.yml`**
+
+- Changed `BACKEND_IMAGE` and `FRONTEND_IMAGE` from `${{ github.repository }}-backend/frontend`
+  to `${{ github.repository_owner | lower }}/${{ github.event.repository.name | lower }}-backend/frontend`
+- **Why:** `github.repository` preserves case (e.g., `SwingTrader-26`) but GHCR stores
+  images under lowercase names. This caused all previous deploy workflow runs to fail.
+- **Impact:** Future deploy workflow runs will correctly push to GHCR.
+
+### Added Documentation
+
+- `docs/agent/CODE_REVIEW_SPRINT_7.md` — Independent code review report
+- `docs/agent/QE_SPRINT_7.md` — Independent QE validation report
+
+### Validation
+
+- YAML syntax: valid ✓
+- Local pytest: 856 tests passing ✓
+- Lint: black/isort/flake8 ✓
+- CI (PR #15): lint ✓, frontend ✓, test (3.11) ✓, test (3.12) ✓
+- Code Review: APPROVED ✓
+- QE: PASSED ✓
+
+### Deferred
+
+None — minimal configuration change.

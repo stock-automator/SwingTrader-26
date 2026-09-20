@@ -43,9 +43,13 @@
 - **Claude Code skills:** Evaluated marketplace — code-review (PR-focused, not applicable), code-simplifier (JS-focused, not applicable to Python), feature-dev (interactive, not autonomous). Project's existing `code_reviewer.md` agent is more appropriate for this repo.
 - **Groq provider:** Still broken (invalid API key)
 
-### Decisions Made
-- Used `hermes send` for Telegram notifications (no consent needed for bot-token platforms)
-- Used GitHub PAT for git push (stored securely in ~/.git-credentials, mode 600)
-- Did not install Claude Code marketplace skills — existing code_reviewer.md agent is more appropriate
-- Did not configure OmniRoute Claude Code profiles — Claude Code works standalone; OmniRoute API key not configured
-- Did not fix deploy workflow GHCR uppercase issue — pre-existing, unrelated to current work
+### Sprint 7: Deploy Workflow GHCR Fix (COMPLETE)
+- **File changed:** `.github/workflows/deploy.yml`
+- **Change:** Use lowercase GHCR image names via `github.repository_owner | lower` / `github.event.repository.name | lower`
+- **PR:** #15 — created, CI green (4/4), Code Review APPROVED, QE PASSED, merged
+- **Commit:** `25749bd` (squash-merged)
+- **CI:** ✅ GREEN — lint ✓, frontend ✓, test (3.11) ✓, test (3.12) ✓
+- **Telegram notification:** Sent via `hermes send`
+
+### Decisions Updated
+- Deploy workflow GHCR fix: Implemented and merged (was previously deferred as pre-existing)

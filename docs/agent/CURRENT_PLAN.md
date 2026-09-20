@@ -1,7 +1,7 @@
 # Current Plan — Autonomous Development Supervisor
 
 **Last updated:** 2026-09-20  
-**Status:** Phase 1 — First iteration COMPLETE
+**Status:** Phase 2 — Sprint 7 COMPLETE, waiting for next PO task
 
 ## Objective
 
@@ -11,11 +11,11 @@ Build an autonomous development supervisor for ~/SwingTrader-26 capable of:
 PLAN → IMPLEMENT → REVIEW → TEST → FIX → CI VERIFY → REPORT
 ```
 
-Operating untended for long periods, contacting via Telegram only when human input is genuinely required.
+Operating unattended for long periods, contacting via Telegram only when human input is genuinely required.
 
 ## Current Phase
 
-**Phase 1: Infrastructure Inspection & First Iteration — COMPLETE**
+**Phase 2: Sprint 7 COMPLETE — Waiting for next PO task**
 
 ### Done
 - [x] Inspect Hermes configuration
@@ -29,13 +29,16 @@ Operating untended for long periods, contacting via Telegram only when human inp
 - [x] Create REPOSITORY_REPORT.md
 - [x] Create persistent PLAN MODE docs (CURRENT_PLAN.md, DECISIONS.md, BLOCKERS.md)
 - [x] Execute first iteration (PLAN → CODE → REVIEW → TEST → FIX → REPORT)
+- [x] **Sprint 7: Fix GHCR image name casing in deploy workflow** — COMPLETE
+  - PR #15 created, CI green (4/4), Code Review APPROVED, QE PASSED, merged
 
 ### In Progress
-- [ ] Configure autonomous execution loop scripts
+- [ ] Determine next approved PO task
 
 ### Not Started
-- [ ] Install useful Claude Code skills (verify before installing) — evaluated, not needed
-- [ ] Set up OmniRoute fallback routing configuration — Claude Code works standalone
+- [ ] Autonomous execution loop scripts (if needed)
+- [ ] OmniRoute fallback routing configuration (Claude Code works standalone)
+- [ ] Claude Code skills (evaluated — not needed for current workflow)
 
 ## Iteration 1 Results
 
