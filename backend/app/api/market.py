@@ -101,21 +101,34 @@ def get_cached_regime_report(settings: Settings) -> dict:
     """`_compute_regime_report`, reused across calls within
     `REGIME_CACHE_TTL_SECONDS` - shared by `GET /regime` and `WS
     /ws/v1/live-feed`'s poll loop (`api/ws.py`) so both read paths hit one
-    cache instead of each running their own full breadth scan."""
-    now = time.monotonic()
+    cache instead of each running their own full breadth scan.
+
+    The lock is held across the recompute itself, not just the
+    check-and-write - callers already run off the event loop (via
+    `run_in_threadpool`/Starlette's auto-threadpool for a sync route), so
+    blocking here is fine, and it's what makes the cache actually work
+    under concurrent load: right as the TTL expires, several callers
+    (multiple dashboard tabs, the WS loop) can land here at once. Without
+    holding the lock across the compute, every one of them would see a
+    stale cache and independently launch its own full breadth scan - the
+    opposite of the point of caching. With it, only the first caller past
+    the check recomputes; everyone else queued on the lock re-checks
+    freshness once they acquire it and finds the value the first caller
+    just wrote, so they read instead of recomputing.
+    """
     with _regime_cache_lock:
         cached_report = _regime_cache["report"]
+        now = time.monotonic()
         if (
             cached_report is not None
             and (now - _regime_cache["computed_at"]) < REGIME_CACHE_TTL_SECONDS
         ):
             return cached_report
 
-    report = _compute_regime_report(settings)
-    with _regime_cache_lock:
+        report = _compute_regime_report(settings)
         _regime_cache["report"] = report
         _regime_cache["computed_at"] = time.monotonic()
-    return report
+        return report
 
 
 def reset_regime_cache_for_tests() -> None:

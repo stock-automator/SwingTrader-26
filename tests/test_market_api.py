@@ -109,3 +109,67 @@ class TestMarketRegimeEndpoint:
 
         assert response.status_code == 200
         assert response.json()["state"] == "BEAR_DEFENSIVE"
+
+
+class TestRegimeCaching:
+    """`get_cached_regime_report` (Sprint 6 Phase 3) - the computation
+    itself is monkeypatched wholesale here rather than its SPY/QQQ/VIX/
+    breadth inputs, since these tests are about call *count*, not the
+    classification logic already covered above / in
+    `test_market_regime_engine.py`.
+    """
+
+    def test_second_call_within_ttl_reuses_cached_report(self, monkeypatch):
+        calls = {"count": 0}
+
+        def _fake_compute(settings):
+            calls["count"] += 1
+            return {"state": "BULL_CONFIRMED", "call": calls["count"]}
+
+        monkeypatch.setattr(market_module, "_compute_regime_report", _fake_compute)
+        settings = Settings(allow_downloads=False)
+
+        first = market_module.get_cached_regime_report(settings)
+        second = market_module.get_cached_regime_report(settings)
+
+        assert calls["count"] == 1
+        assert first == second == {"state": "BULL_CONFIRMED", "call": 1}
+
+    def test_cache_recomputes_once_ttl_has_elapsed(self, monkeypatch):
+        calls = {"count": 0}
+
+        def _fake_compute(settings):
+            calls["count"] += 1
+            return {"state": "BULL_CONFIRMED", "call": calls["count"]}
+
+        monkeypatch.setattr(market_module, "_compute_regime_report", _fake_compute)
+        # A zero TTL means "now - computed_at" (always >= 0) is never < the
+        # TTL, so every call is treated as expired - a deterministic way to
+        # exercise the recompute branch without mocking the clock.
+        monkeypatch.setattr(market_module, "REGIME_CACHE_TTL_SECONDS", 0.0)
+        settings = Settings(allow_downloads=False)
+
+        market_module.get_cached_regime_report(settings)
+        market_module.get_cached_regime_report(settings)
+
+        assert calls["count"] == 2
+
+    def test_rest_endpoint_and_live_feed_ws_share_one_cached_computation(
+        self, monkeypatch
+    ):
+        import backend.app.api.ws as ws_module
+
+        calls = {"count": 0}
+
+        def _fake_compute(settings):
+            calls["count"] += 1
+            return {"state": "BULL_CONFIRMED", "call": calls["count"]}
+
+        monkeypatch.setattr(market_module, "_compute_regime_report", _fake_compute)
+        settings = Settings(allow_downloads=False)
+
+        rest_result = market_module.get_market_regime(settings)
+        ws_event = ws_module._build_regime_event(settings)
+
+        assert calls["count"] == 1
+        assert ws_event == {"type": "regime", **rest_result}

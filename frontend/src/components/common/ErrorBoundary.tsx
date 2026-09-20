@@ -36,6 +36,8 @@ export class ErrorBoundary extends Component<
     );
   }
 
+  private reset = () => this.setState({ error: null });
+
   render() {
     if (this.state.error) {
       return (
@@ -49,9 +51,18 @@ export class ErrorBoundary extends Component<
               ? `${this.props.label} hit an error.`
               : "Something went wrong."}
           </div>
-          <p className="mt-1">
-            Try switching tabs and back, or reload the page.
-          </p>
+          {/* Most tabs unmount on tab-switch anyway (clearing this state
+              for free), but the always-mounted Live Screener tab
+              (App.tsx - never unmounts, it owns the header's live regime
+              WebSocket) doesn't, so a manual reset is the only way back
+              short of a full page reload. */}
+          <button
+            type="button"
+            onClick={this.reset}
+            className="mt-2 rounded border border-border bg-panel-alt px-3 py-1.5 text-xs font-medium text-text hover:border-accent"
+          >
+            Try again
+          </button>
         </div>
       );
     }
