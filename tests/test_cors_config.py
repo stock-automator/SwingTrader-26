@@ -58,8 +58,6 @@ class TestCorsMiddlewareIntegration:
         )
 
     def test_public_origin_gets_no_cors_header(self, client):
-        response = client.get(
-            "/api/v1/health", headers={"Origin": "http://evil.com"}
-        )
+        response = client.get("/api/v1/health", headers={"Origin": "http://evil.com"})
         assert response.status_code == 200
         assert "access-control-allow-origin" not in response.headers

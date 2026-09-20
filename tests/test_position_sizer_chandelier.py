@@ -15,7 +15,9 @@ def _ohlc(n: int = 40, base: float = 100.0) -> pd.DataFrame:
     close = base + np.cumsum(np.random.default_rng(7).normal(0, 1, n))
     high = close + 1.5
     low = close - 1.5
-    return pd.DataFrame({"Open": close, "High": high, "Low": low, "Close": close}, index=idx)
+    return pd.DataFrame(
+        {"Open": close, "High": high, "Low": low, "Close": close}, index=idx
+    )
 
 
 class TestPositionSizerConstruction:

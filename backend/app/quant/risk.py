@@ -556,14 +556,16 @@ class ChandelierExitStop:
 
         atr = wilder_atr(df, self.atr_period) * self.atr_multiplier
         if direction == 1:
-            highest_high = df["High"].rolling(
-                window=self.atr_period, min_periods=self.atr_period
-            ).max()
+            highest_high = (
+                df["High"]
+                .rolling(window=self.atr_period, min_periods=self.atr_period)
+                .max()
+            )
             return highest_high - atr
 
-        lowest_low = df["Low"].rolling(
-            window=self.atr_period, min_periods=self.atr_period
-        ).min()
+        lowest_low = (
+            df["Low"].rolling(window=self.atr_period, min_periods=self.atr_period).min()
+        )
         return lowest_low + atr
 
     @staticmethod

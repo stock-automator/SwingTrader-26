@@ -210,3 +210,20 @@ class TestLoadWatchlist:
     def test_no_overflow_when_watchlist_fits_under_cap(self, settings):
         settings.watchlist_path.write_text("AAPL\nMSFT\n")
         assert deps_module.watchlist_overflow(settings) == 0
+
+    def test_denylisted_tickers_are_filtered_out(self, settings):
+        """Regression: MMC/WBA/K/BK/CTRA have no usable data in this repo's
+        parquet store (see `data.universe.DENYLIST`). A watchlist that still
+        lists them must not surface them to `load_frames` - that's what was
+        spamming failed full-history yfinance downloads every screener/sync
+        poll for tickers that can never succeed."""
+        settings.watchlist_path.write_text("AAPL\nMMC\nWBA\nMSFT\nK\nBK\nCTRA\n")
+
+        tickers = deps_module.load_watchlist(settings)
+
+        assert tickers == ["AAPL", "MSFT"]
+        assert deps_module.watchlist_overflow(settings) == 0
+
+    def test_denylisted_only_watchlist_returns_empty(self, settings):
+        settings.watchlist_path.write_text("MMC\nWBA\n")
+        assert deps_module.load_watchlist(settings) == []

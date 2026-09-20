@@ -24,8 +24,8 @@ def _multiindex_frame(ticker: str = "BK", n: int = 5) -> pd.DataFrame:
         [["Open", "High", "Low", "Close", "Volume"], [ticker]]
     )
     data = {
-        (field, ticker): [100.0 + i for i in range(n)] for field in
-        ["Open", "High", "Low", "Close", "Volume"]
+        (field, ticker): [100.0 + i for i in range(n)]
+        for field in ["Open", "High", "Low", "Close", "Volume"]
     }
     return pd.DataFrame(data, index=index, columns=columns)
 
@@ -123,8 +123,13 @@ class TestFetchYfinanceNoStartDate:
             captured["period"] = period
             idx = pd.date_range("2020-01-02", periods=3, freq="B")
             return pd.DataFrame(
-                {"Open": [1.0] * 3, "High": [1.0] * 3, "Low": [1.0] * 3,
-                 "Close": [1.0] * 3, "Volume": [100] * 3},
+                {
+                    "Open": [1.0] * 3,
+                    "High": [1.0] * 3,
+                    "Low": [1.0] * 3,
+                    "Close": [1.0] * 3,
+                    "Volume": [100] * 3,
+                },
                 index=idx,
             )
 
@@ -143,8 +148,13 @@ class TestFetchYfinanceNoStartDate:
             captured["period"] = period
             idx = pd.date_range("2020-01-02", periods=3, freq="B")
             return pd.DataFrame(
-                {"Open": [1.0] * 3, "High": [1.0] * 3, "Low": [1.0] * 3,
-                 "Close": [1.0] * 3, "Volume": [100] * 3},
+                {
+                    "Open": [1.0] * 3,
+                    "High": [1.0] * 3,
+                    "Low": [1.0] * 3,
+                    "Close": [1.0] * 3,
+                    "Volume": [100] * 3,
+                },
                 index=idx,
             )
 
