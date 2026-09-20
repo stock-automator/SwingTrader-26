@@ -556,6 +556,26 @@ evidence for further investigation, not proof of anything.
    tests across 5 spec files (tab switching, filtering, paper-trade
    submission, modal confirmations, configured/unconfigured empty states,
    error toasts).
+7. **Sprints 4-6.1** — Unified Dashboard, Historical Simulator, universe
+   sync, async DuckDB-backed background scans; market regime engine, ATR
+   position sizer, broker-agnostic order routing, the unified live-feed
+   WebSocket, and mobile/Meshnet access; then a repo-wide dead-code/
+   documentation audit. Detailed per-sprint changes moved to
+   `SPRINT_CHANGELOG.md` starting here rather than growing this list
+   further — that file is now the canonical record.
+8. **Sprint 6 Phase 3 (this round)** — performance and resilience pass, no
+   new user-facing features: parallelized the universe-sync symbol filter
+   and closed an event-loop-blocking gap in the analytics endpoints
+   (`run_in_threadpool` around data loading, not just the backtest
+   computation that followed it); added DuckDB indexes and a short-TTL
+   cache for the market-regime computation (shared between the REST
+   endpoint and the live-feed WebSocket, removing a duplicated
+   computation); a global FastAPI error handler so an unexpected backend
+   exception now returns a consistent JSON error instead of an
+   unformatted one; and a React error boundary around every tab, so a
+   bug in one tab's render shows a "Something went wrong — try switching
+   tabs and back, or reload the page" message in that tab instead of
+   blanking the whole app. See `SPRINT_CHANGELOG.md` for the full list.
 
 **Deliberately not done yet** (so the next session doesn't have to rediscover
 this by reading code):

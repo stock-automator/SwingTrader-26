@@ -374,7 +374,11 @@ class MarketHealthReport:
             "breadth_pct": self.breadth_pct,
             "breadth_above": self.breadth_above,
             "breadth_total": self.breadth_total,
-            "notes": self.notes,
+            # Copied, not a reference: `api/market.py` caches this exact
+            # dict and hands it out to every caller during the TTL window -
+            # a shared mutable list would let one caller's in-place mutation
+            # corrupt what every other concurrent reader sees.
+            "notes": list(self.notes),
         }
 
 

@@ -95,7 +95,7 @@ test("blind tape walkthrough hides future bars until stepped forward", async ({
   // full-viewport backdrop is modal (by design, matching OrderTicketDrawer),
   // so close it to reach the Blind Tape panel underneath - `bars` state
   // lives in Simulator, not the drawer, so closing doesn't lose it.
-  await page.getByRole("button", { name: "✕" }).click();
+  await page.getByRole("button", { name: "Close simulate trade" }).click();
   await expect(page.getByTestId("simulate-trade-drawer")).toHaveClass(/translate-x-full/);
 
   // 20 bars are available but the walkthrough starts revealed to only the

@@ -12,8 +12,11 @@ this module only wires them together with CORS and a health check.
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .api.alerts import router as alerts_router
 from .api.analytics import router as analytics_router
@@ -34,6 +37,8 @@ from .api.universe import router as universe_router
 from .api.ws import router as live_feed_router
 from .config import get_settings
 from .data.universe import register_universe_startup
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(
     title="SwingTrader API",
@@ -77,6 +82,23 @@ app.include_router(orders_router)
 app.include_router(live_feed_router)
 
 register_universe_startup(app)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Last-resort catch-all for anything a route didn't already turn into
+    an `HTTPException` (which FastAPI's own default handler already formats
+    consistently, so this deliberately doesn't touch that path - see every
+    route module's own 422/503/etc. handling). Without this, an unexpected
+    exception (a bug, a third-party library raising something odd) would
+    surface as whatever ASGI's default error response happens to be rather
+    than a shape every client already knows how to parse, and wouldn't get
+    logged server-side with the request context that caused it."""
+    log.exception("unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Check server logs for details."},
+    )
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)

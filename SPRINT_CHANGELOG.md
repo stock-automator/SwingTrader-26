@@ -1,5 +1,100 @@
 # Sprint Changelog
 
+## Sprint 6 Phase 3-4 — Performance, UI Resilience & Documentation (2026-09-20)
+
+Branch: `feature/sprint-6-phase3-4-performance-ui`, stacked on
+`feature/sprint-6.1-audit-cleanup` (PR #13). No new user-facing features —
+this is a performance and resilience pass over the surface Sprint 6.1
+audited, plus filling the documentation gaps that audit flagged but didn't
+fix (`docs/architecture.md` only covered the backtest/screener path).
+
+### Backend performance
+
+- **`data/universe.py::UniverseManager.purge_broken_symbols`** — the
+  500+-symbol per-ticker parquet-existence check (S&P 500 + Nasdaq-100
+  union) now runs across a bounded `ThreadPoolExecutor` instead of a
+  serial loop, matching `quant/regime.py::compute_breadth`'s existing
+  concurrency pattern. Wired from `settings.screener_max_workers` at the
+  API layer (`api/universe.py`) so it shares that one tuning knob.
+- **`api/analytics.py`** — closed a real event-loop-blocking gap: all
+  three routes here are `async def` (unlike `api/backtest.py`'s plain
+  `def`, which Starlette auto-threadpools), so `load_frames`/
+  `_load_benchmark_or_503` — both synchronous, a parquet read or a
+  possible live yfinance fetch — were running directly on the event loop
+  *before* the already-`run_in_threadpool`-wrapped backtest computation
+  that followed them. Now wrapped in `run_in_threadpool` too.
+- **DuckDB indexes** — added `idx_scan_results_job_id`,
+  `idx_routed_orders_status`, `idx_routed_orders_updated_at`
+  (`db/session.py`) on the hot filter columns that didn't already have one
+  via a `PRIMARY KEY`. `scan_jobs`/`routed_orders` were already covered by
+  their own PKs.
+- **`GET /api/v1/market/regime` response cache** — 10-second TTL,
+  `threading.Lock`-guarded (`api/market.py::get_cached_regime_report`).
+  Shared with `WS /ws/v1/live-feed`'s poll loop, which previously carried
+  its own independent copy of the same SPY/QQQ/VIX/breadth computation
+  (`api/ws.py::_build_regime_event`) — now calls the same cached function,
+  removing both the duplication and the redundant recomputation.
+- **Global exception handler** (`main.py`) — an unhandled exception now
+  returns a consistent `{"detail": "Internal server error..."}` 500
+  instead of an unformatted error. Every route's own deliberate
+  `HTTPException` handling (422/503/etc.) is untouched — this only catches
+  what wasn't already turned into one.
+
+### Frontend UI polish & resilience
+
+- **`CloseAllModal`** now animates in/out (`framer-motion`
+  `AnimatePresence`) instead of an instant pop — matches the transition
+  treatment already used for tab switches and `OrderTicketDrawer`.
+- **Loading-state spinners** — `ScreenerGrid`'s Rescan, `Dashboard`'s
+  Refresh, and `BacktestStudio`'s Run Backtest buttons now show a spinning
+  icon alongside the existing text swap, matching the icon+text pattern
+  `PortfolioDashboard`'s own refresh button already had (previously the
+  only place with one).
+- **Touch targets** — `OrderTicketDrawer`'s and `Simulator`'s drawer close
+  buttons bumped from an unlabeled ~28px hit area to 44px with an
+  `aria-label` (mobile accessibility guideline minimum).
+- **`ErrorBoundary`** (new, `components/common/ErrorBoundary.tsx`) — wraps
+  every tab (and the always-mounted `ScreenerGrid`) in `App.tsx`, so a
+  render error in one tab's subtree shows a graceful fallback instead of
+  unmounting the whole app. No frontend unit-test runner exists in this
+  repo (Playwright E2E + `tsc` + `oxlint` only — confirmed in the Sprint
+  6.1 audit), so this ships without automated test coverage of its own;
+  adding one wasn't judged worth a new test-framework dependency for a
+  single, standard React pattern.
+- **Mobile/LAN/Meshnet access** (`0.0.0.0` bindings, CORS private-network
+  regex, viewport meta tag) — audited, already fully in place from Sprint
+  5; nothing to add.
+
+### Documentation
+
+- **`docs/architecture.md`** — filled the gap the Sprint 6.1 audit flagged
+  (only diagrammed the backtest/screener path): added sections covering
+  every other subsystem (execution, order routing, journal, alerts,
+  market regime, position sizer, universe sync, background scans,
+  live-feed WS), the full DuckDB schema (tables, keys, the new indexes,
+  the single-lock-connection concurrency model), both WebSocket routes'
+  frame shapes, and a catalog of the four concurrency patterns used across
+  the codebase (bounded `ThreadPoolExecutor`, `run_in_threadpool`,
+  `asyncio.to_thread`, and the new short-TTL cache pattern).
+- **`README.md`** — added two "Status" entries: a pointer to
+  `SPRINT_CHANGELOG.md` as the canonical record starting at Sprint 4 (the
+  prior numbered list predated it and had drifted out of sync), and this
+  round's summary.
+
+### Verification
+
+- Backend: `pytest tests/` — **849 passed** (848 + one new test for the
+  exception handler), 0 failed. `black --check`, `isort --check-only`,
+  `flake8` — all clean.
+- Frontend: `npm run build` (tsc + vite) clean; `npm run lint` (oxlint) —
+  only the same pre-existing warning from Sprint 6.1; `npx playwright
+  test` — **20 passed**, 0 failed (one selector updated in
+  `simulator.spec.ts` after a close button's accessible name changed from
+  "✕" to "Close simulate trade" — an intentional accessibility fix, not a
+  regression).
+- Code-reviewed via the `code-reviewer` subagent per `AGENTS.md`'s Code
+  Review Workflow before merge.
+
 ## Sprint 6.1 — Audit, Dead-Code Cleanup & Documentation Sync (2026-09-20)
 
 Branch: `feature/sprint-6.1-audit-cleanup`.

@@ -9,6 +9,14 @@ I/O. `run_in_threadpool` moves that work off the event loop so it doesn't
 stall other requests being served by the same process, the same pattern
 `api/screener.py`'s WebSocket handler already uses for its own per-scan
 backtests.
+
+Every route here is also `async def`, unlike `api/backtest.py`'s plain
+`def` handler (which Starlette auto-threadpools for free) - so `load_frames`
+and `_load_benchmark_or_503` (both synchronous: parquet reads, and a
+possible live yfinance fetch on a cache miss) are explicitly wrapped in
+`run_in_threadpool` too, not just the backtest/analytics computation that
+follows them. Without that, the event loop would still stall for the full
+data-loading duration before ever reaching the already-threadpooled work.
 """
 
 from __future__ import annotations
@@ -78,7 +86,9 @@ async def monte_carlo_endpoint(
     strategy = _build_strategy_or_422(request.strategy, request.strategy_params)
 
     tickers = request.tickers[: settings.max_backtest_tickers]
-    frames, warnings = load_frames(tickers, settings, request.start, request.end)
+    frames, warnings = await run_in_threadpool(
+        load_frames, tickers, settings, request.start, request.end
+    )
     if not frames:
         raise HTTPException(
             status_code=503,
@@ -87,8 +97,8 @@ async def monte_carlo_endpoint(
         )
 
     if request.strategy in REQUIRES_BENCHMARK:
-        spy_frame = _load_benchmark_or_503(
-            settings, SPY_TICKER, request.start, request.end
+        spy_frame = await run_in_threadpool(
+            _load_benchmark_or_503, settings, SPY_TICKER, request.start, request.end
         )
         strategy.set_benchmark(spy_frame)
 
@@ -141,8 +151,8 @@ async def walk_forward_endpoint(
     sweep around that parameter's current value."""
     strategy = _build_strategy_or_422(request.strategy, request.strategy_params)
 
-    frames, warnings = load_frames(
-        [request.ticker], settings, request.start, request.end
+    frames, warnings = await run_in_threadpool(
+        load_frames, [request.ticker], settings, request.start, request.end
     )
     if request.ticker not in frames:
         raise HTTPException(
@@ -153,8 +163,8 @@ async def walk_forward_endpoint(
     df = frames[request.ticker]
 
     if request.strategy in REQUIRES_BENCHMARK:
-        spy_frame = _load_benchmark_or_503(
-            settings, SPY_TICKER, request.start, request.end
+        spy_frame = await run_in_threadpool(
+            _load_benchmark_or_503, settings, SPY_TICKER, request.start, request.end
         )
         strategy.set_benchmark(spy_frame)
 
@@ -221,7 +231,9 @@ async def factor_exposure_endpoint(
     strategy = _build_strategy_or_422(request.strategy, request.strategy_params)
 
     tickers = request.tickers[: settings.max_backtest_tickers]
-    frames, warnings = load_frames(tickers, settings, request.start, request.end)
+    frames, warnings = await run_in_threadpool(
+        load_frames, tickers, settings, request.start, request.end
+    )
     if not frames:
         raise HTTPException(
             status_code=503,
@@ -229,8 +241,8 @@ async def factor_exposure_endpoint(
             + "; ".join(warnings),
         )
 
-    spy_frame = _load_benchmark_or_503(
-        settings, request.benchmark, request.start, request.end
+    spy_frame = await run_in_threadpool(
+        _load_benchmark_or_503, settings, request.benchmark, request.start, request.end
     )
     if request.strategy in REQUIRES_BENCHMARK:
         strategy.set_benchmark(spy_frame)

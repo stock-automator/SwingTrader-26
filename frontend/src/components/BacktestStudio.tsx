@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Loader2 } from "lucide-react";
 import { ApiError, runBacktest } from "../lib/api";
 import { fmtCurrency, fmtNum, fmtPct, signClass } from "../lib/format";
 import {
@@ -279,8 +280,9 @@ export function BacktestStudio() {
             type="submit"
             disabled={loading || form.tickers.trim() === ""}
             data-testid="backtest-run-button"
-            className="rounded border border-accent bg-accent/10 px-4 py-2 text-sm font-semibold text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded border border-accent bg-accent/10 px-4 py-2 text-sm font-semibold text-accent hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
+            {loading && <Loader2 size={14} className="animate-spin" />}
             {loading ? "Running…" : "Run Backtest"}
           </button>
         </div>

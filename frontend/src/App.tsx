@@ -6,6 +6,7 @@ import { ScreenerGrid } from "./components/ScreenerGrid";
 import { SignalMatrixGrid } from "./components/SignalMatrixGrid";
 import { SyncStatusBanner } from "./components/SyncStatusBanner";
 import { AlertSettings } from "./components/alerts/AlertSettings";
+import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { LiveFeedListener } from "./components/common/LiveFeedListener";
 import { ScanProvider } from "./lib/ScanContext";
 import type { MacroRegime } from "./types";
@@ -194,12 +195,14 @@ function App() {
             an AnimatePresence-driven unmount here would silently freeze that
             indicator the moment you navigate away from this tab. */}
         <div style={{ display: view === "screener" ? "block" : "none" }}>
-          <ScreenerGrid
-            onRegimeChange={(r, cb) => {
-              setRegime(r);
-              setCircuitBreakerActive(cb);
-            }}
-          />
+          <ErrorBoundary label="Live Screener">
+            <ScreenerGrid
+              onRegimeChange={(r, cb) => {
+                setRegime(r);
+                setCircuitBreakerActive(cb);
+              }}
+            />
+          </ErrorBoundary>
         </div>
         <AnimatePresence mode="wait">
           {view === "dashboard" && (
@@ -210,9 +213,11 @@ function App() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18 }}
             >
-              <Suspense fallback={<TabLoading />}>
-                <Dashboard />
-              </Suspense>
+              <ErrorBoundary label="Dashboard">
+                <Suspense fallback={<TabLoading />}>
+                  <Dashboard />
+                </Suspense>
+              </ErrorBoundary>
             </motion.div>
           )}
           {view === "signals" && (
@@ -223,7 +228,9 @@ function App() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18 }}
             >
-              <SignalMatrixGrid />
+              <ErrorBoundary label="Signal Matrix">
+                <SignalMatrixGrid />
+              </ErrorBoundary>
             </motion.div>
           )}
           {view === "backtest" && (
@@ -234,9 +241,11 @@ function App() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18 }}
             >
-              <Suspense fallback={<TabLoading />}>
-                <BacktestStudio />
-              </Suspense>
+              <ErrorBoundary label="Backtesting Studio">
+                <Suspense fallback={<TabLoading />}>
+                  <BacktestStudio />
+                </Suspense>
+              </ErrorBoundary>
             </motion.div>
           )}
           {view === "portfolio" && (
@@ -247,9 +256,11 @@ function App() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18 }}
             >
-              <Suspense fallback={<TabLoading />}>
-                <PortfolioDashboard />
-              </Suspense>
+              <ErrorBoundary label="Portfolio">
+                <Suspense fallback={<TabLoading />}>
+                  <PortfolioDashboard />
+                </Suspense>
+              </ErrorBoundary>
             </motion.div>
           )}
           {view === "journal" && (
@@ -260,9 +271,11 @@ function App() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18 }}
             >
-              <Suspense fallback={<TabLoading />}>
-                <JournalDashboard />
-              </Suspense>
+              <ErrorBoundary label="Trade Journal">
+                <Suspense fallback={<TabLoading />}>
+                  <JournalDashboard />
+                </Suspense>
+              </ErrorBoundary>
             </motion.div>
           )}
           {view === "alerts" && (
@@ -273,7 +286,9 @@ function App() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18 }}
             >
-              <AlertSettings />
+              <ErrorBoundary label="Alerts">
+                <AlertSettings />
+              </ErrorBoundary>
             </motion.div>
           )}
           {view === "simulator" && (
@@ -284,9 +299,11 @@ function App() {
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18 }}
             >
-              <Suspense fallback={<TabLoading />}>
-                <Simulator />
-              </Suspense>
+              <ErrorBoundary label="Historical Simulator">
+                <Suspense fallback={<TabLoading />}>
+                  <Simulator />
+                </Suspense>
+              </ErrorBoundary>
             </motion.div>
           )}
         </AnimatePresence>
