@@ -30,13 +30,13 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from starlette.concurrency import run_in_threadpool
 
 from ..config import Settings, get_settings
-from .market import QQQ_TICKER, SPY_TICKER, MAX_BREADTH_UNIVERSE
+from ..data.loader import cached_tickers
+from .deps import load_frames
+from .market import MAX_BREADTH_UNIVERSE, QQQ_TICKER, SPY_TICKER
 from .market import _engine as _regime_engine
 from .market import _latest_vix_level, _safe_load_prices
 from .orders import list_orders_updated_since
 from .screener import DEFAULT_SCREENER_EQUITY, DEFAULT_STRATEGY, _scan
-from ..data.loader import cached_tickers
-from .deps import load_frames
 
 log = logging.getLogger(__name__)
 
