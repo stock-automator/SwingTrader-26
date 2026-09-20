@@ -13,8 +13,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ${{ github.repository }}-backend
-  FRONTEND_IMAGE: ${{ github.repository }}-frontend
+  BACKEND_IMAGE: ${{ github.repository_owner | lower }}/${{ github.event.repository.name | lower }}-backend
+  FRONTEND_IMAGE: ${{ github.repository_owner | lower }}/${{ github.event.repository.name | lower }}-frontend
 
 jobs:
   build-backend:
