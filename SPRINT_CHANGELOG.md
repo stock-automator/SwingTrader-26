@@ -321,3 +321,40 @@ Branch: `sprint-7/deploy-workflow-fix` → PR #15 → merged to main as `25749bd
 ### Deferred
 
 None — minimal configuration change.
+
+## Sprint 9 — Data Health Observability (2026-09-21)
+
+Branch: `sprint-9/data-health-observability` → PR #16 (open, CI green).
+
+### Core Changes
+
+**Make parquet cache freshness observable from the API.**
+
+- **`backend/app/quant/data/parquet_manager.py`** — Added `last_fetched_at: str | None = None` to the `SyncResult` dataclass. All four return paths (synced, up_to_date, unavailable/no_new_data, error) now populate it: after a successful write, it reads the max timestamp from the parquet file; for up-to-date/unavailable/error, it reads the existing cache timestamp.
+- **`backend/app/api/schemas.py`** — Added `last_fetched_at: str | None = None` to `SyncResultResponse`. Every sync result row now carries this field.
+- **`backend/app/api/data_health.py`** — New router, `GET /api/v1/data/health`, exposing a parquet cache freshness summary: `total_tickers`, `newest_ticker`/`newest_date`, `oldest_ticker`/`oldest_date`, `stale_ticker_count`, `stale_tickers` (up to 50), and `as_of`.
+- **`backend/app/main.py`** — Wired `data_health_router` into the app.
+
+**Fix test flakiness in the full suite.**
+
+- **`tests/test_data_sync.py`** — New hermetic HTTP contract tests for `POST /api/v1/data/sync` and `GET /api/v1/data/sync/status`. Monkeypatch `_run_sync` with a no-op in `test_omitting_tickers_uses_watchlist` so the test never triggers a real 500+ ticker background sync. The status test verifies `last_fetched_at` appears in every `SyncResultResponse` row, tolerant of whatever state `test_api.py` leaves in the shared `_SyncJobState` singleton.
+
+### Added Documentation
+
+- `docs/SPRINT_8_AUDIT.md` — Complete 619-line application audit covering backend (17 routers, 33 routes), frontend (8 views, components), data pipeline (502 ticker parquet cache), trading correctness (no lookahead, correct sizing/timing), and observability gaps.
+- `docs/agent/HANDOFF.md` — Sprint 9 state document (branch, PR, CI status, blockers, next actions).
+
+### Validation
+
+- Local pytest: **859 passed**, 0 failed (3 new tests in `test_data_sync.py`)
+- Lint: `black --check`, `isort --check-only`, `flake8` — all clean
+- CI (PR #16): test (3.11) ✓, test (3.12) ✓, lint ✓, frontend ✓
+- Code Review: PENDING
+- QE: PENDING
+
+### Next
+
+- Independent code review of PR #16
+- QE validation of `GET /api/v1/data/health` and `GET /api/v1/data/sync/status`
+- Merge to main
+
