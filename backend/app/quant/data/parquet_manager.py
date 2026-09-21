@@ -275,6 +275,7 @@ class SyncResult:
     rows_added: int = 0
     corporate_action: CorporateActionAdjustment | None = None
     error: str | None = None
+    last_fetched_at: pd.Timestamp | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -285,6 +286,11 @@ class SyncResult:
                 self.corporate_action.as_dict() if self.corporate_action else None
             ),
             "error": self.error,
+            "last_fetched_at": (
+                self.last_fetched_at.strftime("%Y-%m-%d")
+                if self.last_fetched_at is not None
+                else None
+            ),
         }
 
 
@@ -388,7 +394,12 @@ class ParquetSyncManager:
         ticker = ticker.upper()
         try:
             if not self.is_stale(ticker, now):
-                return SyncResult(ticker=ticker, status=SYNC_STATUS_UP_TO_DATE)
+                existing = read_max_timestamp(self.path_for(ticker))
+                return SyncResult(
+                    ticker=ticker,
+                    status=SYNC_STATUS_UP_TO_DATE,
+                    last_fetched_at=existing,
+                )
 
             path = self.path_for(ticker)
             cached_df = _read_cached_raw(path)
@@ -402,12 +413,17 @@ class ParquetSyncManager:
 
             fresh_df = self.fetch_fn(ticker, start, end)
             if fresh_df is None or fresh_df.empty:
+                existing = read_max_timestamp(path) if path.exists() else None
                 status = (
                     SYNC_STATUS_UNAVAILABLE
                     if cached_df is None or cached_df.empty
                     else SYNC_STATUS_NO_NEW_DATA
                 )
-                return SyncResult(ticker=ticker, status=status)
+                return SyncResult(
+                    ticker=ticker,
+                    status=status,
+                    last_fetched_at=existing,
+                )
 
             fresh_df = fresh_df[~fresh_df.index.duplicated(keep="last")].sort_index()
 
@@ -438,6 +454,9 @@ class ParquetSyncManager:
 
             _write_parquet(path, combined)
 
+            # Record when this ticker's cache was last fetched/updated.
+            last_fetched = read_max_timestamp(path)
+
             status = (
                 SYNC_STATUS_CORPORATE_ACTION_ADJUSTED
                 if corporate_action is not None
@@ -448,10 +467,21 @@ class ParquetSyncManager:
                 status=status,
                 rows_added=rows_added,
                 corporate_action=corporate_action,
+                last_fetched_at=last_fetched,
             )
         except Exception as exc:
             # Isolated per ticker on purpose - see the docstring above.
-            return SyncResult(ticker=ticker, status=SYNC_STATUS_ERROR, error=str(exc))
+            existing = (
+                read_max_timestamp(self.path_for(ticker))
+                if self.path_for(ticker).exists()
+                else None
+            )
+            return SyncResult(
+                ticker=ticker,
+                status=SYNC_STATUS_ERROR,
+                error=str(exc),
+                last_fetched_at=existing,
+            )
 
     def sync_universe(
         self, tickers: list[str], now: pd.Timestamp | None = None

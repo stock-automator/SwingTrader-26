@@ -268,6 +268,7 @@ class SyncResultResponse(BaseModel):
     rows_added: int
     corporate_action: CorporateActionResponse | None
     error: str | None
+    last_fetched_at: str | None = None
 
 
 class DataSyncStatusResponse(BaseModel):

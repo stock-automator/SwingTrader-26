@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from .api.alerts import router as alerts_router
 from .api.analytics import router as analytics_router
 from .api.backtest import router as backtest_router
+from .api.data_health import router as data_health_router
 from .api.data_sync import router as data_sync_router
 from .api.execution import router as execution_router
 from .api.journal import router as journal_router
@@ -68,6 +69,7 @@ app.include_router(backtest_router)
 app.include_router(screener_router)
 app.include_router(order_ticket_router)
 app.include_router(data_sync_router)
+app.include_router(data_health_router)
 app.include_router(analytics_router)
 app.include_router(alerts_router)
 app.include_router(execution_router)
