@@ -11,3 +11,18 @@ profile = "black"
 # Black's own default, pinned so the isort profile above stays in agreement
 # if that default ever changes upstream.
 line-length = 88
+
+[tool.coverage.run]
+source = ["backend"]
+omit = ["*/tests/*", "*/site-packages/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]

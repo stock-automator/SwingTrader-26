@@ -465,10 +465,9 @@ backend/
     alerts/                Telegram/Discord/webhook dispatch (dispatcher.py)
     execution/             Alpaca paper-trading client wrapper, guards.py
                            (session clock + earnings/split lockout)
-    data/                 Price loading/caching (loader.py, agent.py)
+    data/                 Price loading/caching (loader.py, universe.py)
     journal/              Trade journal persistence + decay/MAE-MFE analytics
-    analytics/             Console/report rendering, expectancy.py
-                           (win-probability engine)
+    analytics/             expectancy.py (win-probability engine)
 frontend/
   src/                    React + Vite + Tailwind UI (lightweight-charts,
                            Recharts, TanStack Table); Signal Matrix grid,
@@ -486,6 +485,8 @@ docs/
   media/                    Demo video recordings
 scripts/
   generate_demo_videos.py  Playwright walkthrough recorder
+  swing_setup_scan.py      Hermes swing-setup scan
+  day_setup_scan.py        Hermes day-setup scan
 tests/                     pytest suite, one file per backend/app module
 config/
   watchlist.txt             Ticker universe the screener scans
@@ -503,90 +504,14 @@ AGENTS.md                  Engineering contract for strategies/risk/engines
 
 ## Status
 
-The project began as a Yahoo Finance historical-data pipeline and evolved
-into a systematic momentum/swing-trading research platform: a stock
-universe of 500+ tickers cached locally as Parquet, a modular strategy
-framework, a risk manager, full-history and live-screener engines, and now
-a FastAPI + React application on top of all of it. The target account size
-for eventual live deployment is small (low four figures); risk management
-takes priority over raw historical return, and a backtest is treated as
-evidence for further investigation, not proof of anything.
+A FastAPI + React swing-trading research platform over a locally cached
+500+ ticker Parquet universe: 10 strategies, a risk manager, backtest/replay
+engines with a $1,000-vs-buy&hold-vs-SPY benchmark, a live setup screener,
+Alpaca paper trading, alerts and a trade journal. Target account size is
+small, risk comes before return, and a backtest is evidence, not proof.
+What's next lives in [`.claude/team/backlog.md`](.claude/team/backlog.md).
 
-**Where this stands today**, roughly in the order it was built:
-
-1. Historical data pipeline, modular strategy framework, risk manager,
-   backtest/forward-test engines, analytics (original CLI-era foundation).
-2. Risk engine & position sizing, market-regime detection, first strategy
-   set (`donchian_breakout`, `moving_average_cross`, `vcp_breakout`,
-   `relative_strength`).
-3. Full-stack refactor onto FastAPI + React, the $1,000-vs-buy&hold-vs-SPY
-   benchmark backtester, and the live setup screener (REST + WebSocket).
-4. **Scanner reliability + strategy library expansion**: the live screener
-   silently truncated a full watchlist to 60 tickers and loaded them one at
-   a time; fixed with a raised, transparent cap, concurrent thread-pooled
-   loading with retry/backoff, and explicit skip-reason categorization
-   (`INSUFFICIENT_HISTORY` / `DATA_STALE` / `VOLUME_FILTER_FAILED` /
-   `ZERO_LIQUIDITY`). Strategy count went from 4 to 10, adding volatility
-   (`bollinger_keltner_squeeze`, `kama_trend`), mean-reversion
-   (`zscore_mean_reversion`, Hurst-filtered), momentum
-   (`supertrend_psar`, `dual_momentum`), and market-structure
-   (`obv_divergence`) coverage.
-5. Cross-strategy signal matrix, point-in-time historical replay (zero
-   lookahead by construction), trade execution simulation, multichannel
-   alerts (Telegram/Discord/generic webhook), Alpaca paper-trading order
-   placement + emergency close-all, trade-journal decay analytics (MAE/MFE,
-   30/60/90-day win-rate/expectancy windows), a real win-probability engine
-   (regime-matched historical backtest, falling back to a block-bootstrap
-   Monte Carlo percentile), and the matching frontend surface: a real-time
-   data-sync banner, the Signal Matrix grid (sortable/filterable, one-click
-   paper-trade action), toast notifications, and animated tab transitions.
-6. **This round** — the frontend panels for the backend surfaces §5 shipped
-   without one: a **Portfolio Dashboard** (Alpaca account/positions/equity
-   curve, emergency close-all behind a modal), an **Alert Channel
-   Configuration UI** (Telegram/Discord/webhook, no `.env` edit needed —
-   backed by two new endpoints, `GET`/`PUT /api/v1/alerts/config` and
-   `POST /api/v1/alerts/test`), and a **Trade Journal & Strategy Decay**
-   view (MAE/MFE scatter chart, rolling win-rate/expectancy vs. baseline —
-   backed by two new endpoints, `GET /api/v1/journal/trades` and
-   `/mae-mfe-distribution`). Also fixed the Signal Matrix's Win Prob.
-   column, which was still hard-coded to `—` from before §5's win-probability
-   engine landed. Playwright coverage expanded from one smoke test to 11
-   tests across 5 spec files (tab switching, filtering, paper-trade
-   submission, modal confirmations, configured/unconfigured empty states,
-   error toasts).
-7. **Sprints 4-6.1** — Unified Dashboard, Historical Simulator, universe
-   sync, async DuckDB-backed background scans; market regime engine, ATR
-   position sizer, broker-agnostic order routing, the unified live-feed
-   WebSocket, and mobile/Meshnet access; then a repo-wide dead-code/
-   documentation audit.
-8. **Sprint 6 Phase 3 (this round)** — performance and resilience pass, no
-   new user-facing features: parallelized the universe-sync symbol filter
-   and closed an event-loop-blocking gap in the analytics endpoints
-   (`run_in_threadpool` around data loading, not just the backtest
-   computation that followed it); added DuckDB indexes and a short-TTL
-   cache for the market-regime computation (shared between the REST
-   endpoint and the live-feed WebSocket, removing a duplicated
-   computation); a global FastAPI error handler so an unexpected backend
-   exception now returns a consistent JSON error instead of an
-   unformatted one; and a React error boundary around every tab, so a
-   bug in one tab's render shows a "Something went wrong — try switching
-   tabs and back, or reload the page" message in that tab instead of
-   blanking the whole app.
-
-**Deliberately not done yet** (so the next session doesn't have to rediscover
-this by reading code):
-
-- The Trade Journal's decay baseline is the journal's own all-time
-  expectancy/win-rate (`GET /api/v1/journal/summary`), not a per-strategy
-  backtest result — `trades_live.csv` has no strategy-attribution column, so
-  there's no way to join a logged trade back to the backtest that would have
-  predicted it without adding one.
-- Logging entries/exits into the trade journal is still done via the
-  `TradeJournal` class directly (script/notebook) — there is no "log this
-  fill" UI action yet; the frontend is read-only against the journal.
-- Statistical-arbitrage pairs trading (cointegration/Johansen) and the
-  macro/cross-asset strategies (yield curve, VIX term structure, COT
-  positioning, intermarket lead-lag, seasonality) were scoped out of the
-  strategy library expansion — they need a multi-symbol architecture and new
-  data sources (COT reports, yield curves) beyond the current single-ticker
-  `BaseStrategy` interface and Parquet/yfinance pipeline.
+Known gaps: the journal's decay baseline is its own all-time stats (no
+strategy-attribution column yet); journal entries are logged via the
+`TradeJournal` class, not the UI; pairs/macro strategies need a multi-symbol
+architecture the single-ticker `BaseStrategy` doesn't have.
