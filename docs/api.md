@@ -743,17 +743,19 @@ Parquet cache freshness summary. A ticker whose last bar is older than
 `screener_stale_after_days` is counted in `stale_count` and listed in
 `stale_tickers` (capped at 50; `more_stale_tickers` is true past the cap).
 `delisted` lists every `DENY_ENTRIES` row; `since` is the first session after
-the symbol's last trading day. Nothing is ever deleted.
+the symbol's last trading day. The endpoint is read-only: it never deletes or
+moves cache files. Delisted history is archived in `data/delisted/` (see its
+README).
 
 ```json
 {
-  "total_tickers": 512,
+  "total_tickers": 505,
   "newest_ticker": "AAPL",
   "newest_date": "2026-11-20",
-  "oldest_ticker": "KVUE",
+  "oldest_ticker": "XYZ",
   "oldest_date": "2026-10-30",
   "stale_count": 1,
-  "stale_tickers": ["KVUE"],
+  "stale_tickers": ["XYZ"],
   "more_stale_tickers": false,
   "total_rows_estimate": 1290000,
   "as_of": "2026-11-22T12:00:00+00:00",
