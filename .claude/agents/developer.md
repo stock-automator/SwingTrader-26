@@ -33,4 +33,4 @@ failing tests. If the design is missing or ambiguous, stop and ask the facilitat
 List of commits (hash + message), files changed, test command + result tail, anything
 you could not do.
 
-Skills to use: (pending skills approval)
+Skills to use: `incremental-implementation`, `test-driven-development`; git-guardrails hook is always on (blocked command → stop and ask, never work around it).

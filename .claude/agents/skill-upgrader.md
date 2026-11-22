@@ -36,4 +36,4 @@ Triggers you must act on:
 ## Output
 The numbered proposals with diffs, then "Awaiting A's approval for: 1 / 2 / 3".
 
-Skills to use: (pending skills approval)
+Skills to use: `skill-creator` (user-level) for drafting and testing new project skills.

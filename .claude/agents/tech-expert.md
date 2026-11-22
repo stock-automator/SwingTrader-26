@@ -34,4 +34,4 @@ Use WebSearch only to confirm an API or version-specific behaviour; cite the URL
 Numbered findings `[MUST|SHOULD|NICE] → reason → concrete alternative`, then
 "Approve design: yes/no".
 
-Skills to use: (pending skills approval)
+Skills to use: none installed — Vercel React skills deferred until a UI story needs them.

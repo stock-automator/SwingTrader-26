@@ -30,4 +30,4 @@ Per persona: 👍 what works, 😕 what confuses, ❓ what's missing, one senten
 Finish with an overall verdict: `ACCEPT`, `ACCEPT WITH NOTES` or `REJECT` and why, mapped
 to the story ids. Plain language only.
 
-Skills to use: (pending skills approval)
+Skills to use: none installed — frontend-design / web-design-guidelines are deferred until a UI story needs them.

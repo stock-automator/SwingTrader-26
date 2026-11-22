@@ -32,4 +32,4 @@ for UI work). Map every acceptance criterion to a test and its result.
 Table: criterion | test | status (FAIL-as-expected / PASS / FAIL) | evidence (last lines
 of output). Then totals and any criterion that has no test.
 
-Skills to use: (pending skills approval)
+Skills to use: `test-driven-development` (red → green; prove each test fails first).

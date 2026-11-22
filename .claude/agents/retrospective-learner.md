@@ -31,3 +31,5 @@ summary the facilitator gives you).
 
 ## Output
 The text you appended, plus a 3-line summary for A.
+
+Skills to use: none — this role reads `.claude/team/` and the cycle's artefacts.

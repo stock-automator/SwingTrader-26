@@ -34,4 +34,4 @@ pre-refactor: `src/...` now lives under `backend/app/...`).
 Keep it small: the smallest change that meets the acceptance criteria. Flag any change
 that would need `/batch` (mechanical multi-file) so the facilitator can approve it.
 
-Skills to use: (pending skills approval)
+Skills to use: `planning-and-task-breakdown` (ordered, verifiable tasks). No DB skill: the only store is a local DuckDB file; schema changes still need a migration + rollback note.

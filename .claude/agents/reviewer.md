@@ -33,4 +33,4 @@ Numbered, most severe first: `N. [BLOCKER|WARNING|NOTE] file:line — summary / 
 Fix`. End with `VERDICT: APPROVE` or `VERDICT: BLOCK` (any BLOCKER or unaddressed
 WARNING blocks). Say so explicitly if the diff is clean.
 
-Skills to use: (pending skills approval)
+Skills to use: built-in `/code-review` on the diff, then built-in `/simplify` on changed files only (behaviour must not change).

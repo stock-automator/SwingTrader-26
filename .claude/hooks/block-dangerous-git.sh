@@ -2,36 +2,55 @@
 # PreToolUse guard for Bash: blocks destructive git commands and commits on main.
 # Adapted from mattpocock/skills git-guardrails-claude-code (abeeaf9).
 # A pushes manually; agents never push, rewrite history or commit to main.
+#
+# Only real git invocations are checked: heredoc bodies and quoted strings
+# (commit messages, echo text, python -c code) are stripped first, and a
+# pattern must start at a command position (line start, ; & | ( or `env`).
 
 INPUT=$(cat)
 COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')
 [ -z "$COMMAND" ] && exit 0
 
+# 1) drop heredoc bodies, 2) drop '...' and "..." strings.
+STRIPPED=$(printf '%s\n' "$COMMAND" | awk '
+  skip { if ($0 == tag || $0 ~ "^[ \t]*" tag "$") { skip = 0 }; next }
+  {
+    line = $0
+    if (match(line, /<<-?[ \t]*["'"'"']?[A-Za-z_][A-Za-z0-9_]*/)) {
+      t = substr(line, RSTART, RLENGTH)
+      gsub(/<<-?[ \t]*["'"'"']?/, "", t)
+      tag = t; skip = 1
+    }
+    print line
+  }' | sed -E "s/'[^']*'//g; s/\"([^\"\\\\]|\\\\.)*\"//g")
+
 block() {
-  echo "BLOCKED by git-guardrails: '$COMMAND' ($1). A has not allowed this; ask A." >&2
+  echo "BLOCKED by git-guardrails: $1. A has not allowed this; ask A." >&2
   exit 2
 }
 
+START='(^|[;&|(]|&&|\|\||then|do)[[:space:]]*'
+GIT="${START}git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+"
+
 DANGEROUS_PATTERNS=(
-  'git[[:space:]]+push'
-  'push[[:space:]].*--force'
-  'reset[[:space:]]+--hard'
-  'git[[:space:]]+clean[[:space:]]+-[a-zA-Z]*f'
-  'git[[:space:]]+branch[[:space:]]+(-D|--delete[[:space:]]+--force)'
-  'git[[:space:]]+(checkout|restore)[[:space:]]+(--[[:space:]]+)?\.([[:space:]]|$|;|&)'
-  'git[[:space:]]+rebase'
-  'git[[:space:]]+filter-(branch|repo)'
-  'git[[:space:]]+commit[[:space:]].*--amend'
-  'update-ref[[:space:]]+-d'
+  "${GIT}push"
+  "${GIT}reset[[:space:]]+(.*[[:space:]])?--hard"
+  "${GIT}clean[[:space:]]+(.*[[:space:]])?-[a-zA-Z]*f"
+  "${GIT}branch[[:space:]]+(.*[[:space:]])?(-D|--delete[[:space:]]+--force)"
+  "${GIT}(checkout|restore)[[:space:]]+(--[[:space:]]+)?\.([[:space:]]|$|;|&)"
+  "${GIT}rebase"
+  "${GIT}filter-(branch|repo)"
+  "${GIT}commit[[:space:]]+(.*[[:space:]])?--amend"
+  "${GIT}update-ref[[:space:]]+-d"
 )
 for pattern in "${DANGEROUS_PATTERNS[@]}"; do
-  if printf '%s' "$COMMAND" | grep -qE "$pattern"; then
-    block "matches '$pattern'"
+  if printf '%s' "$STRIPPED" | grep -qE "$pattern"; then
+    block "destructive git command"
   fi
 done
 
 # No commits or merges while on main.
-if printf '%s' "$COMMAND" | grep -qE 'git[[:space:]]+(commit|merge|cherry-pick)'; then
+if printf '%s' "$STRIPPED" | grep -qE "${GIT}(commit|merge|cherry-pick)"; then
   BRANCH=$(git -C "${CLAUDE_PROJECT_DIR:-.}" symbolic-ref --short HEAD 2>/dev/null)
   if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
     block "commits to $BRANCH need A's approval; use a feature branch"
