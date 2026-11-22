@@ -453,6 +453,28 @@ class TestC2OfflineSyncCannotResurrect:
 
         assert result.symbols == ["AAPL"]
 
+    def test_c2_live_sync_warns_naming_each_denied_symbol(self, manager, caplog):
+        """A live constituent list that still carries a denied symbol means
+        the source is out of date; sync excludes it and logs a WARNING."""
+        manager.fetch_sp500_constituents = lambda: ["AAPL", "EQR"]
+        manager.fetch_nasdaq100_constituents = lambda: ["kvue"]
+        manager.data_dir.mkdir(parents=True, exist_ok=True)
+        for ticker in ("AAPL", "EQR", "KVUE"):
+            _write_parquet(manager.data_dir / f"{ticker}.parquet")
+
+        with caplog.at_level("WARNING", logger=universe_mod.__name__):
+            result = manager.sync()
+
+        assert result.symbols == ["AAPL"]
+        warnings = [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == universe_mod.__name__ and r.levelname == "WARNING"
+        ]
+        for ticker in ("EQR", "KVUE"):
+            assert any(ticker in msg for msg in warnings), (ticker, warnings)
+        assert not any("AAPL" in msg for msg in warnings), warnings
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

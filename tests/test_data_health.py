@@ -169,15 +169,17 @@ class TestC2DelistedList:
         assert "ZZZZ" not in tickers
         assert set(tickers) == set(EXPECTED_DELISTED)
 
-    def test_c2_delisted_ticker_with_leftover_file_is_not_stale_or_deleted(
+    def test_c2_delisted_ticker_with_leftover_file_is_flagged_stale_and_kept(
         self, empty_dir: Path
     ) -> None:
-        """A leftover KVUE file is still reported honestly (counted, may be
-        stale) - the health check never removes it."""
+        """A leftover KVUE file is reported honestly: counted, flagged stale,
+        listed as delisted - and the health check never removes it."""
         path = empty_dir / "KVUE.parquet"
         _write_bars(path, date(2026, 10, 30))
         body = _client(empty_dir, stale_days=5).get(HEALTH_URL).json()
         assert path.exists()
+        assert body["total_tickers"] == 1
+        assert "KVUE" in body["stale_tickers"]
         assert "KVUE" in {row["ticker"] for row in body["delisted"]}
 
 
@@ -195,6 +197,20 @@ class TestC2ResponseModel:
         assert LEGACY_FIELDS <= set(props)
         entry_props = components["DelistedEntry"]["properties"]
         assert set(entry_props) >= {"ticker", "since", "kind", "reason", "successor"}
+
+    def test_c2_openapi_delisted_kind_is_enum(self) -> None:
+        spec = TestClient(app).get("/openapi.json").json()
+        components = spec["components"]["schemas"]
+        kind = components["DelistedEntry"]["properties"]["kind"]
+        if "$ref" in kind:
+            kind = components[kind["$ref"].rsplit("/", 1)[-1]]
+        assert "enum" in kind, f"DelistedEntry.kind is not an enum: {kind}"
+        assert set(kind["enum"]) == {
+            "rename",
+            "stock_merger",
+            "cash_buyout",
+            "broken_data",
+        }
 
     def test_c2_schemas_module_exports_models(self) -> None:
         from backend.app.api.schemas import DataHealthResponse, DelistedEntry

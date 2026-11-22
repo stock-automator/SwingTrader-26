@@ -146,6 +146,22 @@ class TestC2SyncSkipsDenied:
         assert resp.json()["skipped"] == [ticker]
         assert captured_sync == [["AAPL"]]
 
+    def test_c2_explicit_tickers_are_sanitized_and_deduped_before_deny(
+        self, client: TestClient, captured_sync: list
+    ) -> None:
+        """Explicit tickers go through `universe.sanitize_ticker` (so
+        `brk.b` -> `BRK-B`) and are deduped keeping first-seen order
+        *before* the deny check, so a denied ticker is reported once."""
+        resp = client.post(
+            START_SYNC_URL,
+            json={"tickers": ["EQR", "eqr", "brk.b", "AAPL", "aapl"]},
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["tickers"] == ["BRK-B", "AAPL"]
+        assert body["skipped"] == ["EQR"]
+        assert captured_sync == [["BRK-B", "AAPL"]]
+
     def test_c2_all_denied_returns_422_and_queues_nothing(
         self, client: TestClient, captured_sync: list
     ) -> None:

@@ -3,7 +3,10 @@ Cycle 01 (C-2 / C-4) repo-state checks: the tracked watchlist and data
 directories reflect the Gate 1 decisions.
 
 These read real repository files (read-only; nothing is ever written to
-`data/`), so they verify the *data commit*, not code behaviour.
+`data/`), so they guard the *committed data state*, not code behaviour.
+They are expected to change with the data: every new archive added to
+`data/delisted/` (or new deny entry) must update `ARCHIVES` / `DENIED` /
+`NEW_LIVE` here and the archive's line in `data/delisted/README.md`.
 """
 
 from __future__ import annotations
@@ -64,7 +67,35 @@ def test_c2_archive_exists_trimmed_to_last_trading_day(name: str) -> None:
     path = DELISTED_DIR / name
     assert path.exists(), f"missing archive {path}"
     assert len(pd.read_parquet(path)) > 0
-    assert _last_day(path) == ARCHIVES[name]
+    assert _last_day(path) <= ARCHIVES[name], "archive runs past its filename date"
+
+
+@pytest.mark.parametrize("name", sorted(ARCHIVES))
+def test_c2_archive_contains_only_valid_bars(name: str) -> None:
+    """Every archived row is a real bar: positive Open/Volume and a High/Low
+    range that contains Open and Close (no post-delisting junk rows)."""
+    df = pd.read_parquet(DELISTED_DIR / name)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.droplevel(1)
+    body_low = df[["Open", "Close"]].min(axis=1)
+    body_high = df[["Open", "Close"]].max(axis=1)
+    valid = (
+        (df["Open"] > 0)
+        & (df["Volume"] > 0)
+        & (df["Low"] <= body_low)
+        & (df["High"] >= body_high)
+    )
+    bad = [str(pd.Timestamp(ts).date()) for ts in df.index[~valid]]
+    assert not bad, f"{name} has invalid bars on {bad}"
+
+
+def test_c2_archive_readme_documents_each_archive() -> None:
+    readme = DELISTED_DIR / "README.md"
+    assert readme.exists(), f"missing {readme}"
+    text = readme.read_text()
+    assert "last real bar" in text.lower()
+    for name in ARCHIVES:
+        assert name in text, f"README does not mention {name}"
 
 
 def test_c2_archive_dir_holds_only_agreed_files() -> None:
