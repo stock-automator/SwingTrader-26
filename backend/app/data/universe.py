@@ -10,8 +10,8 @@ deduped, and filtered down to symbols this repo can actually trade.
    `_STATIC_NASDAQ100_FALLBACK`).
 2. Sanitizes every ticker onto one notation (see `sanitize_ticker`).
 3. Dedupes the merged set.
-4. Drops a small denylist of symbols known to have broken/zero-bar data in
-   this repo's parquet store (`DENYLIST`).
+4. Drops a small denylist of delisted/renamed symbols (`DENY_ENTRIES`,
+   exposed as the `DENYLIST` set).
 5. Drops any symbol whose `data/raw/{TICKER}.parquet` is missing or has zero
    rows from the *active* list - see `purge_broken_symbols`, checked across
    a bounded thread pool since this step alone is 500+ per-symbol disk
@@ -41,10 +41,10 @@ import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import requests
@@ -61,11 +61,92 @@ DEFAULT_DATA_DIR = Path("data/raw")
 #: How old `synced_at` may be before `needs_sync()` reports true.
 SYNC_STALE_AFTER = timedelta(hours=24)
 
-#: Symbols known to have broken/zero-bar data in this repo's parquet store.
-#: Excluded from the *active* universe unconditionally - never deleted from
-#: disk, and re-included automatically if a future data provider fixes them
-#: and they're removed from this set.
-DENYLIST: frozenset[str] = frozenset({"BK", "CTRA", "K", "MMC", "WBA"})
+#: How a denied symbol left the tradable universe.
+DenyKind = Literal["rename", "stock_merger", "cash_buyout", "broken_data"]
+
+
+@dataclass(frozen=True)
+class DenyEntry:
+    """Why one symbol is excluded from the active universe.
+
+    `since` is the first day the symbol stopped trading under this
+    company (None only for `broken_data`, which has no corporate event).
+    `successor` is the symbol holders ended up with (`rename` /
+    `stock_merger`); None for cash buyouts and broken data.
+    """
+
+    kind: DenyKind
+    since: date | None
+    reason: str
+    successor: str | None = None
+
+
+#: Symbols excluded from the *active* universe unconditionally, each with
+#: the corporate event that removed it. Entries are dated because exchanges
+#: reuse tickers: if a symbol comes back for a different company, remove
+#: its entry on purpose. Excluding a symbol never deletes it from disk; the
+#: pre-delisting history of KVUE and WBD is archived in `data/delisted/`.
+DENY_ENTRIES: dict[str, DenyEntry] = {
+    "EA": DenyEntry(
+        kind="cash_buyout",
+        since=date(2026, 8, 4),
+        reason="Taken private for cash by PIF, Silver Lake and Affinity Partners.",
+    ),
+    "KVUE": DenyEntry(
+        kind="stock_merger",
+        since=date(2026, 11, 2),
+        reason="Acquired by Kimberly-Clark for cash plus KMB shares.",
+        successor="KMB",
+    ),
+    "WBD": DenyEntry(
+        kind="cash_buyout",
+        since=date(2026, 10, 6),
+        reason="Acquired by Paramount Skydance for cash.",
+    ),
+    "AVB": DenyEntry(
+        kind="stock_merger",
+        since=date(2026, 8, 18),
+        reason="Merged into EQR, renamed Vivmark Residential (VMRK).",
+        successor="VMRK",
+    ),
+    "EQR": DenyEntry(
+        kind="rename",
+        since=date(2026, 8, 18),
+        reason="Renamed Vivmark Residential (VMRK) after the AVB merger.",
+        successor="VMRK",
+    ),
+    "BK": DenyEntry(
+        kind="rename",
+        since=date(2026, 5, 21),
+        reason="Bank of New York Mellon now trades as BNY.",
+        successor="BNY",
+    ),
+    "MMC": DenyEntry(
+        kind="rename",
+        since=date(2026, 1, 14),
+        reason="Marsh & McLennan now trades as MRSH.",
+        successor="MRSH",
+    ),
+    "CTRA": DenyEntry(
+        kind="stock_merger",
+        since=date(2026, 5, 7),
+        reason="Merged into Devon Energy (DVN) in an all-stock deal.",
+        successor="DVN",
+    ),
+    "K": DenyEntry(
+        kind="cash_buyout",
+        since=date(2025, 12, 11),
+        reason="Acquired by Mars for cash.",
+    ),
+    "WBA": DenyEntry(
+        kind="cash_buyout",
+        since=date(2025, 8, 28),
+        reason="Taken private for cash by Sycamore Partners.",
+    ),
+}
+
+#: Derived set of denied symbols; every existing caller keys off this.
+DENYLIST: frozenset[str] = frozenset(DENY_ENTRIES)
 
 #: Realistic desktop-browser User-Agent for constituent-page fetches.
 #: Wikipedia (and other index-membership sources) will 403 the default
@@ -145,7 +226,6 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "APTV",
     "ARE",
     "ATO",
-    "AVB",
     "AVGO",
     "AVY",
     "AWK",
@@ -161,12 +241,12 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "BEN",
     "BG",
     "BIIB",
-    "BK",
     "BKNG",
     "BKR",
     "BLDR",
     "BLK",
     "BMY",
+    "BNY",
     "BR",
     "BRO",
     "BSX",
@@ -218,7 +298,6 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "CSGP",
     "CSX",
     "CTAS",
-    "CTRA",
     "CTSH",
     "CTVA",
     "CVS",
@@ -249,7 +328,6 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "DVA",
     "DVN",
     "DXCM",
-    "EA",
     "EBAY",
     "ECL",
     "ED",
@@ -264,7 +342,6 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "EOG",
     "EPAM",
     "EQIX",
-    "EQR",
     "EQT",
     "ERIE",
     "ES",
@@ -358,7 +435,6 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "JKHY",
     "JNJ",
     "JPM",
-    "K",
     "KDP",
     "KEY",
     "KEYS",
@@ -371,7 +447,6 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "KMX",
     "KO",
     "KR",
-    "KVUE",
     "L",
     "LDOS",
     "LEN",
@@ -408,7 +483,6 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "MKC",
     "MKTX",
     "MLM",
-    "MMC",
     "MMM",
     "MNST",
     "MO",
@@ -418,6 +492,7 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "MPWR",
     "MRK",
     "MRNA",
+    "MRSH",
     "MS",
     "MSCI",
     "MSFT",
@@ -566,6 +641,7 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "VLO",
     "VLTO",
     "VMC",
+    "VMRK",
     "VRSK",
     "VRSN",
     "VRTX",
@@ -575,8 +651,6 @@ _STATIC_SP500_FALLBACK: tuple[str, ...] = (
     "VZ",
     "WAB",
     "WAT",
-    "WBA",
-    "WBD",
     "WDC",
     "WEC",
     "WELL",
@@ -637,7 +711,6 @@ _STATIC_NASDAQ100_FALLBACK: tuple[str, ...] = (
     "DDOG",
     "DLTR",
     "DXCM",
-    "EA",
     "EXC",
     "FANG",
     "FAST",
@@ -697,7 +770,6 @@ _STATIC_NASDAQ100_FALLBACK: tuple[str, ...] = (
     "TXN",
     "VRSK",
     "VRTX",
-    "WBD",
     "WDAY",
     "XEL",
     "ZS",
