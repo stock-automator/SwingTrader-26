@@ -16,3 +16,4 @@ download_checkpoint.json
 htmlcov/
 *.egg-info/
 .worktrees/
+.claude/settings.local.json
