@@ -227,3 +227,14 @@ class TestLoadWatchlist:
     def test_denylisted_only_watchlist_returns_empty(self, settings):
         settings.watchlist_path.write_text("MMC\nWBA\n")
         assert deps_module.load_watchlist(settings) == []
+
+    def test_c2_c4_delisted_tickers_are_filtered_out(self, settings):
+        """Cycle 01: delisted/renamed names never reach `load_frames`, and
+        their successors do."""
+        settings.watchlist_path.write_text(
+            "AAPL\nEA\nKVUE\nWBD\nAVB\nEQR\nVMRK\nBNY\nMRSH\nKMB\n"
+        )
+
+        tickers = deps_module.load_watchlist(settings)
+
+        assert tickers == ["AAPL", "VMRK", "BNY", "MRSH", "KMB"]

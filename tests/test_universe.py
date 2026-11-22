@@ -6,14 +6,16 @@ sync()-falls-back-to-a-static-seed-list path when the live fetch fails.
 
 from __future__ import annotations
 
+import dataclasses
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 import pytest
 import requests
 
+import backend.app.data.universe as universe_mod
 from backend.app.data.universe import (
     DENYLIST,
     UniverseManager,
@@ -316,6 +318,140 @@ class TestReadRoundTrip:
 
     def test_read_returns_none_when_never_synced(self, manager):
         assert manager.read() is None
+
+
+# ---------------------------------------------------------------------------
+# Cycle 01 - delisted tickers (stories C-2 / C-4)
+#
+# `DENY_ENTRIES` / `DenyEntry` are read off the module at call time (not
+# imported at the top of this file) so that, before they exist, only these
+# tests fail - the rest of the module still collects and runs.
+# ---------------------------------------------------------------------------
+
+VALID_KINDS = {"rename", "stock_merger", "cash_buyout", "broken_data"}
+
+#: ticker -> (kind, since, successor), as agreed at Gate 1.
+EXPECTED_DENY_ENTRIES = {
+    "EA": ("cash_buyout", date(2026, 8, 4), None),
+    "KVUE": ("stock_merger", date(2026, 11, 2), "KMB"),
+    "WBD": ("cash_buyout", date(2026, 10, 6), None),
+    "AVB": ("stock_merger", date(2026, 8, 18), "VMRK"),
+    "EQR": ("rename", date(2026, 8, 18), "VMRK"),
+    "BK": ("rename", date(2026, 5, 21), "BNY"),
+    "MMC": ("rename", date(2026, 1, 14), "MRSH"),
+    "CTRA": ("stock_merger", date(2026, 5, 7), "DVN"),
+    "K": ("cash_buyout", date(2025, 12, 11), None),
+    "WBA": ("cash_buyout", date(2025, 8, 28), None),
+}
+DENIED_TICKERS = tuple(EXPECTED_DENY_ENTRIES)
+NEW_LIVE_TICKERS = ("VMRK", "BNY", "MRSH")
+
+
+def _deny_entries():
+    return universe_mod.DENY_ENTRIES
+
+
+class TestC2DenyEntries:
+    @pytest.mark.parametrize("ticker", DENIED_TICKERS)
+    def test_c2_deny_entry_matches_gate1_decision(self, ticker):
+        kind, since, successor = EXPECTED_DENY_ENTRIES[ticker]
+        entry = _deny_entries()[ticker]
+        assert entry.kind == kind
+        assert entry.since == since
+        assert entry.successor == successor
+
+    def test_c2_deny_entries_cover_exactly_the_agreed_tickers(self):
+        assert set(_deny_entries()) == set(DENIED_TICKERS)
+
+    def test_c2_denylist_is_derived_from_deny_entries(self):
+        assert isinstance(universe_mod.DENYLIST, frozenset)
+        assert universe_mod.DENYLIST == frozenset(_deny_entries())
+
+    @pytest.mark.parametrize("ticker", DENIED_TICKERS)
+    def test_c2_every_deny_entry_is_well_formed(self, ticker):
+        entry = _deny_entries()[ticker]
+        assert isinstance(entry, universe_mod.DenyEntry)
+        assert ticker == sanitize_ticker(ticker), "keys must be sanitized"
+        assert entry.kind in VALID_KINDS
+        assert entry.since is None or isinstance(entry.since, date)
+        assert isinstance(entry.reason, str) and entry.reason.strip()
+        if entry.kind in ("rename", "stock_merger"):
+            assert entry.successor, f"{ticker}: {entry.kind} needs a successor"
+        if entry.kind == "cash_buyout":
+            assert entry.successor is None
+        if entry.successor is not None:
+            assert entry.successor == sanitize_ticker(entry.successor)
+            assert entry.successor not in universe_mod.DENYLIST
+            assert entry.successor != ticker
+
+    def test_c2_delisted_entries_all_carry_a_date(self):
+        for ticker, entry in _deny_entries().items():
+            if entry.kind != "broken_data":
+                assert entry.since is not None, ticker
+
+    def test_c2_deny_entry_is_frozen(self):
+        entry = _deny_entries()["KVUE"]
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            entry.kind = "broken_data"
+
+    def test_c2_successor_defaults_to_none(self):
+        entry = universe_mod.DenyEntry(kind="broken_data", since=None, reason="x")
+        assert entry.successor is None
+
+
+class TestC2StaticFallbacks:
+    @pytest.mark.parametrize(
+        "name", ["_STATIC_SP500_FALLBACK", "_STATIC_NASDAQ100_FALLBACK"]
+    )
+    def test_c2_fallback_contains_no_denied_ticker(self, name):
+        fallback = set(getattr(universe_mod, name))
+        assert fallback.isdisjoint(DENIED_TICKERS), sorted(
+            fallback & set(DENIED_TICKERS)
+        )
+
+    @pytest.mark.parametrize("ticker", NEW_LIVE_TICKERS)
+    def test_c2_c4_sp500_fallback_contains_successor(self, ticker):
+        assert ticker in universe_mod._STATIC_SP500_FALLBACK
+
+    def test_c2_every_successor_is_in_some_fallback(self):
+        fallback = set(universe_mod._STATIC_SP500_FALLBACK) | set(
+            universe_mod._STATIC_NASDAQ100_FALLBACK
+        )
+        successors = {e.successor for e in _deny_entries().values() if e.successor}
+        assert successors <= fallback, sorted(successors - fallback)
+
+
+class TestC2OfflineSyncCannotResurrect:
+    def test_c2_offline_sync_excludes_denied_even_with_data_on_disk(
+        self, manager, monkeypatch
+    ):
+        monkeypatch.setattr(
+            pd,
+            "read_html",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")),
+        )
+        manager.data_dir.mkdir(parents=True, exist_ok=True)
+        for ticker in DENIED_TICKERS + NEW_LIVE_TICKERS + ("AAPL",):
+            _write_parquet(manager.data_dir / f"{ticker}.parquet")
+
+        result = manager.sync()
+
+        assert set(result.symbols).isdisjoint(DENIED_TICKERS)
+        assert set(NEW_LIVE_TICKERS) <= set(result.symbols)
+        # Non-destructive: denied tickers' files are still on disk.
+        for ticker in DENIED_TICKERS:
+            assert (manager.data_dir / f"{ticker}.parquet").exists()
+
+    def test_c2_live_sync_listing_denied_tickers_still_excludes_them(self, manager):
+        manager.fetch_sp500_constituents = lambda: list(DENIED_TICKERS) + ["AAPL"]
+        manager.fetch_nasdaq100_constituents = lambda: ["kvue", "wbd", "ea"]
+        manager.data_dir.mkdir(parents=True, exist_ok=True)
+        for ticker in DENIED_TICKERS + ("AAPL",):
+            _write_parquet(manager.data_dir / f"{ticker}.parquet")
+
+        result = manager.sync()
+
+        assert result.symbols == ["AAPL"]
 
 
 if __name__ == "__main__":

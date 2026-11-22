@@ -93,3 +93,87 @@ class TestDataSyncStatus:
             assert laf is None or (
                 isinstance(laf, str) and len(laf) == 10
             ), f"last_fetched_at has wrong shape: {laf!r}"
+
+
+# ---------------------------------------------------------------------------
+# Cycle 01 - C-2: explicit request tickers are filtered through DENYLIST, so
+# `POST /data/sync {"tickers": ["EQR"]}` can no longer re-download a
+# delisted/renamed symbol.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def captured_sync(monkeypatch) -> list:
+    """Replace the background task body so no fetch/disk write happens, and
+    record exactly which tickers were handed to it."""
+    import backend.app.api.data_sync as ds
+
+    calls: list = []
+    monkeypatch.setattr(
+        ds, "_run_sync", lambda tickers, data_dir: calls.append(list(tickers))
+    )
+    return calls
+
+
+class TestC2SyncSkipsDenied:
+    def test_c2_denied_tickers_are_skipped_and_reported(
+        self, client: TestClient, captured_sync: list
+    ) -> None:
+        resp = client.post(START_SYNC_URL, json={"tickers": ["AAPL", "EQR", "KVUE"]})
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["tickers"] == ["AAPL"]
+        assert body["skipped"] == ["EQR", "KVUE"]
+        assert captured_sync == [["AAPL"]]
+
+    def test_c2_lowercase_denied_ticker_is_still_skipped(
+        self, client: TestClient, captured_sync: list
+    ) -> None:
+        resp = client.post(START_SYNC_URL, json={"tickers": ["aapl", " wbd "]})
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["tickers"] == ["AAPL"]
+        assert body["skipped"] == ["WBD"]
+
+    @pytest.mark.parametrize(
+        "ticker", ["EA", "KVUE", "WBD", "AVB", "EQR", "BK", "MMC", "CTRA", "K", "WBA"]
+    )
+    def test_c2_every_denied_ticker_is_skipped(
+        self, client: TestClient, captured_sync: list, ticker: str
+    ) -> None:
+        resp = client.post(START_SYNC_URL, json={"tickers": ["AAPL", ticker]})
+        assert resp.status_code == 202
+        assert resp.json()["skipped"] == [ticker]
+        assert captured_sync == [["AAPL"]]
+
+    def test_c2_all_denied_returns_422_and_queues_nothing(
+        self, client: TestClient, captured_sync: list
+    ) -> None:
+        resp = client.post(START_SYNC_URL, json={"tickers": ["EQR", "AVB", "EA"]})
+        assert resp.status_code == 422
+        assert captured_sync == []
+        assert _job_state.in_progress is False
+
+    def test_c2_skipped_defaults_to_empty_list(
+        self, client: TestClient, captured_sync: list
+    ) -> None:
+        resp = client.post(START_SYNC_URL, json={"tickers": ["AAPL", "VMRK"]})
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["tickers"] == ["AAPL", "VMRK"]
+        assert body["skipped"] == []
+
+    def test_c2_watchlist_sync_never_queues_denied(
+        self, client: TestClient, captured_sync: list
+    ) -> None:
+        resp = client.post(START_SYNC_URL, json={})
+        assert resp.status_code == 202
+        body = resp.json()
+        denied = {"EA", "KVUE", "WBD", "AVB", "EQR", "BK", "MMC", "CTRA", "K", "WBA"}
+        assert denied.isdisjoint(body["tickers"])
+        assert body["skipped"] == []
+
+    def test_c2_response_schema_declares_skipped(self) -> None:
+        from backend.app.api.schemas import DataSyncResponse
+
+        assert DataSyncResponse(status="started", tickers=["AAPL"]).skipped == []
