@@ -17,7 +17,9 @@ from fastapi import APIRouter, Depends
 
 from ..config import Settings, get_settings
 from ..data.loader import cached_tickers
+from ..data.universe import DENY_ENTRIES
 from ..quant.data.parquet_manager import read_max_timestamp
+from .schemas import DataHealthResponse
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +28,22 @@ router = APIRouter(prefix="/api/v1/data", tags=["data-health"])
 #: Tickers whose last bar is older than this many days are flagged stale
 #: in the health report. None = no threshold (everything is "fresh").
 #: Can be overridden at runtime by setting DATA_HEALTH_STALE_DAYS.
+
+
+def _delisted() -> list[dict]:
+    """Every denied symbol that left the market (not mere `broken_data`),
+    straight from `DENY_ENTRIES`. Read-only: never touches the cache."""
+    return [
+        {
+            "ticker": ticker,
+            "since": entry.since.isoformat() if entry.since is not None else None,
+            "kind": entry.kind,
+            "reason": entry.reason,
+            "successor": entry.successor,
+        }
+        for ticker, entry in sorted(DENY_ENTRIES.items())
+        if entry.kind != "broken_data"
+    ]
 
 
 def _compute_health(settings: Settings, stale_days: int | None = None) -> dict:
@@ -44,6 +62,7 @@ def _compute_health(settings: Settings, stale_days: int | None = None) -> dict:
             "stale_tickers": [],
             "total_rows_estimate": 0,
             "as_of": datetime.now(timezone.utc).isoformat(),
+            "delisted": _delisted(),
         }
 
     newest_ticker = None
@@ -92,10 +111,11 @@ def _compute_health(settings: Settings, stale_days: int | None = None) -> dict:
         "more_stale_tickers": stale_count > 50,
         "total_rows_estimate": total_rows,
         "as_of": datetime.now(timezone.utc).isoformat(),
+        "delisted": _delisted(),
     }
 
 
-@router.get("/health")
+@router.get("/health", response_model=DataHealthResponse)
 def data_health(
     settings: Settings = Depends(get_settings),
 ) -> dict:

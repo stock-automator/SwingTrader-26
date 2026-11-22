@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from ..config import Settings, get_settings
+from ..data.universe import DENYLIST
 from ..quant.data.parquet_manager import ParquetSyncManager, SyncResult
 from .deps import load_watchlist
 from .schemas import DataSyncRequest, DataSyncResponse, DataSyncStatusResponse
@@ -80,7 +81,23 @@ def start_data_sync(
     """Queue a staleness/corporate-action sync for `tickers` (or the full
     watchlist), and return immediately - the work happens after the
     response is sent."""
-    tickers = request.tickers if request.tickers else load_watchlist(settings)
+    skipped: list[str] = []
+    if request.tickers:
+        # Explicit names bypass the watchlist's DENYLIST filter, so apply it
+        # here too - otherwise a delisted/renamed symbol could be
+        # re-downloaded on request. `DataSyncRequest` already upper-cases.
+        tickers = [t for t in request.tickers if t not in DENYLIST]
+        skipped = [t for t in request.tickers if t in DENYLIST]
+        if not tickers:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "No tickers to sync: every requested ticker is delisted "
+                    f"or renamed: {', '.join(skipped)}."
+                ),
+            )
+    else:
+        tickers = load_watchlist(settings)
     if not tickers:
         raise HTTPException(
             status_code=422,
@@ -90,7 +107,7 @@ def start_data_sync(
     _job_state.start()
     background_tasks.add_task(_run_sync, tickers, settings.data_dir)
 
-    return {"status": "started", "tickers": tickers}
+    return {"status": "started", "tickers": tickers, "skipped": skipped}
 
 
 @router.get("/sync/status", response_model=DataSyncStatusResponse)

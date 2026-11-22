@@ -715,6 +715,11 @@ watchlist. `422` if the body is empty and the watchlist is also empty.
 { "status": "started", "tickers": ["AAPL", "MSFT"] }
 ```
 
+Delisted/renamed tickers (`data.universe.DENY_ENTRIES`, case-insensitive) are
+dropped from an explicit list and reported in `skipped` (`[]` by default);
+`422` if every requested ticker is denied. `GET /api/v1/data/health` lists the
+same entries in `delisted` (`ticker`, `since`, `kind`, `reason`, `successor`).
+
 ### `GET /api/v1/data/sync/status`
 
 ```json

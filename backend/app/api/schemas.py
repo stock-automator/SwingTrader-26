@@ -253,6 +253,37 @@ class DataSyncRequest(BaseModel):
 class DataSyncResponse(BaseModel):
     status: str
     tickers: list[str]
+    skipped: list[str] = Field(
+        default_factory=list,
+        description="Requested tickers dropped because they are delisted/renamed "
+        "(see `data.universe.DENY_ENTRIES`).",
+    )
+
+
+class DelistedEntry(BaseModel):
+    """One delisted/renamed symbol excluded from the universe."""
+
+    ticker: str
+    since: str | None = Field(description="ISO date the symbol stopped trading.")
+    kind: str = Field(description="`rename`, `stock_merger` or `cash_buyout`.")
+    reason: str
+    successor: str | None = None
+
+
+class DataHealthResponse(BaseModel):
+    """`GET /api/v1/data/health` response."""
+
+    total_tickers: int
+    newest_ticker: str | None
+    newest_date: str | None
+    oldest_ticker: str | None
+    oldest_date: str | None
+    stale_count: int
+    stale_tickers: list[str]
+    more_stale_tickers: bool = False
+    total_rows_estimate: int
+    as_of: str
+    delisted: list[DelistedEntry] = Field(default_factory=list)
 
 
 class CorporateActionResponse(BaseModel):
