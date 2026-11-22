@@ -6,6 +6,16 @@ Format: `## YYYY-MM-DD — Decision` then Why / Alternatives considered.
 - **Why:** an existing `ai.hermes.keepawake` launchd agent (`caffeinate -ims`) already prevents sleep; no sleep events since it started. Fewest moving parts.
 - **Alternatives:** launchd `StartCalendarInterval` jobs that run missed slots on wake (needs a market-open guard so a late run can't trade after hours); `pmset repeat` scheduled wake (needs sudo, A's call).
 
+## 2026-09-20 — Infra facts carried over from the old `docs/agent/` notes
+- Outbound Telegram from the Hermes side works with the `hermes send` CLI and needs no gateway. The app's own alerts subsystem has Telegram support but no bot token configured.
+- Hermes routes models through OmniRoute. Groq was failing with an invalid API key, and OmniRoute routing for Claude Code is not configured (not needed).
+- Short-position support exists in the backtest engine: `run_backtest(..., direction=-1)`, from commit bfc6ea3.
+- Sprint 7's deploy "fix" (`| lower`) was itself broken. It was really fixed on 2026-11-22 (00b3ace).
+
+## 2026-11-22 — Retire data/agent.py, analytics/console.py and analytics/llm_reporter.py (approved by A)
+- **Why:** nothing in the repo, CI, Docker, `~/.hermes` or cron imports or runs them. The Sprint 6 audit kept them as "standalone tools", but none has been used since the FastAPI refactor. Downloads now go through `parquet_manager` and `/api/v1/data/sync`, which refreshed 505 tickers in 104s with no VPN rotation. Recoverable from git history (last commit before removal) if ever needed.
+- **Alternatives:** keep them and fix their doc paths (the Sprint 6 recommendation).
+
 ## 2026-11-22 — Work on local branch only until A pushes
 - **Why:** no GitHub credentials on this Mac; A will push at the end.
 - **Alternatives:** `gh auth login` now.
