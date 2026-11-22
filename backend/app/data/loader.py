@@ -1,10 +1,10 @@
 """
 Historical bar access.
 
-Resolution order: the on-disk parquet cache written by `data/agent.py`
-first, then a live yfinance fetch for anything not cached - notably SPY,
-which the benchmark engine needs on every run and which the cache does not
-carry.
+Resolution order: the on-disk parquet cache in `data/raw/` (written by
+`quant/data/parquet_manager.py`) first, then a live yfinance fetch for
+anything not cached - notably SPY, which the benchmark engine needs on every
+run and which the cache does not carry.
 
 Both sources are normalised onto one contract before returning: flat
 `Open/High/Low/Close/Volume` columns, a sorted unique `DatetimeIndex`, and
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-#: Where `data/agent.py` writes its parquet cache.
+#: Where the parquet cache lives (see `quant/data/parquet_manager.py`).
 DATA_DIR = Path("data/raw")
 
 #: The contract every frame leaving this module satisfies.

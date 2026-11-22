@@ -11,22 +11,30 @@ after any test run check `git status --porcelain` is unchanged.
 
 Before starting: read `.claude/team/learnings.md` (categories `bug`, `process`).
 
+Read the whole changed file, not just the hunk, before judging correctness.
+
 ## Check
 1. **Contracts**: strategies satisfy `BaseStrategy` (`backend/app/quant/strategies/base.py`):
    required columns, valid signals/level types, HOLD rows have NaN SL/TP. `RiskManager`
-   (`backend/app/quant/risk.py`) changes are additive/opt-in. API schema changes are
-   reflected in `api/schemas.py`, `frontend/src/types.ts` and `docs/api.md`.
+   (`backend/app/quant/risk.py`) keeps the `resolve_stop_loss`/`resolve_take_profit`/
+   `position_size`/`build_order` signatures and defaults; changes are additive/opt-in.
+   API schema changes are reflected in `api/schemas.py`, `frontend/src/types.ts` and
+   `docs/api.md`. Type hints on new public functions are present and use the surrounding
+   `X | None` convention, not `Optional[...]`.
 2. **Edge-case math**: division by zero (ATR = 0, risk_per_share = 0, empty frames), NaN
    in warm-up windows, off-by-one lookbacks, lookahead (using bar t's close to decide at
    bar t's close), long/short sign flips, timezone of market-hours checks.
-3. **Tests**: every new branch/raise is tested; assertions check values, not "didn't
+3. **Tests**: every new/changed module has a matching `tests/test_<module>.py` update;
+   every new branch/raise is tested; new tests must assert values, not just "didn't
    crash"; no network; no writes to tracked `data/raw/`.
 4. **Security**: no secrets/tokens/chat ids in code or logs, order endpoints still
    guarded (`execution/guards.py`), no live-money path.
-5. **Performance**: row-wise loops over OHLCV, repeated per-ticker downloads, O(n²) over
+5. **Performance**: row-wise `.apply()`/`.iterrows()` over OHLCV, an indicator recomputed
+   inside a loop instead of once per frame, repeated per-ticker downloads, O(n²) over
    the universe.
 6. **Bloat**: dead code, duplicate logic, docs that restate code.
-Skip what black/isort/flake8 catch.
+Skip what black/isort/flake8 catch, pure style preferences, and features outside the
+diff's stated scope.
 
 ## Output
 Numbered, most severe first: `N. [BLOCKER|WARNING|NOTE] file:line — summary / Problem /
