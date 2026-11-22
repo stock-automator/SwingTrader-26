@@ -18,6 +18,7 @@ tester, reviewer, retrospective-learner and skill-upgrader.
   → retro, still ending at Gate 2.
 - `/retro` records lessons and metrics. `/upgrade` proposes at most 3 diffs to agents,
   skills or this file.
+- Diffs touching orders, execution, alerts, config or secrets also get `/security-review`.
 - **Human gates:** A approves the stories and design (Gate 1), the result (Gate 2),
   every `/upgrade` change, any skill install and any deletion.
 - **Installed skills** (`.claude/skills/`, from addyosmani/agent-skills): interview-me,

@@ -16,6 +16,17 @@ Format: `## YYYY-MM-DD — Decision` then Why / Alternatives considered.
 - **Why:** nothing in the repo, CI, Docker, `~/.hermes` or cron imports or runs them. The Sprint 6 audit kept them as "standalone tools", but none has been used since the FastAPI refactor. Downloads now go through `parquet_manager` and `/api/v1/data/sync`, which refreshed 505 tickers in 104s with no VPN rotation. Recoverable from git history (last commit before removal) if ever needed.
 - **Alternatives:** keep them and fix their doc paths (the Sprint 6 recommendation).
 
+## 2026-11-22 — Security scope: no LAN auth; secrets stay local (A)
+- **Why:** only A uses the home network. The real threat is leaking secrets to the outside world. Tokens and API keys live only in the git credential manager and local `.env` files, never in the repo, logs, Telegram or `.claude/`.
+- **Alternatives:** a shared-token dependency on every state-changing endpoint (architect suggestion). Not needed for now. The order-guard bypass still gets fixed (S-1).
+
+## 2026-11-22 — /security-review added to /team Verify for sensitive diffs (A agreed)
+- **Why:** orders, alerts and config are where a mistake costs money or leaks secrets.
+
+## 2026-11-22 — Cycle 01 Gate 1 decisions (A)
+- Archive KVUE/WBD history to `data/delisted/`. Delete the untracked EA/AVB/EQR stubs. Add VMRK.
+- Fix the old deny list: BK→BNY and MMC→MRSH are renames, so add the new tickers. CTRA, K and WBA are real delistings.
+
 ## 2026-11-22 — Work on local branch only until A pushes
 - **Why:** no GitHub credentials on this Mac; A will push at the end.
 - **Alternatives:** `gh auth login` now.

@@ -30,8 +30,11 @@ but say which one and why.
 5. **Build**: developer makes the tests pass in small commits (skills:
    incremental-implementation, test-driven-development). Use `/batch` only for a mechanical
    multi-file change that the architect explicitly approved.
-6. **Verify**: run `/code-review` on `git diff main...HEAD`, then the reviewer subagent,
-   then `/simplify` on the changed files only, then rerun all checks:
+6. **Verify**: run `/code-review` on `git diff main...HEAD`. If the diff touches
+   `backend/app/execution/`, `api/orders.py`, `api/execution.py`, `api/alerts.py`,
+   `alerts/`, `config.py`, `.env*` or anything handling secrets, also run
+   `/security-review`. Then run the reviewer subagent, then `/simplify` on the changed
+   files only, then rerun all checks:
    `ALLOW_DOWNLOADS=false pytest tests/ -q -n auto`, `black --check backend tests`,
    `isort --check-only backend tests`, `flake8 backend tests`, plus `npm run build` if
    `frontend/` changed. Behaviour must stay unchanged by `/simplify`. On any BLOCK or
