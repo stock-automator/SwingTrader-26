@@ -483,7 +483,6 @@ docs/
   architecture.md          Data-flow diagram, backend/frontend separation
   api.md                   Full endpoint reference
   benchmark_math.md         Alpha/beta/Sharpe/information-ratio, explained
-  code_review.md            Multi-persona review of this codebase
   media/                    Demo video recordings
 scripts/
   generate_demo_videos.py  Playwright walkthrough recorder
@@ -500,7 +499,6 @@ AGENTS.md                  Engineering contract for strategies/risk/engines
 - **[`docs/architecture.md`](docs/architecture.md)** — full data-flow diagram
 - **[`docs/api.md`](docs/api.md)** — every endpoint, request/response shapes, curl examples
 - **[`docs/benchmark_math.md`](docs/benchmark_math.md)** — exactly how alpha/beta/Sharpe are computed
-- **[`docs/code_review.md`](docs/code_review.md)** — a multi-persona review of this codebase
 - **[`AGENTS.md`](AGENTS.md)** — the engineering contract for strategies, risk sizing, and the backtest/screener engines
 
 ## Status
@@ -560,9 +558,7 @@ evidence for further investigation, not proof of anything.
    sync, async DuckDB-backed background scans; market regime engine, ATR
    position sizer, broker-agnostic order routing, the unified live-feed
    WebSocket, and mobile/Meshnet access; then a repo-wide dead-code/
-   documentation audit. Detailed per-sprint changes moved to
-   `SPRINT_CHANGELOG.md` starting here rather than growing this list
-   further — that file is now the canonical record.
+   documentation audit.
 8. **Sprint 6 Phase 3 (this round)** — performance and resilience pass, no
    new user-facing features: parallelized the universe-sync symbol filter
    and closed an event-loop-blocking gap in the analytics endpoints
@@ -575,7 +571,7 @@ evidence for further investigation, not proof of anything.
    unformatted one; and a React error boundary around every tab, so a
    bug in one tab's render shows a "Something went wrong — try switching
    tabs and back, or reload the page" message in that tab instead of
-   blanking the whole app. See `SPRINT_CHANGELOG.md` for the full list.
+   blanking the whole app.
 
 **Deliberately not done yet** (so the next session doesn't have to rediscover
 this by reading code):

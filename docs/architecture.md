@@ -123,10 +123,10 @@ EXIT_LONG/FLAT).
 ## Beyond backtest/screener: the other subsystems
 
 The diagram above is the original backtest/screener data-flow path; every
-other API router (all shipped in Sprint 4/5, see `SPRINT_CHANGELOG.md`)
-builds on the same `quant/`/`data/` layer without duplicating it. Full
-request/response shapes for all of these are in `docs/api.md` — this is
-the "how does it fit together" view, not the wire format.
+other API router (all shipped in Sprint 4/5) builds on the same
+`quant/`/`data/` layer without duplicating it. Full request/response shapes
+for all of these are in `docs/api.md` — this is the "how does it fit
+together" view, not the wire format.
 
 | Subsystem | Backend module(s) | Router | Notes |
 |---|---|---|---|
