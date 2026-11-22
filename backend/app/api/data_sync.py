@@ -89,21 +89,15 @@ def start_data_sync(
         # (`universe.sanitize_ticker`) and dedupes, keeping first-seen order.
         tickers = [t for t in request.tickers if t not in DENYLIST]
         skipped = [t for t in request.tickers if t in DENYLIST]
-        if not tickers:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "No tickers to sync: every requested ticker is delisted "
-                    f"or renamed: {', '.join(skipped)}."
-                ),
-            )
     else:
         tickers = load_watchlist(settings)
     if not tickers:
-        raise HTTPException(
-            status_code=422,
-            detail="No tickers to sync: request body was empty and the watchlist is empty.",
+        reason = (
+            f"every requested ticker is delisted or renamed: {', '.join(skipped)}."
+            if skipped
+            else "request body was empty and the watchlist is empty."
         )
+        raise HTTPException(status_code=422, detail=f"No tickers to sync: {reason}")
 
     _job_state.start()
     background_tasks.add_task(_run_sync, tickers, settings.data_dir)

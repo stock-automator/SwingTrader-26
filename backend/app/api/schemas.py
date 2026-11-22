@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..data.universe import DenyKind, sanitize_ticker
+from ..data.universe import DenyKind, sanitize_and_dedupe
 from ..quant.backtest import DEFAULT_INITIAL_CAPITAL
 from ..quant.engine import (
     DEFAULT_ACCOUNT_TIERS,
@@ -249,14 +249,7 @@ class DataSyncRequest(BaseModel):
         """Normalize via `universe.sanitize_ticker` (`brk.b` -> `BRK-B`) and
         dedupe keeping first-seen order, so the route's DENYLIST split
         reports each denied symbol once."""
-        if value is None:
-            return None
-        seen: dict[str, None] = {}
-        for raw in value:
-            ticker = sanitize_ticker(raw) if raw else ""
-            if ticker:
-                seen[ticker] = None
-        return list(seen)
+        return None if value is None else sanitize_and_dedupe(value)
 
 
 class DataSyncResponse(BaseModel):
@@ -274,8 +267,8 @@ class DelistedEntry(BaseModel):
 
     ticker: str
     since: str | None = Field(
-        description="ISO date of the first session the symbol no longer traded "
-        "(day after its last bar); null for `broken_data`."
+        description="ISO date of the first session after the symbol's last "
+        "trading day; null for `broken_data`."
     )
     kind: DenyKind = Field(
         description="`rename`, `stock_merger`, `cash_buyout` or `broken_data`."

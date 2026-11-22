@@ -742,8 +742,8 @@ shows partial progress, not just a final snapshot.
 Parquet cache freshness summary. A ticker whose last bar is older than
 `screener_stale_after_days` is counted in `stale_count` and listed in
 `stale_tickers` (capped at 50; `more_stale_tickers` is true past the cap).
-`delisted` lists every `DENY_ENTRIES` row; `since` is the first session the
-symbol no longer traded (day after its last bar). Nothing is ever deleted.
+`delisted` lists every `DENY_ENTRIES` row; `since` is the first session after
+the symbol's last trading day. Nothing is ever deleted.
 
 ```json
 {

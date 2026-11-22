@@ -69,9 +69,8 @@ DenyKind = Literal["rename", "stock_merger", "cash_buyout", "broken_data"]
 class DenyEntry:
     """Why one symbol is excluded from the active universe.
 
-    `since` is the first session the symbol no longer traded under this
-    company - the day after its last bar (None only for `broken_data`,
-    which has no corporate event).
+    `since` is the first session after the symbol's last trading day under
+    this company (None only for `broken_data`, which has no corporate event).
     `successor` is the symbol holders ended up with (`rename` /
     `stock_merger`); None for cash buyouts and broken data.
     """
@@ -814,6 +813,17 @@ class UniverseSyncResult:
         }
 
 
+def sanitize_and_dedupe(symbols: list[str]) -> list[str]:
+    """`sanitize_ticker` each symbol, drop empties, and dedupe keeping
+    first-seen order."""
+    seen: dict[str, None] = {}
+    for raw in symbols:
+        ticker = sanitize_ticker(raw) if raw else ""
+        if ticker:
+            seen[ticker] = None
+    return list(seen)
+
+
 def _parse_synced_at(raw: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(raw)
@@ -849,7 +859,6 @@ class UniverseManager:
         self.max_workers = max_workers
         #: Sources (`"sp500"` / `"nasdaq100"`) whose last fetch fell back to
         #: the static seed list; `sync()` only warns about live results.
-        self._fallback_sources: set[str] = set()
 
     # ------------------------------------------------------------------
     # Constituent fetching
@@ -894,7 +903,6 @@ class UniverseManager:
                 exc,
                 len(_STATIC_SP500_FALLBACK),
             )
-            self._fallback_sources.add("sp500")
             return list(_STATIC_SP500_FALLBACK)
 
     def fetch_nasdaq100_constituents(self) -> list[str]:
@@ -927,7 +935,6 @@ class UniverseManager:
                 exc,
                 len(_STATIC_NASDAQ100_FALLBACK),
             )
-            self._fallback_sources.add("nasdaq100")
             return list(_STATIC_NASDAQ100_FALLBACK)
 
     # ------------------------------------------------------------------
@@ -970,12 +977,7 @@ class UniverseManager:
         return [s for s, ok in zip(symbols, usable) if ok]
 
     def _sanitize_and_dedupe(self, symbols: list[str]) -> list[str]:
-        seen: dict[str, None] = {}
-        for raw in symbols:
-            ticker = sanitize_ticker(raw)
-            if ticker:
-                seen[ticker] = None
-        return list(seen)
+        return sanitize_and_dedupe(symbols)
 
     # ------------------------------------------------------------------
     # Sync
@@ -989,12 +991,21 @@ class UniverseManager:
         each source, so a caller can tell "Wikipedia returned 503 S&P
         names" from "3 got dropped for broken data" independently.
         """
-        self._fallback_sources = set()
         sp500 = self.fetch_sp500_constituents()
         nasdaq100 = self.fetch_nasdaq100_constituents()
 
-        merged = self._sanitize_and_dedupe(sp500 + nasdaq100)
-        self._warn_live_denied(sp500, nasdaq100)
+        merged = sanitize_and_dedupe(sp500 + nasdaq100)
+        # The static fallbacks never contain a denied symbol (enforced by
+        # tests), so any hit here came from a live source: either the
+        # source is stale or the exchange reused the ticker.
+        for symbol in merged:
+            if symbol in self.denylist:
+                log.warning(
+                    "sync: live constituent list includes denied symbol %s; "
+                    "excluding it. It may be a reused ticker - review its "
+                    "DENY_ENTRIES row.",
+                    symbol,
+                )
         merged = [s for s in merged if s not in self.denylist]
         active = sorted(self.purge_broken_symbols(merged))
 
@@ -1005,28 +1016,6 @@ class UniverseManager:
         )
         self._write(result)
         return result
-
-    def _warn_live_denied(self, sp500: list[str], nasdaq100: list[str]) -> None:
-        """Log one WARNING per denied symbol a *live* source still lists.
-
-        A live list carrying a denied symbol means either the source is
-        out of date or the exchange reused the ticker for a new company -
-        a human should review its `DENY_ENTRIES` row. Static fallback lists
-        are curated here, so they are not checked.
-        """
-        live: list[str] = []
-        if "sp500" not in self._fallback_sources:
-            live += sp500
-        if "nasdaq100" not in self._fallback_sources:
-            live += nasdaq100
-        for symbol in self._sanitize_and_dedupe(live):
-            if symbol in self.denylist:
-                log.warning(
-                    "sync: live constituent list includes denied symbol %s; "
-                    "excluding it. It may be a reused ticker - review its "
-                    "DENY_ENTRIES row.",
-                    symbol,
-                )
 
     def needs_sync(self) -> bool:
         """True if `config_path` doesn't exist, is unreadable, or its
