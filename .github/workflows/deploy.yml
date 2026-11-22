@@ -13,8 +13,11 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  BACKEND_IMAGE: ${{ github.repository_owner | lower }}/${{ github.event.repository.name | lower }}-backend
-  FRONTEND_IMAGE: ${{ github.repository_owner | lower }}/${{ github.event.repository.name | lower }}-frontend
+# GHCR image names must be lowercase, but this repo is "SwingTrader-26".
+# GitHub Actions expressions have no lowercase filter (a `| lower` pipe is a
+# parse error that makes the whole workflow fail on every push), so each job
+# lowercases `$GITHUB_REPOSITORY` in a shell step and exports the image names
+# via `$GITHUB_ENV` instead.
 
 jobs:
   build-backend:
@@ -24,6 +27,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute lowercase image name
+        run: echo "BACKEND_IMAGE=${GITHUB_REPOSITORY,,}-backend" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -54,6 +60,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute lowercase image name
+        run: echo "FRONTEND_IMAGE=${GITHUB_REPOSITORY,,}-frontend" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

@@ -8,6 +8,7 @@ rather than the ParquetSyncManager backend, which is covered by
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -31,9 +32,15 @@ def reset_sync_state():
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(tmp_path: Path) -> TestClient:
+    # The sync job writes Parquet files into ``data_dir``. Point it at a
+    # throwaway copy so running the suite never rewrites the tracked
+    # ``data/raw/AAPL.parquet`` snapshot.
+    data_dir = tmp_path / "raw"
+    data_dir.mkdir()
+    shutil.copy(Path("data/raw/AAPL.parquet"), data_dir / "AAPL.parquet")
     settings = Settings(
-        data_dir=Path("data/raw"),
+        data_dir=data_dir,
         allow_downloads=False,
         watchlist_path=Path("config/watchlist.txt"),
         screener_max_tickers=750,
