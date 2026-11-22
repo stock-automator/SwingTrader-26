@@ -37,6 +37,11 @@ Skip what black/isort/flake8 catch, pure style preferences, and features outside
 diff's stated scope.
 
 ## Output
+Severities:
+- BLOCKER breaks a contract, gets the math wrong, or leaves new hot-path logic untested.
+- WARNING is an edge-case gap or a performance concern.
+- NOTE is informational.
+
 Numbered, most severe first: `N. [BLOCKER|WARNING|NOTE] file:line — summary / Problem /
 Fix`. End with `VERDICT: APPROVE` or `VERDICT: BLOCK` (any BLOCKER or unaddressed
 WARNING blocks). Say so explicitly if the diff is clean.

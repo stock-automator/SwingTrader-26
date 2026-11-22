@@ -20,4 +20,5 @@ Status: `todo` | `in-progress` | `blocked` | `done`. Priority P1–P3.
 | T-2 | As A, I want one short Telegram message with at most 3 setups (entry/stop/target/$ risk) or "no trades today", so that I can act from my phone. | P1 | todo | Expert pick #3 (customer). Overlaps B-2. |
 | E-1 | As A, I want dependencies locked and CI to run frontend lint and Playwright on Node 22, so that nothing breaks silently. | P2 | todo | Expert picks #5 and #7 (tech-expert). |
 | U-2 | As A, I want the UI to show each strategy's record after costs and an honest "no strategy beats SPY yet" banner. | P2 | todo | Expert pick #6. |
+| B-3 | As A, I want the day scan's scoring to be correct so that the strongest setups aren't missed. | P2 | todo | Reviewer, 2026-11-22: `day_setup_scan.py:145` turns `range_position` 0.0 into 0.5. `avg_vol` always divides by 5. Each ticker is downloaded twice, and `sma_20` is a 5-bar mean. Fix both the repo copy and `~/.hermes/scripts/`. |
 | Q-1 | Decide whether `data/raw/*.parquet` (~74MB) should stay tracked in git. | P3 | todo | It's tracked while the docs say it's a gitignored cache. Open question from the Sprint 6 audit. |
