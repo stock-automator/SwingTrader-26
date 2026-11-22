@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..data.universe import DenyKind, sanitize_ticker
 from ..quant.backtest import DEFAULT_INITIAL_CAPITAL
 from ..quant.engine import (
     DEFAULT_ACCOUNT_TIERS,
@@ -244,10 +245,18 @@ class DataSyncRequest(BaseModel):
 
     @field_validator("tickers")
     @classmethod
-    def _upper_tickers(cls, value: list[str] | None) -> list[str] | None:
+    def _sanitize_tickers(cls, value: list[str] | None) -> list[str] | None:
+        """Normalize via `universe.sanitize_ticker` (`brk.b` -> `BRK-B`) and
+        dedupe keeping first-seen order, so the route's DENYLIST split
+        reports each denied symbol once."""
         if value is None:
             return None
-        return [t.strip().upper() for t in value if t and t.strip()]
+        seen: dict[str, None] = {}
+        for raw in value:
+            ticker = sanitize_ticker(raw) if raw else ""
+            if ticker:
+                seen[ticker] = None
+        return list(seen)
 
 
 class DataSyncResponse(BaseModel):
@@ -264,8 +273,13 @@ class DelistedEntry(BaseModel):
     """One delisted/renamed symbol excluded from the universe."""
 
     ticker: str
-    since: str | None = Field(description="ISO date the symbol stopped trading.")
-    kind: str = Field(description="`rename`, `stock_merger` or `cash_buyout`.")
+    since: str | None = Field(
+        description="ISO date of the first session the symbol no longer traded "
+        "(day after its last bar); null for `broken_data`."
+    )
+    kind: DenyKind = Field(
+        description="`rename`, `stock_merger`, `cash_buyout` or `broken_data`."
+    )
     reason: str
     successor: str | None = None
 

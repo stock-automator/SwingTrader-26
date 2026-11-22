@@ -712,9 +712,10 @@ Body: `{"tickers": ["AAPL", "MSFT"]}` — omit or `null` to sync the full
 watchlist. `422` if the body is empty and the watchlist is also empty.
 
 ```json
-{ "status": "started", "tickers": ["AAPL", "MSFT"] }
+{ "status": "started", "tickers": ["AAPL", "MSFT"], "skipped": [] }
 ```
 
+Explicit tickers are normalized (`brk.b` -> `BRK-B`) and deduped first.
 Delisted/renamed tickers (`data.universe.DENY_ENTRIES`, case-insensitive) are
 dropped from an explicit list and reported in `skipped` (`[]` by default);
 `422` if every requested ticker is denied. `GET /api/v1/data/health` lists the
@@ -735,6 +736,34 @@ same entries in `delisted` (`ticker`, `since`, `kind`, `reason`, `successor`).
 
 `results` fills in incrementally as each ticker finishes, so polling mid-run
 shows partial progress, not just a final snapshot.
+
+### `GET /api/v1/data/health`
+
+Parquet cache freshness summary. A ticker whose last bar is older than
+`screener_stale_after_days` is counted in `stale_count` and listed in
+`stale_tickers` (capped at 50; `more_stale_tickers` is true past the cap).
+`delisted` lists every `DENY_ENTRIES` row; `since` is the first session the
+symbol no longer traded (day after its last bar). Nothing is ever deleted.
+
+```json
+{
+  "total_tickers": 512,
+  "newest_ticker": "AAPL",
+  "newest_date": "2026-11-20",
+  "oldest_ticker": "KVUE",
+  "oldest_date": "2026-10-30",
+  "stale_count": 1,
+  "stale_tickers": ["KVUE"],
+  "more_stale_tickers": false,
+  "total_rows_estimate": 1290000,
+  "as_of": "2026-11-22T12:00:00+00:00",
+  "delisted": [
+    { "ticker": "KVUE", "since": "2026-11-02", "kind": "stock_merger",
+      "reason": "Acquired by Kimberly-Clark for cash plus KMB shares.",
+      "successor": "KMB" }
+  ]
+}
+```
 
 ---
 

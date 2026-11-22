@@ -85,7 +85,8 @@ def start_data_sync(
     if request.tickers:
         # Explicit names bypass the watchlist's DENYLIST filter, so apply it
         # here too - otherwise a delisted/renamed symbol could be
-        # re-downloaded on request. `DataSyncRequest` already upper-cases.
+        # re-downloaded on request. `DataSyncRequest` already sanitizes
+        # (`universe.sanitize_ticker`) and dedupes, keeping first-seen order.
         tickers = [t for t in request.tickers if t not in DENYLIST]
         skipped = [t for t in request.tickers if t in DENYLIST]
         if not tickers:

@@ -302,6 +302,7 @@ export interface DataSyncStatusResponse {
 export interface DataSyncResponse {
   status: string;
   tickers: string[];
+  skipped: string[];
 }
 
 // ---- Signal matrix ----

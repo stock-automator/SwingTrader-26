@@ -124,10 +124,10 @@ def load_frames(
 
 def _read_watchlist(settings: Settings) -> list[str]:
     """Every ticker in `settings.watchlist_path`, one per line, uncapped,
-    with `data.universe.DENYLIST` symbols filtered out - those are known to
-    have broken/missing data in this repo's parquet store, and retrying
-    them against a live provider on every screener/sync poll just spams
-    failed downloads for tickers that can never succeed. Empty if the file
+    with `data.universe.DENYLIST` symbols filtered out - delisted, renamed
+    or merged symbols (see `DENY_ENTRIES` in `data/universe.py`) that can
+    no longer be fetched, so retrying them against a live provider on
+    every screener/sync poll would just spam failed downloads. Empty if the file
     doesn't exist."""
     path = settings.watchlist_path
     if not path.exists():
