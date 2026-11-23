@@ -518,6 +518,7 @@ def test_run_scorecard_script_writes_outputs(tmp_path, capsys):
     )
     text = md.read_text()
     assert "| Rank |" in text and "donchian_breakout" in text
+    assert "\n\n| Rank |" in text  # a table needs a blank line before it
     payload = json.loads(js.read_text())
     assert {r["strategy"] for r in payload["rows"]} <= {
         "donchian_breakout",

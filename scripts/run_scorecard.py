@@ -200,6 +200,7 @@ def main(argv: list[str] | None = None) -> dict:
         "- Caveats: survivorship bias (today's index members only); short "
         "borrow and fees not modelled; whole shares.",
         "",
+        "",
     ]
     markdown = "\n".join(header) + scorecard_markdown(rows, ordered)
     payload = {
