@@ -7,6 +7,7 @@ itself, which forced its imports below a statement and required a blanket
 E402 exemption for `tests/` in `.flake8`.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -14,6 +15,9 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# F3 B-1: the app's APScheduler must never start under tests.
+os.environ["SCHEDULER_ENABLED"] = "false"
 
 
 @pytest.fixture

@@ -312,6 +312,8 @@ class TestF3Endpoints:
     def test_f3_get_daily_returns_brief_json(self, daily, tmp_path, client):
         daily.scan_universe = FakeScan(["AAA"])
         _use(_settings(tmp_path))
+        # F3 B-1: GET serves the cached brief; refresh builds it first.
+        assert client.post("/api/v1/reports/daily/refresh").status_code == 202
         res = client.get("/api/v1/reports/daily")
         assert res.status_code == 200, res.text
         body = res.json()
