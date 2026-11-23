@@ -34,6 +34,11 @@ Format: `## YYYY-MM-DD — Decision` then Why / Alternatives considered.
 - Q1 answered 2026-11-23 10:42: A keeps a USD balance, so set FX conversions per round trip to 0 by default. £ figures use the live GBP/USD rate. Superseded earlier note: Q1 (broker FX) not answered. Defaulting to a configurable `FX_COST_PCT=0.0015` with 2 conversions per round trip. Set conversions to 0 if A holds USD.
 - The /upgrade proposals were also approved by A, but the facilitator's tool safety check blocked writing the reduced-review `team.md`. Nothing applied; A was asked to apply them or re-confirm in the thread.
 
+## 2026-11-23 — £ figures use a live GBP/USD quote (A)
+- **Why:** A asked for £ based on live prices.
+- **How:** fetch only the latest quote, cache it ~60s, and fall back to the stored daily `GBPUSD=X` close (refreshed by the data sync). Show the rate's timestamp and source (live or daily).
+- **Alternatives:** stored daily close only (stale intraday); full-history download per request (slow, the reviewer blocked it).
+
 ## 2026-11-22 — Work on local branch only until A pushes
 - **Why:** no GitHub credentials on this Mac; A will push at the end.
 - **Alternatives:** `gh auth login` now.
