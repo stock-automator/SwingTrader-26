@@ -22,7 +22,9 @@ from .loader import DATA_DIR, DataUnavailableError, load_prices
 GBPUSD_TICKER = "GBPUSD=X"
 LIVE_CACHE_TTL = timedelta(seconds=60)
 
-_live_cache: tuple[datetime, float] | None = None
+#: (fetched_at, price) of the last live attempt; price None = it failed, so
+#: an outage costs one provider timeout per TTL, not one per request.
+_live_cache: tuple[datetime, float | None] | None = None
 _offline: ContextVar[bool] = ContextVar("fx_offline", default=False)
 _data_dir: ContextVar[Path | str] = ContextVar("fx_data_dir", default=DATA_DIR)
 
@@ -50,15 +52,16 @@ def fx_context(data_dir: Path | str, offline: bool = False) -> Iterator[None]:
 def _live_quote(now: datetime) -> FxRate | None:
     global _live_cache
     if _live_cache is not None and now - _live_cache[0] < LIVE_CACHE_TTL:
-        return FxRate(_live_cache[1], _live_cache[0], "live")
+        fetched_at, cached = _live_cache
+        return None if cached is None else FxRate(cached, fetched_at, "live")
     try:
-        price = float(yf.Ticker(GBPUSD_TICKER).fast_info["last_price"])
+        price: float | None = float(yf.Ticker(GBPUSD_TICKER).fast_info["last_price"])
     except Exception:  # noqa: BLE001 - any provider failure means fall back
-        return None
-    if not math.isfinite(price) or price <= 0:
-        return None
+        price = None
+    if price is not None and (not math.isfinite(price) or price <= 0):
+        price = None
     _live_cache = (now, price)
-    return FxRate(price, now, "live")
+    return None if price is None else FxRate(price, now, "live")
 
 
 def _daily_rate(
