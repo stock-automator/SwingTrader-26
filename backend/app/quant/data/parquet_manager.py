@@ -39,6 +39,9 @@ DEFAULT_LOOKBACK_START = "2015-01-01"
 
 #: Local hour (24h) after which the current trading day is considered
 #: closed, for `latest_market_close`'s "has today's bar landed yet" check.
+#: US market time zone, for the "has today's session closed" check.
+NEW_YORK = "America/New_York"
+
 DEFAULT_MARKET_CLOSE_HOUR = 16
 
 #: Relative change in the Adj-Close/Close factor, at the shared anchor bar,
@@ -71,7 +74,14 @@ def latest_market_close(
             at. Before this hour on a trading day, that day hasn't
             produced a closing bar yet, so the answer rolls back one day.
     """
-    now = pd.Timestamp.now() if now is None else pd.Timestamp(now)
+    # The close is a New York event: judge it on New York wall-clock time.
+    # Aware timestamps (and the default "now") are converted to New York; a
+    # naive `now` is taken to already be New York time.
+    if now is None:
+        now = pd.Timestamp.now(tz=NEW_YORK)
+    now = pd.Timestamp(now)
+    if now.tzinfo is not None:
+        now = now.tz_convert(NEW_YORK).tz_localize(None)
     candidate = now.normalize()
     if now.hour < market_close_hour:
         candidate -= pd.Timedelta(days=1)
@@ -412,6 +422,12 @@ class ParquetSyncManager:
             end = now_ts.strftime("%Y-%m-%d")
 
             fresh_df = self.fetch_fn(ticker, start, end)
+            if fresh_df is not None and not fresh_df.empty:
+                # Never cache the bar of a session that hasn't closed yet:
+                # later syncs only append after the last cached day, so a
+                # partial bar would never be corrected.
+                last_close = latest_market_close(now, self.market_close_hour)
+                fresh_df = fresh_df[fresh_df.index.normalize() <= last_close]
             if fresh_df is None or fresh_df.empty:
                 existing = read_max_timestamp(path) if path.exists() else None
                 status = (
