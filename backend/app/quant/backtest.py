@@ -11,6 +11,10 @@ the same first common date:
     strategy      signal-driven backtest (`quant/engine.py`)
     buy_and_hold  the target asset, bought once at the window's first close
     spy           SPY, bought once at the window's first close
+    spy_exposure_matched
+                  SPY held only on the bars the strategy was invested, cash
+                  otherwise - so a low-exposure strategy is compared with
+                  the market at the same "% of time invested"
 
 Sharing a baseline *and* an index is what makes the curves comparable. A
 benchmark normalised to its own first bar rather than the strategy's, or
@@ -60,6 +64,20 @@ EQUITY_COLUMN = "Equity"
 STRATEGY_KEY = "strategy"
 BUY_HOLD_KEY = "buy_and_hold"
 SPY_KEY = "spy"
+MATCHED_SPY_KEY = "spy_exposure_matched"
+
+#: Below this many closed trades the result is mostly noise.
+MIN_TRADES_FOR_CONFIDENCE = 30
+
+SURVIVORSHIP_WARNING = (
+    "Survivorship bias: tickers are today's index members (current-constituent "
+    "universe), so names that were delisted or dropped are missing and "
+    "results are optimistic."
+)
+FRACTIONAL_WARNING = (
+    "Fractional sizing: this backtest trades fractional shares; live and "
+    "paper orders use whole shares, so they will size smaller or skip."
+)
 
 
 def _finite(value: float | None) -> float | None:
@@ -86,6 +104,8 @@ class CurveSummary:
     sharpe_ratio: float | None
     max_drawdown_pct: float | None
     volatility_pct: float | None
+    #: % of bars with capital invested (0-100).
+    exposure_pct: float | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -97,6 +117,7 @@ class CurveSummary:
             "sharpe_ratio": self.sharpe_ratio,
             "max_drawdown_pct": self.max_drawdown_pct,
             "volatility_pct": self.volatility_pct,
+            "exposure_pct": self.exposure_pct,
         }
 
 
@@ -163,6 +184,7 @@ class BenchmarkComparison:
     trades: pd.DataFrame
     trade_metrics: dict
     warnings: list[str] = field(default_factory=list)
+    skipped_signals: dict[str, int] = field(default_factory=dict)
 
     @property
     def start(self) -> pd.Timestamp:
@@ -314,7 +336,10 @@ def rebase(frame: pd.DataFrame, initial_capital: float) -> pd.DataFrame:
 
 
 def summarize_curve(
-    curve: pd.Series, label: str, risk_free_rate: float = 0.0
+    curve: pd.Series,
+    label: str,
+    risk_free_rate: float = 0.0,
+    exposure_pct: float | None = None,
 ) -> CurveSummary:
     """Absolute stats for one dollar curve."""
     initial_value = float(curve.iloc[0])
@@ -349,7 +374,29 @@ def summarize_curve(
         sharpe_ratio=_finite(stats.get("sharpe_ratio")),
         max_drawdown_pct=_finite(stats.get("max_drawdown_pct")),
         volatility_pct=_finite(volatility_pct),
+        exposure_pct=_finite(exposure_pct),
     )
+
+
+def invested_fraction(trades: pd.DataFrame, index: pd.Index) -> pd.Series:
+    """1.0 on bars where a trade from `run_backtest` is held at the close
+    (`EntryBar` up to, not including, `ExitBar`), else 0.0."""
+    delta = np.zeros(len(index) + 1)
+    if not trades.empty:
+        np.add.at(delta, trades["EntryBar"].to_numpy(dtype=int), 1)
+        np.add.at(delta, trades["ExitBar"].to_numpy(dtype=int), -1)
+    held = np.cumsum(delta)[: len(index)] > 0
+    return pd.Series(held.astype(float), index=index)
+
+
+def exposure_matched_curve(
+    benchmark: pd.Series, invested: pd.Series, initial_capital: float
+) -> pd.Series:
+    """`benchmark` held only while the strategy was invested at the prior
+    close, cash otherwise; `invested` is a 0-1 fraction on the same index."""
+    returns = benchmark.pct_change().fillna(0.0)
+    weight = invested.shift(1).fillna(0.0)
+    return (1 + returns * weight).cumprod() * initial_capital
 
 
 def relative_metrics(
@@ -455,6 +502,8 @@ def run_comparison(
     fee_per_share: float = 0.0,
     atr_slippage_multiple: float = 0.0,
     fx_cost_pct: float = 0.0,
+    fractional: bool = False,
+    use_risk_gate: bool = False,
 ) -> BenchmarkComparison:
     """Run `strategy` over `frames` and compare it to buy & hold and SPY.
 
@@ -482,6 +531,9 @@ def run_comparison(
             flat-rate `slippage_pct` model.
         fx_cost_pct: Per-leg currency-conversion cost, see
             `engine.run_backtest`. `0.0` adds nothing.
+        fractional / use_risk_gate: See `engine.run_backtest`. Entries the
+            risk gate refused are summed across sleeves in
+            `skipped_signals`.
 
     Raises:
         ValueError: if `frames` is empty, or a frame is too short to produce
@@ -492,10 +544,14 @@ def run_comparison(
 
     tickers = list(frames)
     sleeve_capital = initial_capital / len(tickers)
-    warnings: list[str] = []
+    warnings: list[str] = [SURVIVORSHIP_WARNING]
+    if fractional:
+        warnings.append(FRACTIONAL_WARNING)
 
     sleeve_curves: list[pd.Series] = []
+    sleeve_invested: list[pd.Series] = []
     all_trades: list[pd.DataFrame] = []
+    skipped: dict[str, int] = {}
 
     for ticker, df in frames.items():
         risk_manager = RiskManager(
@@ -510,21 +566,30 @@ def run_comparison(
             fee_per_share=fee_per_share,
             atr_slippage_multiple=atr_slippage_multiple,
             fx_cost_pct=fx_cost_pct,
+            fractional=fractional,
+            use_risk_gate=use_risk_gate,
         )
 
         sleeve_curves.append(extract_strategy_equity(result, sleeve_capital))
+        sleeve_invested.append(
+            invested_fraction(result.trades, result.equity_curve.index)
+        )
+        for reason, count in result.skipped_signals.items():
+            skipped[reason] = skipped.get(reason, 0) + count
 
         trades = result.trades.copy()
         if not trades.empty:
             trades.insert(0, "ticker", ticker)
             all_trades.append(trades)
-        else:
+        elif not fractional:
             warnings.append(
                 f"{ticker}: strategy took no trades in this window. With a "
                 f"${sleeve_capital:,.0f} sleeve, whole-share sizing rounds to "
                 "zero shares whenever the stop distance exceeds the risk "
                 "budget - raise initial capital or risk per trade."
             )
+        else:
+            warnings.append(f"{ticker}: strategy took no trades in this window.")
 
     # Sleeves are summed on the union of their dates, forward-filling each so
     # a ticker with a missing bar holds its last mark instead of dropping the
@@ -559,8 +624,31 @@ def run_comparison(
 
     aligned = rebase(align_curves(curves), initial_capital)
 
+    # Equal-weight sleeves: the portfolio's invested fraction is the mean.
+    invested = (
+        pd.concat(sleeve_invested, axis=1)
+        .ffill()
+        .fillna(0.0)
+        .mean(axis=1)
+        .reindex(aligned.index)
+        .fillna(0.0)
+    )
+    strategy_exposure = float(invested.mean()) * 100
+    exposures = {key: 100.0 for key in aligned.columns}
+    exposures[STRATEGY_KEY] = strategy_exposure
+    if SPY_KEY in aligned.columns:
+        aligned[MATCHED_SPY_KEY] = exposure_matched_curve(
+            aligned[SPY_KEY], invested, initial_capital
+        )
+        exposures[MATCHED_SPY_KEY] = strategy_exposure
+
     summaries = {
-        key: summarize_curve(aligned[key], _curve_label(key, tickers), risk_free_rate)
+        key: summarize_curve(
+            aligned[key],
+            _curve_label(key, tickers),
+            risk_free_rate,
+            exposure_pct=exposures[key],
+        )
         for key in aligned.columns
     }
 
@@ -583,6 +671,11 @@ def run_comparison(
     )
 
     trades = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
+    if len(trades) < MIN_TRADES_FOR_CONFIDENCE:
+        warnings.append(
+            f"Too few trades ({len(trades)}) to judge an edge: under "
+            f"{MIN_TRADES_FOR_CONFIDENCE}, the result is mostly noise."
+        )
     trade_metrics = compute_metrics(
         trades if not trades.empty else pd.DataFrame({"pnl": []}),
         equity_curve=aligned[STRATEGY_KEY],
@@ -604,6 +697,7 @@ def run_comparison(
             for k, v in trade_metrics.items()
         },
         warnings=warnings,
+        skipped_signals=skipped,
     )
 
 
@@ -614,6 +708,8 @@ def _curve_label(key: str, tickers: list[str]) -> str:
         return f"Buy & hold {'/'.join(tickers)}"
     if key == SPY_KEY:
         return f"{SPY_TICKER} (S&P 500 ETF)"
+    if key == MATCHED_SPY_KEY:
+        return f"{SPY_TICKER} at the strategy's exposure"
     return key
 
 
@@ -676,6 +772,7 @@ def comparison_to_payload(comparison: BenchmarkComparison) -> dict:
         "equity_curves": comparison.curve_records(),
         "trades": _trades_payload(comparison.trades),
         "warnings": comparison.warnings,
+        "skipped_signals": comparison.skipped_signals,
     }
 
 
