@@ -27,6 +27,13 @@ Format: `## YYYY-MM-DD — Decision` then Why / Alternatives considered.
 - Archive KVUE/WBD history to `data/delisted/`. Delete the untracked EA/AVB/EQR stubs. Add VMRK.
 - Fix the old deny list: BK→BNY and MMC→MRSH are renames, so add the new tickers. CTRA, K and WBA are real delistings.
 
+## 2026-11-23 — Batch 02 Gate 1 approved by A ("approved all")
+- Q2: the app sends Telegram itself, using a token in the local `.env`.
+- Q3: the backend runs always-on as a launchd service on 127.0.0.1.
+- Q4: the paper bot becomes a pure executor of the daily setups.
+- Q1 (broker FX): not answered. Defaulting to a configurable `FX_COST_PCT=0.0015` with 2 conversions per round trip. Set conversions to 0 if A holds USD.
+- The /upgrade proposals were also approved by A, but the facilitator's tool safety check blocked writing the reduced-review `team.md`. Nothing applied; A was asked to apply them or re-confirm in the thread.
+
 ## 2026-11-22 — Work on local branch only until A pushes
 - **Why:** no GitHub credentials on this Mac; A will push at the end.
 - **Alternatives:** `gh auth login` now.
