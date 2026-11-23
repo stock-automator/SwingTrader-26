@@ -26,11 +26,11 @@ from backend.app.quant.strategies.base import BaseStrategy
 
 REQUIRED_OHLCV_COLUMNS = ("Open", "High", "Low", "Close", "Volume")
 
-#: Trading 212 charges no per-share commission on its default long-term
-#: investing accounts, but IBKR's US stock tier does, and modelling *some*
+#: IBKR's US stock tier charges a per-share commission, and modelling *some*
 #: per-share friction is the point - $0.005/share (IBKR's own published
 #: tiered-pricing rate) is the default fixed maker/taker fee applied to both
-#: legs of a round trip when `fee_per_share` is set.
+#: legs of a round trip when `fee_per_share` is set. Currency conversion is
+#: modelled separately by `fx_cost_pct`.
 DEFAULT_FEE_PER_SHARE = 0.005
 
 #: A signal on bar `t` fills at bar `t+1`'s open - the realistic default:
@@ -110,6 +110,7 @@ def run_backtest(
     atr_slippage_multiple: float = 0.0,
     execution_mode: str = EXECUTION_MODE_NEXT_OPEN,
     direction: int | None = None,
+    fx_cost_pct: float = 0.0,
 ) -> BacktestResult:
     """Simulate `strategy` over historical `df` with realistic costs.
 
@@ -139,6 +140,9 @@ def run_backtest(
             `-1` to also allow short entries (`signal == -1` opens a short
             when flat, `signal == 1` closes an open short). When `None` the
             engine stays long-only exactly as before this parameter was added.
+        fx_cost_pct: Currency-conversion cost as a fraction of notional,
+            charged on each leg on top of `commission`/`fee_per_share`.
+            `0.0` (the default) adds nothing.
 
     Raises:
         ValueError: if `df` is missing a required OHLCV column, or
@@ -234,6 +238,13 @@ def run_backtest(
         if fee_per_share > 0
         else commission
     )
+    if fx_cost_pct > 0:
+        # backtesting.py calls this once per leg (entry and exit).
+        per_share = fee_per_share if fee_per_share > 0 else 0.0
+        rate = fx_cost_pct + (0.0 if fee_per_share > 0 else commission)
+        commission_param = (  # noqa: E731
+            lambda size, price: abs(size) * per_share + abs(size) * price * rate
+        )
     spread_param = (
         estimate_atr_spread_pct(df, atr_slippage_multiple)
         if atr_slippage_multiple > 0
