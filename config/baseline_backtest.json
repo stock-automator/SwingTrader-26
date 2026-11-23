@@ -1,0 +1,11 @@
+{
+  "strategy": "moving_average_cross",
+  "strategy_params": {},
+  "tickers": ["AAPL", "MSFT", "JPM", "XOM", "JNJ", "PG", "HD", "UNH", "V", "KO"],
+  "start": "2016-01-01",
+  "end": "2025-12-31",
+  "initial_capital": 10000,
+  "risk_per_trade_pct": 0.02,
+  "fractional": true,
+  "use_risk_gate": true
+}
