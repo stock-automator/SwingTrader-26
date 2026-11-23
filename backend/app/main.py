@@ -38,7 +38,6 @@ from .api.signals import router as signals_router
 from .api.universe import router as universe_router
 from .api.ws import router as live_feed_router
 from .config import get_settings
-from .data.universe import check_and_schedule_startup_sync
 from .scheduler import start_scheduler
 
 log = logging.getLogger(__name__)
@@ -89,13 +88,12 @@ app.include_router(live_feed_router)
 
 @app.on_event("startup")
 async def _start_scheduled_jobs() -> None:
-    """Universe refresh, 07:30 UK data sync and 08:00 UK daily brief, all
-    on one APScheduler - skipped entirely when `SCHEDULER_ENABLED=false`."""
+    """Monthly universe refresh, 07:30 UK data sync and 08:00 UK daily
+    brief, all on one APScheduler - skipped entirely when `SCHEDULER_ENABLED=false`."""
     settings = get_settings()
     if not settings.scheduler_enabled:
         log.info("scheduler disabled (SCHEDULER_ENABLED=false)")
         return
-    check_and_schedule_startup_sync()
     start_scheduler(app, settings)
 
 

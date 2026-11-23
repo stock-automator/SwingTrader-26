@@ -95,7 +95,9 @@ class Settings:
             can reach the API without hardcoding its current IP into
             `cors_origins`. `None` disables this (exact-match `cors_origins`
             only).
-        watchlist_path: Newline-delimited ticker list the screener scans.
+        universe_path: The ticker universe (`symbols` in a JSON file) the
+            screener, scans and data sync use; refreshed monthly by
+            `data.universe.UniverseManager`.
         screener_max_tickers: Hard cap on tickers scanned per screener call -
             a safety valve against an accidentally enormous watchlist, not a
             throttle. Loading is parallelized across `screener_max_workers`
@@ -163,7 +165,7 @@ class Settings:
     allow_downloads: bool = True
     cors_origins: tuple[str, ...] = field(default=DEFAULT_CORS_ORIGINS)
     cors_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX
-    watchlist_path: Path = Path("config/watchlist.txt")
+    universe_path: Path = Path("config/universe.json")
     screener_max_tickers: int = 750
     screener_max_workers: int = 16
     screener_min_avg_volume: float = 100_000.0
@@ -193,6 +195,11 @@ class Settings:
     def has_alpaca(self) -> bool:
         return bool(self.alpaca_api_key and self.alpaca_api_secret)
 
+    @property
+    def universe_status_path(self) -> Path:
+        """Outcome of the last universe sync attempt, for the weekly report."""
+        return self.universe_path.with_name("universe_status.json")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -211,7 +218,6 @@ def get_settings() -> Settings:
         ),
         cors_origin_regex=os.environ.get("CORS_ORIGIN_REGEX", DEFAULT_CORS_ORIGIN_REGEX)
         or None,
-        watchlist_path=Path(os.environ.get("WATCHLIST_PATH", "config/watchlist.txt")),
         screener_max_tickers=_env_int("SCREENER_MAX_TICKERS", 750),
         screener_max_workers=_env_int("SCREENER_MAX_WORKERS", 16),
         screener_min_avg_volume=_env_float("SCREENER_MIN_AVG_VOLUME", 100_000.0),

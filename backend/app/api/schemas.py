@@ -376,12 +376,25 @@ class DataSyncStatusResponse(BaseModel):
     results: list[SyncResultResponse]
 
 
+class UniverseChanges(BaseModel):
+    """Symbols added, removed and renamed by a universe sync."""
+
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    renamed: list[dict[str, str]] = Field(default_factory=list)
+
+
 class UniverseSyncResponse(BaseModel):
-    """`POST /api/v1/universe/sync` response."""
+    """`/api/v1/universe/sync` and `/symbols` response. `kept_previous`
+    means a source fell back or returned too few names, so the previous
+    list was kept unchanged."""
 
     symbols: list[str]
     synced_at: str
     source_counts: dict[str, int]
+    source_status: dict[str, str] = Field(default_factory=dict)
+    changes: UniverseChanges = Field(default_factory=UniverseChanges)
+    kept_previous: bool = False
 
 
 class MonteCarloRequest(BaseModel):

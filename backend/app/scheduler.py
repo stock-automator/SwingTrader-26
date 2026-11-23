@@ -1,10 +1,10 @@
-"""In-process scheduled jobs: the 07:30 UK data sync and the 08:00 UK brief.
+"""In-process scheduled jobs on Europe/London time (APScheduler follows UK
+clock changes): the 07:30 data sync and 08:00 brief, Monday to Friday, and
+the universe refresh at 07:00 on the 1st of each month.
 
-Both run Monday to Friday on Europe/London time (APScheduler follows UK
-clock changes). `coalesce=True` with a 6-hour `misfire_grace_time` means a
-Mac that slept through 08:00 runs each missed job once when it wakes, not
-once per missed day. The jobs share the process scheduler the universe
-refresh already uses (`data.universe._scheduler`), and only start when
+`coalesce=True` with a 6-hour `misfire_grace_time` means a Mac that slept
+through a run fires it once when it wakes, not once per missed run. The jobs
+share one process scheduler (`data.universe._scheduler`) and only start when
 `Settings.scheduler_enabled` (env `SCHEDULER_ENABLED`, default true).
 """
 
@@ -23,6 +23,7 @@ from apscheduler.triggers.cron import CronTrigger
 from .alerts.config_store import effective_channel_config
 from .alerts.dispatcher import TelegramAlertChannel
 from .api.data_sync import run_watchlist_sync
+from .api.universe import universe_manager
 from .config import Settings
 from .data import universe
 from .reports import daily
@@ -124,6 +125,13 @@ def send_daily_brief_job(settings: Settings) -> None:
 
 def build_jobs(settings: Settings) -> list[JobSpec]:
     return [
+        JobSpec(
+            id="universe_monthly",
+            func=_guarded(
+                "universe_monthly", lambda: universe_manager(settings).sync()
+            ),
+            trigger=CronTrigger(day=1, hour=7, minute=0, timezone=TIMEZONE),
+        ),
         JobSpec(
             id="data_sync",
             func=_guarded("data_sync", lambda: _sync(settings)),

@@ -16,7 +16,7 @@ import pandas as pd
 
 from ..config import Settings, get_settings
 from ..data.loader import DataUnavailableError, load_prices
-from ..data.universe import DENYLIST
+from ..data.universe import DENYLIST, UniverseManager
 
 log = logging.getLogger(__name__)
 
@@ -123,27 +123,17 @@ def load_frames(
 
 
 def _read_watchlist(settings: Settings) -> list[str]:
-    """Every ticker in `settings.watchlist_path`, one per line, uncapped,
-    with `data.universe.DENYLIST` symbols filtered out - delisted, renamed
-    or merged symbols (see `DENY_ENTRIES` in `data/universe.py`) that can
-    no longer be fetched, so retrying them against a live provider on
-    every screener/sync poll would just spam failed downloads. Empty if the file
-    doesn't exist."""
-    path = settings.watchlist_path
-    if not path.exists():
+    """Every symbol in `settings.universe_path`, uncapped, minus
+    `data.universe.DENYLIST` (delisted, renamed or merged symbols that can no
+    longer be fetched). Empty if the file is missing or malformed."""
+    universe = UniverseManager(config_path=settings.universe_path).read()
+    if universe is None:
         return []
-
-    return [
-        line.strip().upper()
-        for line in path.read_text().splitlines()
-        if line.strip()
-        and not line.strip().startswith("#")
-        and line.strip().upper() not in DENYLIST
-    ]
+    return [s for s in universe.symbols if s not in DENYLIST]
 
 
 def load_watchlist(settings: Settings) -> list[str]:
-    """Tickers from `settings.watchlist_path`, one per line, capped at
+    """Tickers from `settings.universe_path`, capped at
     `settings.screener_max_tickers`.
 
     Returns an empty list if the file doesn't exist rather than raising -
@@ -156,7 +146,7 @@ def load_watchlist(settings: Settings) -> list[str]:
 
 def watchlist_overflow(settings: Settings) -> int:
     """How many tickers `load_watchlist` silently drops off the end of
-    `settings.watchlist_path` for exceeding `screener_max_tickers`.
+    `settings.universe_path` for exceeding `screener_max_tickers`.
 
     `0` if the file fits under the cap or doesn't exist. Callers use this to
     surface a truncation warning instead of a scan that comes back short for
