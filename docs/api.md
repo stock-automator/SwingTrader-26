@@ -56,6 +56,9 @@ every number in the response is computed.
 | `include_buy_and_hold` | bool | `true` | Emit the buy & hold curve |
 | `benchmark` | string | `"SPY"` | Ticker for the second benchmark curve |
 | `fx_cost_pct` | float \| null | `null` | Currency-conversion cost per leg (fraction of notional), on top of commission; `>= 0`. `null` uses `FX_COST_PCT * FX_CONVERSIONS_PER_ROUND_TRIP / 2` (0 by default: USD balance) |
+| `walk_forward` | bool | `false` | Adds `oos_summary` (first field): out-of-sample return per 12-month-IS / 3-month-OOS window next to SPY's return over the same window |
+| `fractional` | bool | `false` | Backtest-only fractional shares (1/10,000 steps). Live and paper orders stay whole shares; the run is labelled in `warnings` |
+| `use_risk_gate` | bool | `false` | Size entries with the live gate (`build_risk_managed_order`: min 2.5R, 1-2% dynamic risk); refused entries are counted per reason in `skipped_signals` |
 
 Both `tickers` and `strategy` are validated by Pydantic: an empty/blank
 ticker list or an unregistered strategy name is rejected before any data is
@@ -124,6 +127,82 @@ curl -X POST http://localhost:8000/api/v1/backtest \
 `costs` echoes the cost inputs the run used. The block above is a real
 response with `FX_CONVERSIONS_PER_ROUND_TRIP=2`; with the default `0`,
 `fx_cost_pct_per_leg` is `0.0`.
+
+Every response also carries `oos_summary` (first; `null` unless
+`walk_forward`), `exposure_pct` (0-100, % of bars invested) on each summary,
+a `spy_exposure_matched` curve and summary (SPY held only while the strategy
+was invested; omitted without SPY) and `skipped_signals`. `warnings` always
+includes the survivorship label, plus a fractional label and a "too few
+trades" warning below 30 trades. Real excerpt (synthetic data via
+`TestClient`, `walk_forward`, `fractional` and `use_risk_gate` all `true`,
+windows and curves trimmed):
+
+```json
+{
+  "oos_summary": {
+    "is_window_months": 12,
+    "oos_window_months": 3,
+    "mean_oos_return_pct": 0.0,
+    "mean_spy_oos_return_pct": 2.2942583923937043,
+    "windows_beating_spy": 0,
+    "windows": [
+      {
+        "oos_start": "2024-01-02",
+        "oos_end": "2024-04-02",
+        "oos_return_pct": 0.0,
+        "spy_oos_return_pct": 2.843916380759959
+      },
+      {
+        "oos_start": "2024-04-02",
+        "oos_end": "2024-07-02",
+        "oos_return_pct": 0.0,
+        "spy_oos_return_pct": 1.776338340491157
+      }
+    ]
+  },
+  "strategy": "Moving Average Cross",
+  "headline": "$1,000 grown to $1,033 vs $1,217 in SPY vs $2,294 buying & holding AAPL",
+  "summaries": {
+    "strategy": {
+      "label": "Strategy",
+      "initial_value": 1000.0,
+      "final_value": 1032.95,
+      "total_return_pct": 3.295299160095233,
+      "cagr_pct": 1.4248730512108398,
+      "sharpe_ratio": 0.965513364091246,
+      "max_drawdown_pct": -0.9689520909379977,
+      "volatility_pct": 1.4232067477772492,
+      "exposure_pct": 3.166666666666667
+    },
+    "spy_exposure_matched": {
+      "label": "SPY at the strategy's exposure",
+      "initial_value": 1000.0,
+      "final_value": 995.58,
+      "total_return_pct": -0.4424827015979127,
+      "cagr_pct": -0.19333190281825008,
+      "sharpe_ratio": -0.1605383921112468,
+      "max_drawdown_pct": -1.5077900277346188,
+      "volatility_pct": 1.1228657726739666,
+      "exposure_pct": 3.166666666666667
+    }
+  },
+  "equity_curves": [
+    {
+      "date": "2025-04-18",
+      "strategy": 1032.95,
+      "buy_and_hold": 2294.34,
+      "spy": 1216.75,
+      "spy_exposure_matched": 995.58
+    }
+  ],
+  "skipped_signals": {},
+  "warnings": [
+    "Survivorship bias: tickers are today's index members (current-constituent universe), so names that were delisted or dropped are missing and results are optimistic.",
+    "Fractional sizing: this backtest trades fractional shares; live and paper orders use whole shares, so they will size smaller or skip.",
+    "Too few trades (1) to judge an edge: under 30, the result is mostly noise."
+  ]
+}
+```
 
 `vs_spy` and `vs_buy_and_hold` are `null` when that benchmark curve could
 not be built (e.g. SPY unreachable, `include_buy_and_hold: false`) — check

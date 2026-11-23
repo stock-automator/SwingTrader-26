@@ -199,6 +199,17 @@ fills, commission, and stop/target order mechanics. Optional, opt-in cost
 and fill parameters (`fee_per_share`, `atr_slippage_multiple`,
 `execution_mode`) are documented in the `run_backtest` docstring.
 
+Two more opt-in flags (both default `False`, which is bit-identical to the
+old behaviour):
+
+- `fractional=True` sizes in 1/10,000-share steps via
+  `backtesting.lib.FractionalBacktest`; `result.trades` comes back in real
+  shares and prices. **Backtests only**: `Order.shares` stays an `int`, and
+  live/paper orders stay whole shares (Alpaca can't do fractional brackets).
+- `use_risk_gate=True` sizes entries with `RiskManager.build_risk_managed_order`
+  (the live gate) at the signal bar's close; refused entries are counted per
+  reason in `result.skipped_signals` (`dict[str, int]`, empty otherwise).
+
 `result.trades` is the `backtesting` library's native trades DataFrame
 (`Size`, `EntryPrice`, `ExitPrice`, `PnL`, `ReturnPct`, `EntryTime`,
 `ExitTime`, ...) **plus a lowercase `pnl` alias column** (`pnl == PnL`).

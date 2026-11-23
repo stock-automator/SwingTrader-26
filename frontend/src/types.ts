@@ -166,6 +166,9 @@ export interface BacktestRequest {
   fx_cost_pct?: number | null;
   earnings_blackout: boolean;
   regime_gating: boolean;
+  walk_forward?: boolean;
+  fractional?: boolean;
+  use_risk_gate?: boolean;
 }
 
 export interface CurveSummary {
@@ -177,6 +180,7 @@ export interface CurveSummary {
   sharpe_ratio: number | null;
   max_drawdown_pct: number | null;
   volatility_pct: number | null;
+  exposure_pct: number | null;
 }
 
 export interface RelativeMetrics {
@@ -209,6 +213,7 @@ export interface EquityCurvePoint {
   strategy: number;
   buy_and_hold?: number;
   spy?: number;
+  spy_exposure_matched?: number;
 }
 
 export interface Trade {
@@ -222,7 +227,24 @@ export interface Trade {
   return_pct: number;
 }
 
+export interface OosWindow {
+  oos_start: string;
+  oos_end: string;
+  oos_return_pct: number | null;
+  spy_oos_return_pct: number | null;
+}
+
+export interface OosSummary {
+  is_window_months: number;
+  oos_window_months: number;
+  mean_oos_return_pct: number | null;
+  mean_spy_oos_return_pct: number | null;
+  windows_beating_spy: number;
+  windows: OosWindow[];
+}
+
 export interface BacktestResponse {
+  oos_summary: OosSummary | null;
   strategy: string;
   tickers: string[];
   initial_capital: number;
@@ -233,6 +255,7 @@ export interface BacktestResponse {
     strategy: CurveSummary;
     buy_and_hold?: CurveSummary;
     spy?: CurveSummary;
+    spy_exposure_matched?: CurveSummary;
   };
   vs_spy: RelativeMetrics | null;
   vs_buy_and_hold: RelativeMetrics | null;
@@ -241,6 +264,7 @@ export interface BacktestResponse {
   trades: Trade[];
   costs: BacktestCosts;
   warnings: string[];
+  skipped_signals: Record<string, number>;
 }
 
 export interface BacktestCosts {
