@@ -702,6 +702,71 @@ the error:
 
 ---
 
+## `/api/v1/reports/weekly` — weekly forward-test report
+
+Research and paper trading only. Alpaca paper fills (account activities,
+type `FILL`) are stored once each in the DuckDB table `broker_fills`, keyed
+by Alpaca's activity id, so re-fetching an overlap adds nothing. Each
+symbol's fills are netted in time order: a trade opens when the position
+leaves flat and closes when it is flat again, so partial fills and bracket
+legs count once. Entry and exit prices are volume-weighted.
+
+The report covers the Monday to Saturday week ending on the latest Saturday
+(UK), so a mid-week build shows the last full week. Net figures are after FX
+costs: `FX_COST_PCT` x `FX_CONVERSIONS_PER_ROUND_TRIP` x entry notional per
+trade, as in the order ticket. The vs-SPY line (average net trade return
+against SPY over the same holding days) appears only from 30 closed trades;
+before that it reads `n too small (n/30)`. Average R is `n/a`: fills carry
+no stop. The universe line comes from `config/universe_status.json`. The
+text is plain, one message under 4096 characters, and ends with the
+"Research only, paper trading" footer.
+
+The scheduler pulls fills Monday to Friday at 21:30 UK, and on Saturday at
+09:00 UK pulls fills again, then builds and sends the report to Telegram. A
+job missed while the Mac slept runs once on wake (up to 6 hours late). If
+the pull fails the report is still sent, with a `journal not updated`
+warning.
+
+Rollback: `DROP TABLE broker_fills` (nothing else reads it).
+
+### `GET /api/v1/reports/weekly`
+
+Builds the report from the stored fills. Alpaca is not called and nothing is
+sent. Real output (test fixture fills, built on Sat 21 Nov 2026 09:00 UK):
+
+```json
+{
+  "week_start": "2026-11-16",
+  "trades_this_week": 2,
+  "trades_total": 3,
+  "open_positions": 1,
+  "net_usd_total": 106.0,
+  "text": "SwingTrader weekly report, week of Mon 16 Nov 2026\nThis week: 2 closed trades, 1 win, net +$86.00 / +£68.80\n  AAA +$96.00 (10 sh, 100.70 to 110.30)\n  CCC -$10.00 (5 sh, 50.00 to 48.00)\nSince start: 3 closed trades, 2 wins (67%), net +$106.00 / +£84.80 after $0.00 costs, avg R n/a (no stops on fills)\nvs SPY: n too small (3/30)\nOpen positions: 1\nUniverse (sync 2026-11-01): +2 −1, 1 skipped\nAdded: NEW1, NEW2\nRemoved: OLD1\nGBP/USD 1.2500 (live, 2026-11-21 09:00)\n\nResearch only, paper trading. Not investment advice."
+}
+```
+
+### `POST /api/v1/reports/weekly/send`
+
+Pulls new fills from Alpaca, builds the report and sends it to the Telegram
+chat set by `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (or the Alerts tab).
+
+```json
+{"sent": true, "parts": 1, "error": null}
+```
+
+A Telegram or network failure is not a 500; the bot token is scrubbed from
+the error:
+
+```json
+{"sent": false, "parts": 0, "error": "400 Client Error: Bad Request for url: https://api.telegram.org/bot<token>/sendMessage"}
+```
+
+| Status | Cause |
+|---|---|
+| `503` | Telegram is not configured: `{"detail": "Telegram is not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your local .env."}` |
+
+---
+
 ## `/api/v1/execution/*` — Alpaca paper trading
 
 Every route 503s with a clear message if `ALPACA_API_KEY`/

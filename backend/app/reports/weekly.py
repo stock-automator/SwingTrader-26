@@ -70,7 +70,9 @@ def _spy_line(settings: Settings, trades: pd.DataFrame) -> str:
         return f"vs SPY: n too small ({n}/{MIN_TRADES_FOR_SPY})"
     try:
         spy = load_prices(
-            SPY_TICKER, data_dir=settings.data_dir, allow_download=settings.allow_downloads
+            SPY_TICKER,
+            data_dir=settings.data_dir,
+            allow_download=settings.allow_downloads,
         )["Close"].dropna()
     except DataUnavailableError:
         return "vs SPY: SPY prices unavailable"
@@ -97,7 +99,9 @@ def _universe_lines(settings: Settings) -> list[str]:
     changes = status.get("last_changes") or {}
     added, removed = changes.get("added") or [], changes.get("removed") or []
     skipped = len(changes.get("skipped") or [])
-    lines = [f"Universe (sync {when}): +{len(added)} −{len(removed)}, {skipped} skipped"]
+    lines = [
+        f"Universe (sync {when}): +{len(added)} −{len(removed)}, {skipped} skipped"
+    ]
     for label, names in (("Added", added), ("Removed", removed)):
         if names:
             more = len(names) - MAX_NAMES
@@ -242,4 +246,3 @@ def report_to_dict(report: WeeklyReport) -> dict:
         "net_usd_total": report.net_usd_total,
         "text": report.text,
     }
-

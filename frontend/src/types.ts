@@ -782,3 +782,17 @@ export interface DailyBriefSendResponse {
   parts: number;
   error: string | null;
 }
+
+/** `GET /api/v1/reports/weekly`: the forward-test report built from the
+ *  stored Alpaca fills; `week_start` is the Monday of the reported week. */
+export interface WeeklyReportResponse {
+  week_start: string;
+  trades_this_week: number;
+  trades_total: number;
+  open_positions: number;
+  net_usd_total: number;
+  text: string;
+}
+
+/** `POST /api/v1/reports/weekly/send`: same shape as the daily send. */
+export type WeeklyReportSendResponse = DailyBriefSendResponse;
