@@ -3,12 +3,15 @@ the improvement-experiment options (regime and trend entry filters)."""
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from backend.app.quant.portfolio import suspect_spike
+from backend.app.quant.portfolio import PortfolioConfig, suspect_spike
+from backend.app.quant.regime import MACRO_BLOCKED_REGIMES
 from backend.app.quant.scorecard import param_variants
 from backend.app.quant.strategies.base import BaseStrategy
+from tests.test_portfolio_scorecard_c3 import free, frame, neutral, run, signal_on
 
 
 def closes(seq: list[float], pad: int = 30) -> pd.Series:
@@ -69,3 +72,75 @@ def test_param_variants_keep_positive_int_params_at_one_or_more():
     assert lookback == [2]  # 0 would be invalid; 1 is the default itself
     assert period == [1, 3]
     assert all(v["value"] >= 1 for v in variants if v["param"] != "offset")
+
+
+# --------------------------------------------------------------------------
+# Long entry filters in PortfolioConfig (regime and trend)
+# --------------------------------------------------------------------------
+
+def test_long_filters_off_by_default():
+    c = PortfolioConfig()
+    assert c.long_blocked_regimes == frozenset()
+    assert c.long_trend_sma is None
+
+
+@pytest.mark.parametrize("blocked", sorted(MACRO_BLOCKED_REGIMES))
+def test_long_blocked_by_signal_day_regime(blocked):
+    df = signal_on(frame(), 5)
+    cfg = free(long_blocked_regimes=MACRO_BLOCKED_REGIMES)
+    regime = neutral(df.index)
+    regime.iloc[5] = blocked  # the signal bar's close, the fill day's t-1
+    res = run({"AAA": df}, cfg, regime=regime)
+    assert res.trades.empty
+    assert res.skipped["long blocked by regime"] == 1
+
+
+def test_long_regime_gate_ignores_fill_day_regime():
+    df = signal_on(frame(), 5)
+    cfg = free(long_blocked_regimes=MACRO_BLOCKED_REGIMES)
+    regime = neutral(df.index)
+    regime.iloc[6] = "BEAR_TRENDING"
+    assert len(run({"AAA": df}, cfg, regime=regime).trades) == 1
+
+
+def test_long_regime_gate_leaves_shorts_alone():
+    df = signal_on(frame(), 5, sig=-1)
+    cfg = free(allow_shorts=True, long_blocked_regimes=MACRO_BLOCKED_REGIMES)
+    regime = neutral(df.index)
+    regime.iloc[5] = "BEAR_TRENDING"
+    assert len(run({"AAA": df}, cfg, regime=regime).trades) == 1
+
+
+def trending(n: int, start: float, end: float):
+    df = frame(n)
+    line = np.linspace(start, end, n)
+    for col in ("Open", "Close"):
+        df[col] = line
+    df["High"], df["Low"] = line * 1.001, line * 0.999
+    return df
+
+
+def test_long_needs_close_above_trend_sma():
+    up = signal_on(trending(60, 50.0, 100.0), 30)
+    down = signal_on(trending(60, 100.0, 50.0), 30)
+    cfg = free(long_trend_sma=20)
+    res = run({"UP": up, "DOWN": down}, cfg, regime=neutral(up.index))
+    assert list(res.trades["ticker"]) == ["UP"]
+    assert res.skipped["long below trend SMA"] == 1
+
+
+def test_trend_sma_needs_full_window_of_history():
+    df = signal_on(trending(60, 50.0, 100.0), 10)  # 11 bars < 20-day SMA
+    res = run({"AAA": df}, free(long_trend_sma=20), regime=neutral(df.index))
+    assert res.trades.empty
+
+
+def test_trend_sma_warms_up_before_the_window():
+    df = signal_on(trending(60, 50.0, 100.0), 30)
+    res = run(
+        {"AAA": df},
+        free(long_trend_sma=20),
+        regime=neutral(df.index),
+        start=df.index[25],
+    )
+    assert len(res.trades) == 1
