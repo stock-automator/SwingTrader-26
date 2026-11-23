@@ -66,6 +66,7 @@ def _window_return_pct(
     risk_per_trade_pct: float,
     commission: float,
     slippage_pct: float,
+    engine_kwargs: dict | None = None,
 ) -> float | None:
     """Total return over `df_window`, or `None` if it's too short to
     backtest at all or the run otherwise fails - both treated as "no
@@ -84,6 +85,7 @@ def _window_return_pct(
             risk_manager,
             commission=commission,
             slippage_pct=slippage_pct,
+            **(engine_kwargs or {}),
         )
     except Exception:
         return None
@@ -540,3 +542,85 @@ def optimize_parameter_per_window(
         windows=stability_windows,
         drift_threshold_pct=drift_threshold_pct,
     )
+
+
+def _buy_and_hold_return_pct(df_window: pd.DataFrame) -> float | None:
+    if len(df_window) < 2:
+        return None
+    first, last = float(df_window["Close"].iloc[0]), float(df_window["Close"].iloc[-1])
+    return (last / first - 1) * 100 if first > 0 else None
+
+
+def _mean(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return sum(present) / len(present) if present else None
+
+
+def oos_summary(
+    strategy: BaseStrategy,
+    frames: dict[str, pd.DataFrame],
+    benchmark_df: pd.DataFrame | None,
+    is_months: int = 12,
+    oos_months: int = 3,
+    initial_capital: float = 1000.0,
+    risk_per_trade_pct: float = 0.02,
+    commission: float = 0.001,
+    slippage_pct: float = 0.0005,
+    **engine_kwargs,
+) -> dict:
+    """Out-of-sample return per walk-forward window next to the benchmark's
+    buy-and-hold return over the same window - the honest headline.
+
+    Each ticker is scored on its own (as `run_comparison`'s equal-weight
+    sleeves are) and the window's `oos_return_pct` is their mean. Windows
+    come from the dates every frame shares. `engine_kwargs` go through to
+    `run_backtest` (e.g. `fractional`, `use_risk_gate`, `fee_per_share`).
+    """
+    common = None
+    for df in frames.values():
+        common = df.index if common is None else common.intersection(df.index)
+    windows = generate_windows(common, is_months, oos_months)
+
+    rows = []
+    for _, _, oos_start, oos_end in windows:
+        oos = _mean(
+            [
+                _window_return_pct(
+                    strategy,
+                    _slice_window(df, oos_start, oos_end),
+                    initial_capital / len(frames),
+                    risk_per_trade_pct,
+                    commission,
+                    slippage_pct,
+                    engine_kwargs,
+                )
+                for df in frames.values()
+            ]
+        )
+        spy = (
+            _buy_and_hold_return_pct(_slice_window(benchmark_df, oos_start, oos_end))
+            if benchmark_df is not None
+            else None
+        )
+        rows.append(
+            {
+                "oos_start": oos_start.strftime("%Y-%m-%d"),
+                "oos_end": oos_end.strftime("%Y-%m-%d"),
+                "oos_return_pct": oos,
+                "spy_oos_return_pct": spy,
+            }
+        )
+
+    beat = [
+        r["oos_return_pct"] > r["spy_oos_return_pct"]
+        for r in rows
+        if r["oos_return_pct"] is not None and r["spy_oos_return_pct"] is not None
+    ]
+    return {
+        "is_window_months": is_months,
+        "oos_window_months": oos_months,
+        "mean_oos_return_pct": _mean([r["oos_return_pct"] for r in rows]),
+        "mean_spy_oos_return_pct": _mean([r["spy_oos_return_pct"] for r in rows]),
+        "windows_beating_spy": sum(beat),
+        "windows": rows,
+    }

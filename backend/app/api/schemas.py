@@ -88,6 +88,18 @@ class BacktestRequest(BaseModel):
         default=False,
         description="Suppress long entries while the SPY macro regime is BEAR_TRENDING or HIGH_VOLATILITY_CHOP.",
     )
+    walk_forward: bool = Field(
+        default=False,
+        description="Add `oos_summary`: out-of-sample return per walk-forward window vs SPY.",
+    )
+    fractional: bool = Field(
+        default=False,
+        description="Backtest-only fractional shares. Live/paper orders stay whole shares.",
+    )
+    use_risk_gate: bool = Field(
+        default=False,
+        description="Size entries with the live risk gate; refused entries are counted in `skipped_signals`.",
+    )
 
     @field_validator("tickers")
     @classmethod
@@ -115,6 +127,7 @@ class CurveSummaryResponse(BaseModel):
     sharpe_ratio: float | None
     max_drawdown_pct: float | None
     volatility_pct: float | None
+    exposure_pct: float | None = None
 
 
 class RelativeMetricsResponse(BaseModel):
@@ -140,7 +153,27 @@ class BacktestCostsResponse(BaseModel):
     fx_cost_pct_per_leg: float
 
 
+class OosWindowResponse(BaseModel):
+    oos_start: str
+    oos_end: str
+    oos_return_pct: float | None
+    spy_oos_return_pct: float | None
+
+
+class OosSummaryResponse(BaseModel):
+    """Walk-forward out-of-sample results vs SPY (`walk_forward=true`)."""
+
+    is_window_months: int
+    oos_window_months: int
+    mean_oos_return_pct: float | None
+    mean_spy_oos_return_pct: float | None
+    windows_beating_spy: int
+    windows: list[OosWindowResponse]
+
+
 class BacktestResponse(BaseModel):
+    # Out-of-sample first: it is the honest headline when requested.
+    oos_summary: OosSummaryResponse | None = None
     strategy: str
     tickers: list[str]
     initial_capital: float
@@ -155,6 +188,7 @@ class BacktestResponse(BaseModel):
     trades: list[dict]
     costs: BacktestCostsResponse
     warnings: list[str]
+    skipped_signals: dict[str, int] = Field(default_factory=dict)
 
 
 class SetupResponse(BaseModel):
