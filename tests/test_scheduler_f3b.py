@@ -16,6 +16,8 @@ import os
 import plistlib
 import re
 import stat
+import threading
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -220,10 +222,11 @@ class TestF3bJobs:
 
 class _FakeScheduler:
     def __init__(self):
-        self.jobs, self.started = {}, False
+        self.jobs, self.funcs, self.started = {}, {}, False
 
     def add_job(self, func, trigger=None, id=None, **kw):
         self.jobs[id] = kw
+        self.funcs[id] = func
 
     def start(self):
         self.started = True
@@ -458,3 +461,274 @@ class TestF3bRepoFiles:
         assert script.exists()
         assert script.stat().st_mode & stat.S_IXUSR
         assert os.access(script, os.X_OK)
+
+
+# ------------------------------------------- rework 1: concurrency, order
+
+# Interface notes for the developer:
+# - one process-wide lock serialises brief builds + cache writes;
+# - the scheduler module keeps `run_watchlist_sync` as a module-level name
+#   (tests patch `backend.app.scheduler.run_watchlist_sync`);
+# - "today's sync done" is tracked per `settings.data_dir` (tests use a fresh
+#   tmp_path each) and a running sync is waited for by the brief job;
+# - `start_scheduler(app, settings, now=None)`; the catch-up is a one-off
+#   job with id "brief_catch_up" whose zero-arg func runs sync -> brief.
+
+
+class _SlowBuilder:
+    """Blocks inside the build until released; tracks overlapping builds."""
+
+    def __init__(self):
+        self.entered, self.release = threading.Event(), threading.Event()
+        self.calls = self.active = self.max_active = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, settings, *a, **k):
+        with self._lock:
+            self.calls += 1
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        self.entered.set()
+        self.release.wait(5)
+        with self._lock:
+            self.active -= 1
+        return _canned_brief()
+
+
+@pytest.fixture
+def slow_builder(monkeypatch):
+    from backend.app.reports import daily
+
+    fake = _SlowBuilder()
+    monkeypatch.setattr(daily, "build_daily_brief", fake)
+    return fake
+
+
+def _thread(fn, *a):
+    t = threading.Thread(target=fn, args=a, daemon=True)
+    t.start()
+    return t
+
+
+@pytest.fixture
+def sync_log(monkeypatch):
+    """Record sync calls; the daily builder also logs into the same list."""
+    from backend.app.reports import daily
+
+    log: list[str] = []
+    monkeypatch.setattr(
+        "backend.app.scheduler.run_watchlist_sync", lambda s: log.append("sync")
+    )
+
+    def build(settings, *a, **k):
+        log.append("build")
+        return _canned_brief()
+
+    monkeypatch.setattr(daily, "build_daily_brief", build)
+    return log
+
+
+class TestF3bConcurrency:
+    def test_f3b_refresh_while_running_is_already_running(self, tmp_path, slow_builder):
+        settings = _settings(tmp_path)
+        _use(settings)
+        try:
+            first = _thread(
+                lambda: TestClient(app).post("/api/v1/reports/daily/refresh")
+            )
+            assert slow_builder.entered.wait(3)
+            res = TestClient(app).post("/api/v1/reports/daily/refresh")
+            assert res.status_code == 202, res.text
+            assert res.json() == {"status": "already_running"}
+            assert slow_builder.calls == 1  # no second build queued
+            slow_builder.release.set()
+            first.join(5)
+        finally:
+            slow_builder.release.set()
+            app.dependency_overrides.pop(get_settings, None)
+        assert slow_builder.calls == 1 and slow_builder.max_active == 1
+
+    def test_f3b_refresh_when_idle_still_starts(self, tmp_path, builder, client):
+        _use(_settings(tmp_path))
+        res = client.post("/api/v1/reports/daily/refresh")
+        assert res.status_code == 202 and res.json() == {"status": "started"}
+        # and a second refresh after the first finished is not blocked
+        assert client.post("/api/v1/reports/daily/refresh").json() == {
+            "status": "started"
+        }
+        assert builder.calls == 2
+
+    def test_f3b_brief_job_during_rebuild_skips_or_waits_never_overlaps(
+        self, tmp_path, slow_builder, monkeypatch
+    ):
+        monkeypatch.setattr("backend.app.scheduler.run_watchlist_sync", lambda s: None)
+        from backend.app.reports import daily
+
+        settings = _settings(tmp_path)
+        first = _thread(daily.refresh_cached_brief, settings)
+        assert slow_builder.entered.wait(3)
+        job = _thread(_jobs(settings)["daily_brief"].func)
+        time.sleep(0.3)
+        assert slow_builder.max_active == 1
+        slow_builder.release.set()
+        first.join(5)
+        job.join(5)
+        assert not job.is_alive()
+        assert slow_builder.max_active == 1  # one writer at a time
+        assert json.loads(_cache(settings).read_text())["text"] == CANNED_TEXT
+
+    def test_f3b_many_concurrent_refreshes_single_writer(self, tmp_path, slow_builder):
+        from backend.app.reports import daily
+
+        settings = _settings(tmp_path)
+        threads = [_thread(daily.refresh_cached_brief, settings) for _ in range(4)]
+        assert slow_builder.entered.wait(3)
+        time.sleep(0.2)
+        slow_builder.release.set()
+        for t in threads:
+            t.join(5)
+        assert slow_builder.max_active == 1
+        json.loads(_cache(settings).read_text())  # intact JSON
+
+
+class TestF3bBriefAfterSync:
+    def test_f3b_brief_job_syncs_first_when_not_done_today(self, tmp_path, sync_log):
+        _jobs(_settings(tmp_path))["daily_brief"].func()
+        assert sync_log == ["sync", "build"]
+
+    def test_f3b_brief_job_skips_sync_when_todays_sync_done(self, tmp_path, sync_log):
+        jobs = _jobs(_settings(tmp_path))
+        jobs["data_sync"].func()
+        jobs["daily_brief"].func()
+        assert sync_log == ["sync", "build"]  # exactly one sync
+
+    def test_f3b_brief_job_waits_for_running_sync(self, tmp_path, monkeypatch):
+        from backend.app.reports import daily
+
+        log: list[str] = []
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_sync(settings):
+            log.append("sync-start")
+            entered.set()
+            release.wait(5)
+            log.append("sync-end")
+
+        monkeypatch.setattr("backend.app.scheduler.run_watchlist_sync", slow_sync)
+        monkeypatch.setattr(
+            daily,
+            "build_daily_brief",
+            lambda s, *a, **k: log.append("build") or _canned_brief(),
+        )
+        jobs = _jobs(_settings(tmp_path))
+        sync = _thread(jobs["data_sync"].func)
+        assert entered.wait(3)
+        brief = _thread(jobs["daily_brief"].func)
+        time.sleep(0.3)
+        assert "build" not in log  # still waiting for the sync
+        release.set()
+        sync.join(5)
+        brief.join(5)
+        assert log == ["sync-start", "sync-end", "build"]
+
+    def test_f3b_brief_job_still_builds_if_sync_fails(
+        self, tmp_path, builder, monkeypatch
+    ):
+        def boom(settings):
+            raise RuntimeError("yfinance down")
+
+        monkeypatch.setattr("backend.app.scheduler.run_watchlist_sync", boom)
+        settings = _settings(tmp_path)
+        _jobs(settings)["daily_brief"].func()
+        assert builder.calls == 1 and _cache(settings).exists()
+
+
+def _start(tmp_path, monkeypatch, now, cache_computed_at=None):
+    from backend.app.data import universe
+    from backend.app.scheduler import start_scheduler
+
+    fake = _FakeScheduler()
+    monkeypatch.setattr(universe, "_scheduler", fake)
+    settings = _settings(tmp_path, scheduler_enabled=True)
+    if cache_computed_at is not None:
+        path = _cache(settings)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        body = {"text": CANNED_TEXT, "computed_at": cache_computed_at.isoformat()}
+        path.write_text(json.dumps(body))
+    start_scheduler(FastAPI(), settings, now=now)
+    return fake
+
+
+class TestF3bCatchUp:
+    # Mon 23 Nov 2026 (GMT, UK == UTC).
+    def test_f3b_catch_up_scheduled_weekday_after_8_no_brief_today(
+        self, tmp_path, monkeypatch, sync_log
+    ):
+        fake = _start(tmp_path, monkeypatch, datetime(2026, 11, 23, 9, 30, tzinfo=UK))
+        assert "brief_catch_up" in fake.funcs
+        fake.funcs["brief_catch_up"]()
+        assert sync_log == ["sync", "build"]
+
+    def test_f3b_catch_up_when_cache_is_from_yesterday(
+        self, tmp_path, monkeypatch, sync_log
+    ):
+        fake = _start(
+            tmp_path,
+            monkeypatch,
+            datetime(2026, 11, 23, 9, 30, tzinfo=UK),
+            cache_computed_at=datetime(2026, 11, 20, 8, 0, tzinfo=UK),
+        )
+        assert "brief_catch_up" in fake.funcs
+
+    def test_f3b_no_catch_up_when_brief_exists_today(self, tmp_path, monkeypatch):
+        fake = _start(
+            tmp_path,
+            monkeypatch,
+            datetime(2026, 11, 23, 9, 30, tzinfo=UK),
+            cache_computed_at=datetime(2026, 11, 23, 8, 1, tzinfo=UK),
+        )
+        assert "brief_catch_up" not in fake.funcs
+        assert {"data_sync", "daily_brief"} <= set(fake.funcs)
+
+    @pytest.mark.parametrize(
+        "now",
+        [
+            datetime(2026, 11, 21, 10, 0, tzinfo=UK),  # Saturday
+            datetime(2026, 11, 22, 10, 0, tzinfo=UK),  # Sunday
+            datetime(2026, 11, 23, 7, 59, tzinfo=UK),  # Monday before 08:00
+        ],
+    )
+    def test_f3b_no_catch_up_weekend_or_before_8(self, tmp_path, monkeypatch, now):
+        fake = _start(tmp_path, monkeypatch, now)
+        assert "brief_catch_up" not in fake.funcs
+
+    def test_f3b_catch_up_uses_london_time_in_summer(self, tmp_path, monkeypatch):
+        # 07:30 UTC on a BST day is 08:30 London: past 08:00, so catch up.
+        now = datetime(2026, 7, 1, 7, 30, tzinfo=ZoneInfo("UTC"))
+        fake = _start(tmp_path, monkeypatch, now)
+        assert "brief_catch_up" in fake.funcs
+
+    def test_f3b_disabled_scheduler_schedules_no_catch_up(self, tmp_path, monkeypatch):
+        from backend.app.data import universe
+        from backend.app.scheduler import start_scheduler
+
+        fake = _FakeScheduler()
+        monkeypatch.setattr(universe, "_scheduler", fake)
+        start_scheduler(
+            FastAPI(),
+            _settings(tmp_path, scheduler_enabled=False),
+            now=datetime(2026, 11, 23, 9, 30, tzinfo=UK),
+        )
+        assert fake.funcs == {}
+
+
+class TestF3bInstallScriptRetry:
+    def test_f3b_install_script_waits_between_bootout_and_bootstrap(self):
+        text = (REPO / "scripts" / "install_launchd.sh").read_text()
+        out = text.index("\nlaunchctl bootout")
+        boot = text.index("\nlaunchctl bootstrap")
+        assert out < boot
+        between = text[out:boot]
+        assert re.search(r"\bsleep\b", between), "no wait after bootout"
+        # and bootstrap itself is retried, not a single bare attempt
+        assert re.search(r"\b(for|while|until)\b", text[out:]), "no retry loop"
