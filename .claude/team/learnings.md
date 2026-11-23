@@ -1,5 +1,8 @@
 # Team learnings
 
+<!-- newest operational lesson pinned here until the next /retro files it -->
+- 2026-11-23 [developer] [bug] `latest_market_close` used the Mac's UK local time, so a 17:43 London sync (12:43 New York) cached a partial Monday bar that append-only syncs never correct. Judge market events on America/New_York time, and never write bars from an unfinished session. (bfefed4)
+
 Every agent reads this before starting. One line per lesson, newest at the bottom:
 `- YYYY-MM-DD [role] [bug|misunderstanding|process|domain|skill] lesson (evidence)`
 Repeat lessons get `(+1 YYYY-MM-DD)`; 3+ occurrences get `⚑ RULE CANDIDATE`.

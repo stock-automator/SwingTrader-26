@@ -34,4 +34,5 @@ Status: `todo` | `in-progress` | `blocked` | `done`. Priority P1–P3.
 | U-6 | As A, I want the daily brief to explain regime names in plain English and show how many stocks were screened and why they were rejected. | P3 | todo | F3a customer notes. |
 | D-2 | As A, I want spin-off price gaps adjusted (e.g. CTVA's close fell 84.8% on 2026-09-15 when Vylor separated) so that backtests and signals aren't fooled by a fake crash. | P2 | todo | F4 reviewer, 2026-11-23. Also check DD→Q, HON→HONA, FDX→FDXF. Use the ticker-lifecycle-check skill. |
 | U-7 | As A, I want company-name changes (e.g. BK→BNY) recognised as renames in the monthly refresh, not as remove + add. | P3 | todo | F4 reviewer note. Rename matching only covers same-name ticker changes (FI→FISV). |
+| P-2 | As A, I want /api/v1/data/health to load in under a few seconds. | P2 | todo | It took ~100 s in the 2026-11-23 demo recording (scans every parquet). Cache the result or read footers only. |
 | Q-1 | Decide whether `data/raw/*.parquet` (~74MB) should stay tracked in git. | P3 | todo | It's tracked while the docs say it's a gitignored cache. Open question from the Sprint 6 audit. |
