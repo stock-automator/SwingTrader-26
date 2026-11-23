@@ -157,8 +157,8 @@ def test_max_open_positions():
 
 
 def test_heat_cap_limits_total_open_risk():
-    # Each trade risks exactly 1% ($100 = 10 sh x $10); 6% heat allows 6.
-    frames = {f"T{i}": signal_on(frame(), 5, sl=0.10, tp=0.20) for i in range(7)}
+    # Each trade risks exactly 1% ($100 = 8 sh x $12.50); 6% heat allows 6.
+    frames = {f"T{i}": signal_on(frame(), 5, sl=0.125, tp=0.25) for i in range(7)}
     res = run(frames, free(max_positions=10))
     assert len(res.trades) == 6
     assert res.skipped["heat cap"] == 1
@@ -295,10 +295,10 @@ def test_costs_reduce_pnl():
 
 def test_exposure_and_invested():
     res = run({"AAA": signal_on(frame(), 5, sl=0.05)})
-    # Held from fill (day 6) through the time-stop close (day 46).
-    assert res.exposure_pct == pytest.approx(41 / 120 * 100)
+    # Invested at the closes of days 6-45; flat after the day-46 time stop.
+    assert res.exposure_pct == pytest.approx(40 / 120 * 100)
     # 20 shares x $100 = 20% of $10,000 on held days.
-    assert res.avg_invested_pct == pytest.approx(41 / 120 * 20, rel=1e-3)
+    assert res.avg_invested_pct == pytest.approx(40 / 120 * 20, rel=1e-3)
 
 
 def test_trade_columns():
