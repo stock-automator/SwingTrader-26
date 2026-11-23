@@ -173,10 +173,12 @@ class AlpacaExecutionClient:
         stop_loss: float,
         take_profit: float,
         limit_price: float | None = None,
+        client_order_id: str | None = None,
     ) -> dict:
         """Places a bracket (entry + OCO stop-loss/take-profit) order - a
         market entry if `limit_price` is `None`, otherwise a limit entry.
-        Bracket orders require GTC time-in-force. Raises
+        Bracket orders require GTC time-in-force. `client_order_id` tags the
+        order (e.g. its shortlist strategy) for later attribution. Raises
         `AlpacaNotConfiguredError` if no credentials are set."""
         client = self._require_client()
         common: dict[str, Any] = dict(
@@ -187,6 +189,7 @@ class AlpacaExecutionClient:
             order_class=OrderClass.BRACKET,
             take_profit=TakeProfitRequest(limit_price=take_profit),
             stop_loss=StopLossRequest(stop_price=stop_loss),
+            client_order_id=client_order_id,
         )
         request = (
             MarketOrderRequest(**common)

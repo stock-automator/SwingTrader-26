@@ -635,6 +635,14 @@ class ExecutionOrderRequest(BaseModel):
         "only if the Alpaca account holds at least qty long of the ticker; "
         "every other order is guarded as an entry.",
     )
+    client_order_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+        description="Alpaca client order id, e.g. the paper executor's "
+        "strategy tag. BRACKET orders only.",
+    )
 
     @field_validator("ticker")
     @classmethod
