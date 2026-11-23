@@ -603,7 +603,7 @@ button per channel in the UI. Body: `{"channel": "telegram" | "discord" |
 ## `/api/v1/reports/daily` — daily Telegram brief
 
 Research and paper trading only. Builds the 08:00 UK brief from the cached
-prices (`DATA_DIR`) and the watchlist (`WATCHLIST_PATH`): up to 3 long
+prices (`DATA_DIR`) and the universe (`config/universe.json`): up to 3 long
 setups, one per ticker, best reward:risk first, sized in whole shares
 ($1,000 account, 2% risk). Setups inside the earnings/split lockout
 (`EARNINGS_LOCKOUT_HOURS`) are dropped, and so is any setup whose earnings
@@ -1052,31 +1052,47 @@ Most recent jobs first, capped at 50 — job summaries only (no `results` or
 
 ---
 
-## `/api/v1/universe/*` — dynamic S&P 500 + Nasdaq-100 universe
+## `/api/v1/universe/*` — S&P 500 + Nasdaq-100 universe
 
-`backend/app/data/universe.py`'s `UniverseManager` fetches, sanitizes,
-dedupes, and DENYLIST-filters the trading universe, persisting to
-`config/universe.json` (gitignored, generated). This router only exposes it
-over HTTP.
+`config/universe.json` is the only ticker list: the screener, scans, brief and
+data sync all read its `symbols`. `backend/app/data/universe.py`'s
+`UniverseManager` refreshes it from Wikipedia at 07:00 UK on the 1st of each
+month (scheduler job `universe_monthly`). A sync:
+
+- keeps the previous file unchanged (`kept_previous: true`, logged as a
+  warning) if a source fails (`source_status` "fallback") or returns too few
+  names (S&P 500 under 450, Nasdaq-100 under 90);
+- reports `changes` against the previous file: `added`, `removed` (flagged
+  only, their price files are kept) and `renamed` (`{"old", "new"}`, matched
+  on company name, e.g. FI to FISV);
+- fetches price history for new and renamed-to names;
+- records each attempt in `config/universe_status.json` (`last_attempt`,
+  `kept_previous`, `reason`, `source_status`, `last_changes`) for the weekly
+  report.
 
 ### `POST /api/v1/universe/sync`
 
-Runs a fresh sync (network/Wikipedia fetch + parquet scan) off the event
-loop via `asyncio.to_thread`.
+Runs a sync now, off the event loop.
 
 ### `GET /api/v1/universe/symbols`
 
-Returns the current `config/universe.json` contents, syncing first if the
-universe has never been synced or is more than 24h stale — no "call sync
-once before this ever works" step to remember on a fresh checkout.
+Returns the stored universe without re-syncing (it syncs only if no universe
+file exists yet); `changes` are those of the last sync.
 
-Both return the same shape:
+Both return the same shape (real response, lists shortened):
 
 ```json
 {
-  "symbols": ["AAPL", "MSFT", "..."],
-  "synced_at": "2026-09-20T14:00:00+00:00",
-  "source_counts": { "sp500": 503, "nasdaq100": 101 }
+  "symbols": ["A", "AAPL", "ABBV", "..."],
+  "synced_at": "2026-11-23T13:04:51.652283+00:00",
+  "source_counts": { "sp500": 503, "nasdaq100": 101 },
+  "source_status": { "sp500": "live", "nasdaq100": "live" },
+  "changes": {
+    "added": ["ALAB", "ALNY", "ARES", "BE", "..."],
+    "removed": ["AZN", "CTVA", "EA", "GFS", "KVUE", "TEAM", "TTD", "WBD", "ZS"],
+    "renamed": []
+  },
+  "kept_previous": false
 }
 ```
 

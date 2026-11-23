@@ -240,11 +240,16 @@ today" with the reason. It is research only, for paper trading.
 
 ### Daily brief schedule
 
-While the backend runs, it does two jobs Monday to Friday, on UK time
-(clock changes handled):
+While the backend runs, it does these jobs on UK time (clock changes
+handled):
 
-- **07:30** syncs the watchlist, GBP/USD and SPY prices into `DATA_DIR`.
-- **08:00** builds the brief, caches it (`GET /api/v1/reports/daily` serves
+- **07:00 on the 1st of each month** refreshes the ticker universe
+  (`config/universe.json`, S&P 500 + Nasdaq-100). If Wikipedia fails or looks
+  wrong it keeps last month's list and records why in
+  `config/universe_status.json`.
+- **07:30**, Monday to Friday, syncs the universe, GBP/USD and SPY prices
+  into `DATA_DIR`.
+- **08:00**, Monday to Friday, builds the brief, caches it (`GET /api/v1/reports/daily` serves
   that copy) and sends it to Telegram if configured. With Alpaca keys it
   also shows `Day trades used: n/3 (last 5 days)`.
 
@@ -304,7 +309,6 @@ cp .env.example .env
 | `ALLOW_DOWNLOADS` | `true` | Whether the backend may fetch a ticker it doesn't have cached. Set to `false` to run fully offline against only what's already downloaded. |
 | `DATA_DIR` | `data/raw` | Folder where downloaded price data is cached, so repeat requests don't re-download. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Which frontend URLs the backend will accept requests from. Only change this if you're hosting the frontend somewhere other than your own machine. |
-| `WATCHLIST_PATH` | `config/watchlist.txt` | The list of tickers the live screener scans (one per line — already comes with ~500 S&P 500-ish names). |
 | `SCREENER_MAX_TICKERS` | `750` | Caps how many tickers one screener scan checks — a safety valve against an accidentally enormous watchlist, not a throttle (loading is parallelized, see below). |
 | `SCREENER_MAX_WORKERS` | `16` | Thread-pool size used to fetch tickers concurrently; also the de facto rate limit against the data provider. |
 | `SCREENER_MIN_AVG_VOLUME` | `100000` | Tickers below this trailing average daily volume are skipped as `VOLUME_FILTER_FAILED` rather than scanned. |
@@ -546,7 +550,7 @@ scripts/
 deploy/launchd/            launchd plist for the backend
 tests/                     pytest suite, one file per backend/app module
 config/
-  watchlist.txt             Ticker universe the screener scans
+  universe.json             The ticker universe (S&P 500 + Nasdaq-100), refreshed monthly
 data/raw/                  Cached OHLCV parquet files
 docker-compose.yml          One-command local run via Docker
 AGENTS.md                  Engineering contract for strategies/risk/engines
