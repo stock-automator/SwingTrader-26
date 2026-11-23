@@ -188,8 +188,10 @@ def numeric_params(cls: type) -> dict[str, int | float]:
 
 
 def param_variants(name: str, cls: type | None = None) -> list[dict]:
-    """Each numeric param at -20% and +20%. Ints round and stay >= 1; an int
-    whose +/-20% rounds back to its default (0, 2) steps by -1 and +1."""
+    """Each numeric param at -20% and +20%. Ints round; one whose +/-20%
+    rounds back to its default (0, 1, 2) steps by -1 and +1. An int with a
+    default of 1 or more (a period or count) stays >= 1, and a variant equal
+    to the default is dropped (default 1 gives just 2)."""
     cls = cls or REGISTRY[name]
     variants = []
     for param, default in numeric_params(cls).items():
@@ -198,8 +200,9 @@ def param_variants(name: str, cls: type | None = None) -> list[dict]:
             values = [int(round(v)) for v in values]
             if default in values:
                 values = [default - 1, default + 1]
-            else:
-                values = [max(1, v) for v in values]
+            if default >= 1:
+                values = list(dict.fromkeys(max(1, v) for v in values))
+                values = [v for v in values if v != default]
         variants += [{"param": param, "value": v} for v in values]
     return variants
 
