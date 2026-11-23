@@ -9,14 +9,18 @@ earnings/split lockout as live entries. A lookup error excludes the setup
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from alpaca.trading.client import TradingClient
 from pandas.tseries.holiday import (
     AbstractHolidayCalendar,
     GoodFriday,
@@ -60,6 +64,11 @@ REGULAR_CLOSE = time(16, 0)
 #: Longest run of closed days to step back over (a holiday weekend is 4).
 MAX_LOOKBACK_DAYS = 14
 FOOTER = "Research only, paper trading. Not financial advice."
+#: FINRA's pattern-day-trader limit: day trades allowed per 5 business days.
+DAY_TRADE_LIMIT = 3
+#: Where the scheduler (and `POST /reports/daily/refresh`) caches the brief,
+#: relative to `settings.data_dir`.
+CACHE_RELATIVE_PATH = "reports/daily_brief.json"
 
 
 @dataclass(frozen=True)
@@ -164,6 +173,21 @@ def _load_spy(settings: Settings) -> pd.DataFrame | None:
 def _gbp_rate(settings: Settings) -> FxRate | None:
     with fx_context(settings.data_dir, offline=not settings.allow_downloads):
         return latest_gbp_rate()
+
+
+def _day_trades(settings: Settings) -> int | None:
+    """Alpaca's rolling 5-day day-trade count; `None` (line omitted) when
+    Alpaca isn't configured or the lookup fails."""
+    if not settings.has_alpaca:
+        return None
+    try:
+        client = TradingClient(
+            settings.alpaca_api_key, settings.alpaca_api_secret, paper=True
+        )
+        return int(client.get_account().daytrade_count)
+    except Exception as exc:  # noqa: BLE001 - display only, omit the line
+        log.warning("Alpaca day-trade count unavailable: %s", exc)
+        return None
 
 
 def _reason(strategy: str, setup: Setup) -> str:
@@ -315,6 +339,7 @@ def _render(
     rate: FxRate | None,
     setups: list[BriefSetup],
     reason: str,
+    day_trades: int | None = None,
 ) -> str:
     lines = [] if setups else [f"No trades today: {reason}."]
     lines.append(f"SwingTrader daily brief, {now.astimezone(UK):%a %d %b %Y}")
@@ -328,6 +353,8 @@ def _render(
         lines.append(
             f"GBP/USD {rate.rate:.4f} ({rate.source}, {rate.as_of:%Y-%m-%d %H:%M})"
         )
+    if day_trades is not None:
+        lines.append(f"Day trades used: {day_trades}/{DAY_TRADE_LIMIT} (last 5 days)")
     for i, s in enumerate(setups, start=1):
         gbp = "£ n/a" if s.risk_gbp is None else f"£{s.risk_gbp:.2f}"
         lines += [
@@ -360,7 +387,17 @@ def build_daily_brief(settings: Settings, now: datetime | None = None) -> DailyB
 
     rate = _gbp_rate(settings)
     setups, reason = _pick(settings, now, tickers, frames, spy, rate)
-    text = _render(now, as_of, last_session, regime, stale, rate, setups, reason)
+    text = _render(
+        now,
+        as_of,
+        last_session,
+        regime,
+        stale,
+        rate,
+        setups,
+        reason,
+        _day_trades(settings),
+    )
     return DailyBrief(
         as_of=as_of,
         last_session=last_session,
@@ -369,3 +406,41 @@ def build_daily_brief(settings: Settings, now: datetime | None = None) -> DailyB
         text=text,
         setups=setups,
     )
+
+
+def brief_to_dict(brief: DailyBrief) -> dict:
+    """JSON-ready form of `brief` (dates as ISO strings)."""
+    body = dataclasses.asdict(brief)
+    body["as_of"] = brief.as_of.isoformat() if brief.as_of else None
+    body["last_session"] = brief.last_session.isoformat()
+    return body
+
+
+def cache_path(settings: Settings) -> Path:
+    return Path(settings.data_dir) / CACHE_RELATIVE_PATH
+
+
+def refresh_cached_brief(settings: Settings) -> DailyBrief:
+    """Build today's brief and cache it with a UTC `computed_at` stamp.
+    The write goes through a temp file so a reader never sees half a file."""
+    brief = build_daily_brief(settings)
+    body = brief_to_dict(brief)
+    body["computed_at"] = datetime.now(timezone.utc).isoformat()
+    path = cache_path(settings)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(body, indent=2))
+    tmp.replace(path)
+    return brief
+
+
+def load_cached_brief(settings: Settings) -> dict | None:
+    """The cached brief, or `None` if there is none or it is unreadable."""
+    path = cache_path(settings)
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        log.warning("daily brief cache unreadable at %s: %s", path, exc)
+        return None

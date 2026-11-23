@@ -759,7 +759,8 @@ export interface DailyBriefSetup {
   reason: string;
 }
 
-/** `GET /api/v1/reports/daily`: the brief and its plain-text rendering. */
+/** `GET /api/v1/reports/daily`: the cached brief, its plain-text rendering
+ *  and when it was built (`computed_at`, ISO 8601 UTC). 404 before the first. */
 export interface DailyBriefResponse {
   as_of: string | null;
   last_session: string;
@@ -767,6 +768,12 @@ export interface DailyBriefResponse {
   stale: boolean;
   setups: DailyBriefSetup[];
   text: string;
+  computed_at: string;
+}
+
+/** `POST /api/v1/reports/daily/refresh` (202): rebuild queued. */
+export interface DailyBriefRefreshResponse {
+  status: string;
 }
 
 /** `POST /api/v1/reports/daily/send`. */

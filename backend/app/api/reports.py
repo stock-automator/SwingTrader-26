@@ -1,4 +1,8 @@
-"""`/api/v1/reports/daily`: preview or send the daily Telegram brief.
+"""`/api/v1/reports/daily`: the cached daily brief, a background refresh,
+and an on-demand Telegram send.
+
+`GET /daily` only reads the cache the scheduler's 08:00 UK job (or
+`POST /daily/refresh`) writes, so it never runs a universe scan inline.
 
 Sending never returns a 500 for a Telegram failure: a refused or
 unreachable send comes back as `sent=false` with the error, with the bot
@@ -7,35 +11,50 @@ token scrubbed from it (requests puts the full URL in its messages).
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from ..alerts.config_store import effective_channel_config
 from ..alerts.dispatcher import TelegramAlertChannel
 from ..config import Settings, get_settings
 from ..reports import daily
-from .schemas import DailyBriefResponse, DailyBriefSendResponse
+from .schemas import (
+    DailyBriefRefreshResponse,
+    DailyBriefResponse,
+    DailyBriefSendResponse,
+)
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
 
-def _payload(brief: daily.DailyBrief) -> dict:
-    body = dataclasses.asdict(brief)
-    body["as_of"] = brief.as_of.isoformat() if brief.as_of else None
-    body["last_session"] = brief.last_session.isoformat()
-    return body
-
-
 @router.get("/daily", response_model=DailyBriefResponse)
-async def get_daily_brief(settings: Settings = Depends(get_settings)) -> dict:
-    """Today's brief, built from the cached prices. Nothing is sent."""
-    return _payload(await run_in_threadpool(daily.build_daily_brief, settings))
+def get_daily_brief(settings: Settings = Depends(get_settings)) -> dict:
+    """The most recently cached brief. Nothing is built or sent."""
+    cached = daily.load_cached_brief(settings)
+    if cached is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No daily brief yet: it is built at 08:00 UK on weekdays, "
+            "or POST /api/v1/reports/daily/refresh to build one now.",
+        )
+    return cached
+
+
+@router.post(
+    "/daily/refresh", response_model=DailyBriefRefreshResponse, status_code=202
+)
+def refresh_daily_brief(
+    background_tasks: BackgroundTasks, settings: Settings = Depends(get_settings)
+) -> dict:
+    """Rebuild the cached brief after the response is sent. Nothing is sent
+    to Telegram; poll `GET /daily` and compare `computed_at`."""
+    background_tasks.add_task(daily.refresh_cached_brief, settings)
+    return {"status": "started"}
 
 
 @router.post("/daily/send", response_model=DailyBriefSendResponse)

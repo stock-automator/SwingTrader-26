@@ -1131,7 +1131,8 @@ class DailyBriefSetup(BaseModel):
 
 
 class DailyBriefResponse(BaseModel):
-    """`GET /api/v1/reports/daily`: the brief and its plain-text rendering."""
+    """`GET /api/v1/reports/daily`: the cached brief, its plain-text
+    rendering and when it was built (`computed_at`, ISO 8601 UTC)."""
 
     as_of: str | None
     last_session: str
@@ -1139,6 +1140,13 @@ class DailyBriefResponse(BaseModel):
     stale: bool
     setups: list[DailyBriefSetup]
     text: str
+    computed_at: str
+
+
+class DailyBriefRefreshResponse(BaseModel):
+    """`POST /api/v1/reports/daily/refresh`: the rebuild was queued."""
+
+    status: str
 
 
 class DailyBriefSendResponse(BaseModel):

@@ -612,11 +612,20 @@ lookup fails. With no setups the text starts `No trades today: <reason>`.
 NYSE session (Alpaca's calendar when keys are set, otherwise weekday and
 holiday rules), and the text then carries a "data stale" warning. The text
 is plain (no Markdown) and ends with the "Research only, paper" footer.
+When Alpaca keys are set it also carries `Day trades used: n/3 (last 5
+days)` from the paper account; the line is left out without keys or if
+Alpaca can't be reached.
+
+The backend's scheduler builds the brief Monday to Friday at 08:00 UK
+(after a 07:30 UK data sync), caches it in
+`<DATA_DIR>/reports/daily_brief.json` and sends it to Telegram when
+configured. A job missed while the Mac slept runs once on wake (up to 6
+hours late). `SCHEDULER_ENABLED=false` turns the jobs off.
 
 ### `GET /api/v1/reports/daily`
 
-Builds the brief and returns it. Nothing is sent. Real output, no setups
-(the market regime gate):
+Returns the cached brief; it never runs a scan. `computed_at` (UTC) says
+when it was built. Real output, no setups (the market regime gate):
 
 ```json
 {
@@ -625,12 +634,14 @@ Builds the brief and returns it. Nothing is sent. Real output, no setups
   "regime": "HIGH_VOLATILITY_CHOP",
   "stale": false,
   "setups": [],
-  "text": "No trades today: market regime HIGH_VOLATILITY_CHOP blocks new longs.\nSwingTrader daily brief, Mon 23 Nov 2026\nPrices to the 2026-11-20 close. Market regime HIGH_VOLATILITY_CHOP.\nGBP/USD 1.3105 (daily, 2026-11-23 00:00)\n\nResearch only, paper trading. Not financial advice."
+  "text": "No trades today: market regime HIGH_VOLATILITY_CHOP blocks new longs.\nSwingTrader daily brief, Mon 23 Nov 2026\nPrices to the 2026-11-20 close. Market regime HIGH_VOLATILITY_CHOP.\nGBP/USD 1.3105 (daily, 2026-11-23 00:00)\n\nResearch only, paper trading. Not financial advice.",
+  "computed_at": "2026-11-23T12:44:45.757475+00:00"
 }
 ```
 
 With a setup (test fixture data, 2026-11-18 08:00 UK). `risk_gbp` is `null`
-and the text shows `£ n/a` when no GBP/USD rate is available:
+and the text shows `£ n/a` when no GBP/USD rate is available (`computed_at`
+left out):
 
 ```json
 {
@@ -653,6 +664,19 @@ and the text shows `£ n/a` when no GBP/USD rate is available:
   ],
   "text": "SwingTrader daily brief, Wed 18 Nov 2026\nPrices to the 2026-11-17 close. Market regime BULL_TRENDING.\nGBP/USD 1.3105 (live, 2026-11-18 07:59)\n\n1. AAA long (donchian_breakout)\nEntry 109.80, stop 107.80, target 115.80\n10 shares, risk $20.00 / £15.26\nWhy: donchian_breakout long signal, ticker regime BULL_TREND, ADX 30\n\nResearch only, paper trading. Not financial advice."
 }
+```
+
+| Status | Cause |
+|---|---|
+| `404` | No brief cached yet: `{"detail": "No daily brief yet: it is built at 08:00 UK on weekdays, or POST /api/v1/reports/daily/refresh to build one now."}` |
+
+### `POST /api/v1/reports/daily/refresh`
+
+Rebuilds the cached brief in the background and answers `202` at once.
+Nothing is sent to Telegram. Poll `GET /daily` until `computed_at` changes.
+
+```json
+{"status": "started"}
 ```
 
 ### `POST /api/v1/reports/daily/send`
