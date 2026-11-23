@@ -759,6 +759,30 @@ export interface DailyBriefSetup {
   reason: string;
 }
 
+/** One shortlist pick: sized like the portfolio engine (1% risk, 25% cap);
+ *  `strength` is the strategy's own signal strength (higher ranks first). */
+export interface DailyBriefShortlistPick {
+  ticker: string;
+  strategy: string;
+  entry: number;
+  stop: number;
+  target: number;
+  shares: number;
+  risk_usd: number;
+  risk_gbp: number | null;
+  strength: number | null;
+}
+
+/** One strategy's shortlist section; `trails_spy` is null without a
+ *  scorecard line, `note` says why there are no picks. */
+export interface DailyBriefShortlistSection {
+  strategy: string;
+  scorecard: string;
+  trails_spy: boolean | null;
+  note: string;
+  picks: DailyBriefShortlistPick[];
+}
+
 /** `GET /api/v1/reports/daily`: the cached brief, its plain-text rendering
  *  and when it was built (`computed_at`, ISO 8601 UTC). 404 before the first. */
 export interface DailyBriefResponse {
@@ -767,6 +791,8 @@ export interface DailyBriefResponse {
   regime: string;
   stale: boolean;
   setups: DailyBriefSetup[];
+  shortlist: DailyBriefShortlistSection[];
+  shortlist_equity: number | null;
   text: string;
   computed_at: string;
 }
