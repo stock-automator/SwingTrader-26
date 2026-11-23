@@ -191,3 +191,39 @@ def test_f6_ticket_no_rate_source_null(client, env, monkeypatch) -> None:
     assert "fx_rate_source" in t and t["fx_rate_source"] is None
     assert t["fx_rate_date"] is None and t["risk_gbp"] is None
     assert t["tradable"] is True
+
+
+# --- Offline branch and negative cache (rework loop 2) ----------------------
+
+
+def test_f6_offline_context_never_constructs_ticker(env, t0, tmp_path, monkeypatch):
+    import backend.app.data.fx as fx
+
+    built: list[str] = []
+    real = fx.yf.Ticker
+
+    def _spy(symbol):
+        built.append(symbol)
+        return real(symbol)
+
+    monkeypatch.setattr("yfinance.Ticker", _spy)
+    with fx.fx_context(tmp_path, offline=True):
+        r = fx.latest_gbp_rate(now=t0)
+    assert r.source == "daily" and r.rate == pytest.approx(1.30)
+    assert built == [] and env["fetches"] == 0
+    with fx.fx_context(tmp_path, offline=False):
+        r = fx.latest_gbp_rate(now=t0)
+    assert r.source == "live" and built == ["GBPUSD=X"]
+
+
+def test_f6_failed_live_fetch_not_retried_within_60s(env, t0) -> None:
+    from backend.app.data.fx import latest_gbp_rate
+
+    env["raises"] = RuntimeError("net")
+    assert latest_gbp_rate(now=t0).source == "daily"
+    assert env["fetches"] == 1
+    r = latest_gbp_rate(now=t0 + timedelta(seconds=30))
+    assert env["fetches"] == 1, "failed fetch must be negatively cached for 60s"
+    assert r.source == "daily" and r.rate == pytest.approx(1.30)
+    latest_gbp_rate(now=t0 + timedelta(seconds=61))
+    assert env["fetches"] == 2
