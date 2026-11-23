@@ -212,6 +212,31 @@ you've configured what they talk to:
 > the UI to show the round trip. That's also why they're a good source of
 > truth: nothing in them is staged data.
 
+### Daily Telegram brief
+
+The backend can send you a short plain-text brief: up to 3 setups (entry,
+stop, target, whole shares, $ and £ risk, one-line reason) or "No trades
+today" with the reason. It is research only, for paper trading.
+
+1. In Telegram, talk to **@BotFather**, send `/newbot` and copy the bot token
+   it gives you. Send your new bot any message.
+2. Find your chat id: open
+   `https://api.telegram.org/bot<your token>/getUpdates` in a browser and copy
+   `"chat":{"id": ...}`.
+3. Add both to the `.env` file in the repo root (it is gitignored; never
+   commit it):
+
+   ```
+   TELEGRAM_BOT_TOKEN=<your bot token>
+   TELEGRAM_CHAT_ID=<your chat id>
+   ```
+
+4. Restart the backend, preview the brief with
+   `curl http://localhost:8000/api/v1/reports/daily`, then send it with
+   `curl -X POST http://localhost:8000/api/v1/reports/daily/send`. A reply of
+   `{"sent": true, ...}` means it arrived; `{"sent": false, "error": ...}`
+   says why not. See [docs/api.md](docs/api.md).
+
 ### Running the tests (optional, for the curious)
 
 ```bash
@@ -259,7 +284,7 @@ cp .env.example .env
 | `WS_POLL_SECONDS` | `15` | How often the live screener pushes a fresh scan over its live connection. |
 | `MAX_BACKTEST_TICKERS` | `10` | Caps how many tickers one backtest request can run at once. |
 | `JOURNAL_PATH` | `data/trades_live.csv` | Where the trade journal (entries/exits/MAE-MFE/decay analytics) reads and writes its CSV. |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(unset)* | Telegram alert channel for `POST /api/v1/alerts/dispatch`; both must be set to activate it. |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(unset)* | Telegram alert channel for `POST /api/v1/alerts/dispatch` and the daily brief (`POST /api/v1/reports/daily/send`); both must be set to activate it. |
 | `DISCORD_WEBHOOK_URL` | *(unset)* | Discord alert channel (incoming webhook). |
 | `GENERIC_WEBHOOK_URL` | *(unset)* | Generic HTTP alert channel — setups are POSTed here as flat JSON. |
 | `ALERT_CONFIG_PATH` | `config/alerts_channels.json` | Where the Alerts tab's **Save Channel Settings** persists Telegram/Discord/webhook credentials, so they can be configured from the browser without editing `.env` or restarting. A field saved here overrides the matching variable above; gitignored, since it can hold real secrets. |
@@ -464,6 +489,7 @@ backend/
                            benchmark), metrics.py, slippage_model.py
                            (per-bar spread + market impact)
     alerts/                Telegram/Discord/webhook dispatch (dispatcher.py)
+    reports/               daily.py (the daily Telegram brief)
     execution/             Alpaca paper-trading client wrapper, guards.py
                            (session clock + earnings/split lockout)
     data/                 Price loading/caching (loader.py, universe.py)

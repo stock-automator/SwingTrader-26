@@ -164,7 +164,7 @@ def _gbp_rate(settings: Settings) -> FxRate | None:
 
 
 def _reason(strategy: str, setup: Setup) -> str:
-    parts = [f"{strategy} long signal", f"{setup.regime} trend"]
+    parts = [f"{strategy} long signal", f"ticker regime {setup.regime}"]
     if setup.adx is not None:
         parts.append(f"ADX {setup.adx:.0f}")
     if setup.reward_risk_ratio is not None:

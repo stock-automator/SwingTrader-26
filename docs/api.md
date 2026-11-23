@@ -600,6 +600,84 @@ button per channel in the UI. Body: `{"channel": "telegram" | "discord" |
 
 ---
 
+## `/api/v1/reports/daily` — daily Telegram brief
+
+Research and paper trading only. Builds the 08:00 UK brief from the cached
+prices (`DATA_DIR`) and the watchlist (`WATCHLIST_PATH`): up to 3 long
+setups, one per ticker, best reward:risk first, sized in whole shares
+($1,000 account, 2% risk). Setups inside the earnings/split lockout
+(`EARNINGS_LOCKOUT_HOURS`) are dropped, and so is any setup whose earnings
+lookup fails. With no setups the text starts `No trades today: <reason>`.
+`stale` is true when the newest cached bar is older than the last completed
+NYSE session (Alpaca's calendar when keys are set, otherwise weekday and
+holiday rules), and the text then carries a "data stale" warning. The text
+is plain (no Markdown) and ends with the "Research only, paper" footer.
+
+### `GET /api/v1/reports/daily`
+
+Builds the brief and returns it. Nothing is sent. Real output, no setups
+(the market regime gate):
+
+```json
+{
+  "as_of": "2026-11-20",
+  "last_session": "2026-11-20",
+  "regime": "HIGH_VOLATILITY_CHOP",
+  "stale": false,
+  "setups": [],
+  "text": "No trades today: market regime HIGH_VOLATILITY_CHOP blocks new longs.\nSwingTrader daily brief, Mon 23 Nov 2026\nPrices to the 2026-11-20 close. Market regime HIGH_VOLATILITY_CHOP.\nGBP/USD 1.3105 (daily, 2026-11-23 00:00)\n\nResearch only, paper trading. Not financial advice."
+}
+```
+
+With a setup (test fixture data, 2026-11-18 08:00 UK). `risk_gbp` is `null`
+and the text shows `£ n/a` when no GBP/USD rate is available:
+
+```json
+{
+  "as_of": "2026-11-17",
+  "last_session": "2026-11-17",
+  "regime": "BULL_TRENDING",
+  "stale": false,
+  "setups": [
+    {
+      "ticker": "AAA",
+      "strategy": "donchian_breakout",
+      "entry": 109.8,
+      "stop": 107.8,
+      "target": 115.8,
+      "shares": 10,
+      "risk_usd": 20.0,
+      "risk_gbp": 15.26,
+      "reason": "donchian_breakout long signal, ticker regime BULL_TREND, ADX 30"
+    }
+  ],
+  "text": "SwingTrader daily brief, Wed 18 Nov 2026\nPrices to the 2026-11-17 close. Market regime BULL_TRENDING.\nGBP/USD 1.3105 (live, 2026-11-18 07:59)\n\n1. AAA long (donchian_breakout)\nEntry 109.80, stop 107.80, target 115.80\n10 shares, risk $20.00 / £15.26\nWhy: donchian_breakout long signal, ticker regime BULL_TREND, ADX 30\n\nResearch only, paper trading. Not financial advice."
+}
+```
+
+### `POST /api/v1/reports/daily/send`
+
+Builds the brief and sends it to the Telegram chat set by
+`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (or the Alerts tab). Text over
+4096 characters is split on line breaks into `(i/n)` parts.
+
+```json
+{"sent": true, "parts": 1, "error": null}
+```
+
+A Telegram or network failure is not a 500; the bot token is scrubbed from
+the error:
+
+```json
+{"sent": false, "parts": 0, "error": "400 Client Error: Bad Request for url: https://api.telegram.org/bot<token>/sendMessage"}
+```
+
+| Status | Cause |
+|---|---|
+| `503` | Telegram is not configured: `{"detail": "Telegram is not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your local .env."}` |
+
+---
+
 ## `/api/v1/execution/*` — Alpaca paper trading
 
 Every route 503s with a clear message if `ALPACA_API_KEY`/

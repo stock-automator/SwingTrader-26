@@ -745,3 +745,33 @@ export interface JournalTradeResponse {
   created_at: string | null;
   source: string | null;
 }
+
+/** One setup in `GET /api/v1/reports/daily` (whole shares, USD and GBP risk). */
+export interface DailyBriefSetup {
+  ticker: string;
+  strategy: string;
+  entry: number;
+  stop: number;
+  target: number;
+  shares: number;
+  risk_usd: number;
+  risk_gbp: number | null;
+  reason: string;
+}
+
+/** `GET /api/v1/reports/daily`: the brief and its plain-text rendering. */
+export interface DailyBriefResponse {
+  as_of: string | null;
+  last_session: string;
+  regime: string;
+  stale: boolean;
+  setups: DailyBriefSetup[];
+  text: string;
+}
+
+/** `POST /api/v1/reports/daily/send`. */
+export interface DailyBriefSendResponse {
+  sent: boolean;
+  parts: number;
+  error: string | null;
+}
