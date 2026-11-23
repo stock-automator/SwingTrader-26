@@ -284,6 +284,7 @@ export interface OrderTicket {
   notional_gbp: number | null;
   fx_note: string | null;
   fx_rate_date: string | null;
+  fx_rate_source: "live" | "daily" | null;
 }
 
 export interface OrderTicketsResponse {

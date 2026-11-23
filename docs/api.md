@@ -705,7 +705,7 @@ for the display-only GBP figures.
 
 Real response for `entry_price: 231.42`, 3%/9% percentage stop/target, one
 $5,000 tier, `FX_COST_PCT=0.0015`, `FX_CONVERSIONS_PER_ROUND_TRIP=2` and the
-cached `GBPUSD=X` close of 2026-11-23:
+cached `GBPUSD=X` close of 2026-11-23 (downloads disabled, so the daily close):
 
 ```json
 {
@@ -715,17 +715,20 @@ cached `GBPUSD=X` close of 2026-11-23:
       "quantity": 9, "notional_value": 2082.78, "risk_amount": 62.48,
       "reward_risk_ratio": 3.0, "tradable": true, "note": null,
       "fx_cost_usd": 6.25, "risk_gbp": 47.68, "notional_gbp": 1589.24,
-      "fx_note": null, "fx_rate_date": "2026-11-23" }
+      "fx_note": null, "fx_rate_date": "2026-11-23T00:00:00",
+      "fx_rate_source": "daily" }
   ],
   "min_reward_risk_ratio": 2.5
 }
 ```
 
 `fx_cost_usd` is `notional_value * FX_COST_PCT * FX_CONVERSIONS_PER_ROUND_TRIP`
-(`0.0` by default). The rate is read from the cache only (never
-downloaded; `POST /data/sync` keeps `GBPUSD=X` fresh) and `fx_rate_date` is its
-ISO date. With no rate, `risk_gbp`, `notional_gbp` and `fx_rate_date` are
-`null` and `fx_note` is `"GBP rate unavailable: GBPUSD=X is not cached yet (run a data sync)."`;
+(`0.0` by default). The rate is the latest
+`GBPUSD=X` quote (`fx_rate_source: "live"`, `fx_rate_date` the quote's ISO
+timestamp, cached 60 s). It falls back to the stored daily close
+(`"daily"`, kept fresh by `POST /data/sync`) when the quote is unavailable or
+downloads are disabled (`ALLOW_DOWNLOADS=false`). With no rate, `risk_gbp`,
+`notional_gbp`, `fx_rate_date` and `fx_rate_source` are `null` and `fx_note` is `"GBP rate unavailable: GBPUSD=X is not cached yet (run a data sync)."`;
 the ticket is still issued.
 
 A tier too small to size even 1 share comes back `tradable: false` with a

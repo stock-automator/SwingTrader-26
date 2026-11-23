@@ -73,3 +73,17 @@ def market(monkeypatch):
     monkeypatch.setattr(guards, "fetch_stock_splits", lambda ticker, *a, **k: [])
     yield clock
     app.dependency_overrides.pop(get_market_clock, None)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_fx_quote(monkeypatch):
+    """Keep the GBP/USD live quote off the network and out of the 60s cache."""
+    import yfinance
+
+    from backend.app.data import fx
+
+    def _offline_ticker(*args, **kwargs):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(yfinance, "Ticker", _offline_ticker)
+    monkeypatch.setattr(fx, "_live_cache", None)

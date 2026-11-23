@@ -253,6 +253,7 @@ class OrderTicketResponse(BaseModel):
     notional_gbp: float | None
     fx_note: str | None
     fx_rate_date: str | None = None
+    fx_rate_source: str | None = None
 
 
 class OrderTicketsResponse(BaseModel):

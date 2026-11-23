@@ -13,7 +13,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from ..config import Settings, get_settings
-from ..data.fx import usd_to_gbp
+from ..data import fx
 from ..quant.engine import build_order_tickets
 from .schemas import OrderTicketRequest, OrderTicketsResponse
 
@@ -37,14 +37,16 @@ def build_order_ticket_endpoint(
         order_type=request.order_type,
     )
     fx_round_trip = settings.fx_cost_pct * settings.fx_conversions_per_round_trip
-    converted = usd_to_gbp(1.0, data_dir=settings.data_dir, allow_download=False)
-    usd_per_gbp = None if converted is None else converted[1]
-    rate_date = None if converted is None else converted[2].isoformat()
+    with fx.fx_context(settings.data_dir, offline=not settings.allow_downloads):
+        found = fx.latest_gbp_rate()
+    usd_per_gbp = None if found is None else found.rate
+    rate_date = None if found is None else found.as_of.isoformat()
 
     payload = []
     for ticket in tickets:
         row = ticket.as_dict()
         row["fx_rate_date"] = rate_date
+        row["fx_rate_source"] = None if found is None else found.source
         row["fx_cost_usd"] = round(ticket.notional_value * fx_round_trip, 2)
         if usd_per_gbp is None:
             row["risk_gbp"] = row["notional_gbp"] = None
