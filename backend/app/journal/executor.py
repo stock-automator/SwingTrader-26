@@ -39,7 +39,20 @@ class TradeJournal:
                 df["source"] = "LIVE"
             return df
 
-        # Create empty journal
+        return self.empty_frame()
+
+    @classmethod
+    def from_frame(cls, df: pd.DataFrame) -> "TradeJournal":
+        """An in-memory journal over `df` for the analysis methods; nothing
+        is read, and saving is not supported."""
+        journal = cls.__new__(cls)
+        journal.filepath = None
+        journal.df = df
+        return journal
+
+    @staticmethod
+    def empty_frame() -> pd.DataFrame:
+        """A journal with no rows, in the journal's column order and dtypes."""
         return pd.DataFrame(
             {
                 "id": pd.Series(dtype="int64"),
