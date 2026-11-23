@@ -93,6 +93,23 @@ def _create_tables(conn: duckdb.DuckDBPyConnection) -> None:
             updated_at TIMESTAMP
         )
         """)
+    # Alpaca paper FILL activities (`journal/fills.py`), one row per
+    # execution, so the PK makes re-ingesting an overlap a no-op. Times are
+    # naive UTC. Rollback: `DROP TABLE broker_fills` (nothing else reads it).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS broker_fills (
+            activity_id TEXT PRIMARY KEY,
+            order_id TEXT,
+            parent_order_id TEXT,
+            leg TEXT,
+            symbol TEXT,
+            side TEXT,
+            qty DOUBLE,
+            price DOUBLE,
+            filled_at TIMESTAMP,
+            ingested_at TIMESTAMP
+        )
+        """)
     # `job_id`/`order_id` PKs above already give scan_jobs/routed_orders a
     # lookup index for free. The three indexes below cover the remaining
     # hot filter columns that don't have one: scan_results has no PK at all
