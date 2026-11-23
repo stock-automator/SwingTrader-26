@@ -71,7 +71,12 @@ def run_once(base_url: str = BASE_URL, session=requests, now=None) -> dict:
         return out
 
     pos = session.get(f"{api}/execution/positions", timeout=TIMEOUT)
-    held = {p["symbol"] for p in pos.json().get("positions", [])}
+    positions = pos.json().get("positions") if pos.status_code == 200 else None
+    if not isinstance(positions, list):
+        # Limits need the live book: fail closed rather than see an empty one.
+        out["reason"] = f"positions unavailable (HTTP {pos.status_code})"
+        return out
+    held = {p["symbol"] for p in positions}
     state = _state()
     done = state.get("tickers", []) if state.get("date") == day else []
     book = {

@@ -252,3 +252,15 @@ def test_blocked_pick_is_reported_and_not_counted(ex):
     assert out["placed"] == [] and "AAA" in out["blocked"][0]
     state = json.loads(ex.STATE_PATH.read_text()) if ex.STATE_PATH.exists() else {}
     assert "AAA" not in state.get("open", {})
+
+
+def test_positions_error_places_nothing(ex):
+    """Limits use live positions: a failed fetch must fail closed."""
+    for status, body in ((503, {"detail": "broker down"}), (200, {})):
+        s = FakeSession(shortlist((Z, [pick("AAA")]), setups=("BBB",)))
+        s.get = lambda url, timeout=None, s=s, st=status, b=body: (
+            s.brief if url.endswith("/reports/daily") else Resp(st, b)
+        )
+        out = ex.run_once(session=s, now=NOW)
+        assert s.posts == [] and out["placed"] == []
+        assert "positions" in out["reason"]
