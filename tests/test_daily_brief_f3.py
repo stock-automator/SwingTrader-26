@@ -871,3 +871,66 @@ class TestF3Ranking:
         daily.scan_universe = RRScan({(k, "AAA"): 1.0 + i for i, k in enumerate(keys)})
         brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
         assert [s.ticker for s in brief.setups] == ["AAA"]
+
+
+class TestF3LiveOrderGate:
+    """The brief must apply the same gate as live orders:
+    `RiskManager.build_risk_managed_order` (min R, dynamic risk pct, sizing)."""
+
+    KEY = "donchian_breakout"
+
+    def test_f3_below_min_reward_risk_is_excluded_with_reason(self, daily, tmp_path):
+        daily.scan_universe = RRScan({(self.KEY, "AAA"): 2.3})
+        brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+        assert brief.setups == []
+        assert brief.text.startswith("No trades today")
+        first = brief.text.splitlines()[0].lower()
+        assert "reward" in first and "risk" in first, first
+
+    def test_f3_above_min_reward_risk_matches_live_order(self, daily, tmp_path):
+        from backend.app.api.screener import DEFAULT_SCREENER_EQUITY
+        from backend.app.quant.risk import MIN_REWARD_RISK_RATIO, RiskManager
+
+        assert MIN_REWARD_RISK_RATIO == 2.5
+        scan = RRScan({(self.KEY, "AAA"): 3.0})
+        daily.scan_universe = scan
+        brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+        (got,) = brief.setups
+        entry, stop = got.entry, got.stop
+        order = RiskManager(
+            account_equity=DEFAULT_SCREENER_EQUITY, risk_per_trade_pct=0.02
+        ).build_risk_managed_order(
+            entry_price=entry,
+            sl_type="FIXED",
+            sl_value=2.0,
+            tp_type="FIXED",
+            tp_value=6.0,
+            atr=1.0,
+        )
+        assert not order.rejected
+        assert got.shares == order.shares
+        assert got.stop == pytest.approx(order.stop_loss, abs=0.01)
+        assert got.target == pytest.approx(order.take_profit, abs=0.01)
+        assert got.risk_usd == pytest.approx(order.risk_amount, abs=0.01)
+        # dynamic sizing (1.33%) differs from the flat 2% the scan used
+        assert got.shares < int(DEFAULT_SCREENER_EQUITY * 0.02 // (entry - stop))
+
+    def test_f3_order_rejected_for_another_reason_is_excluded(self, daily, tmp_path):
+        """3R passes the R gate but the stop is too wide for the dynamic risk
+        budget (sizes to zero), even though the scan reported shares > 0."""
+
+        from backend.app.quant.strategies import REGISTRY
+
+        def scan(frames, strategy, risk_manager, *a, **k):
+            report = ScanReport()
+            if type(strategy) is REGISTRY[self.KEY]:
+                df = frames["AAA"]
+                report.setups.append(
+                    _long_scan_setup(df, "AAA", 3.0, gap=40.0, shares=5)
+                )
+            return report
+
+        daily.scan_universe = scan
+        brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+        assert brief.setups == []
+        assert brief.text.startswith("No trades today")
