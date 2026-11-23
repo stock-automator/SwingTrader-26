@@ -53,19 +53,41 @@ BASELINE_KEYS = (
 def run_baseline(
     config: dict, frames: dict[str, pd.DataFrame], spy_frame: pd.DataFrame | None
 ) -> dict:
-    """Run the baseline described by `config` over `frames` (and SPY)."""
+    """Run the baseline described by `config` over `frames` (and SPY), with
+    the same defaults and cost model as `POST /api/v1/backtest`: missing
+    keys take the API request's defaults, and the FX cost per leg comes
+    from settings unless the config sets `fx_cost_pct`."""
+    import backend.app.config as app_config
+    from backend.app.api.schemas import BacktestRequest
+
+    def get(key: str):
+        value = config.get(key)
+        return BacktestRequest.model_fields[key].default if value is None else value
+
     strategy = build_strategy(config["strategy"], config.get("strategy_params"))
     if config["strategy"] in REQUIRES_BENCHMARK and spy_frame is not None:
         strategy.set_benchmark(spy_frame)
+
+    settings = app_config.get_settings()
+    fx_cost_pct = get("fx_cost_pct")
+    if fx_cost_pct is None:
+        fx_cost_pct = settings.fx_cost_pct * settings.fx_conversions_per_round_trip / 2
 
     comparison = run_comparison(
         strategy,
         frames,
         spy_frame=spy_frame,
-        initial_capital=float(config.get("initial_capital", 1000.0)),
-        risk_per_trade_pct=float(config.get("risk_per_trade_pct", 0.02)),
-        fractional=bool(config.get("fractional", False)),
-        use_risk_gate=bool(config.get("use_risk_gate", False)),
+        initial_capital=float(get("initial_capital")),
+        risk_per_trade_pct=float(get("risk_per_trade_pct")),
+        commission=float(get("commission")),
+        slippage_pct=float(get("slippage_pct")),
+        risk_free_rate=float(get("risk_free_rate")),
+        include_buy_and_hold=bool(get("include_buy_and_hold")),
+        fee_per_share=float(get("fee_per_share")),
+        atr_slippage_multiple=float(get("atr_slippage_multiple")),
+        fx_cost_pct=float(fx_cost_pct),
+        fractional=bool(get("fractional")),
+        use_risk_gate=bool(get("use_risk_gate")),
     )
     payload = comparison_to_payload(comparison)
     record = {key: payload[key] for key in BASELINE_KEYS}
