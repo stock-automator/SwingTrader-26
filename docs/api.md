@@ -523,22 +523,33 @@ a live order.
 | `limit_price` | float \| null | `null` | Required for `LIMIT`; optional entry price for a `BRACKET` (omit for a market-entry bracket) |
 | `stop_loss` / `take_profit` | float \| null | `null` | Required for `BRACKET` |
 
-Before dispatching to Alpaca, this route runs `execution/guards.py`'s
-`check_order_guards` (unless `EXECUTION_GUARDS_ENABLED=false`):
+| `intent` | string \| null | `null` | `"ENTRY"` or `"EXIT"`. Unset: `buy` = `ENTRY`, `sell` = `EXIT` |
 
-- **Session guard** — refuses to dispatch while the US market is closed,
-  and by default refuses pre-market/after-hours too
-  (`EXECUTION_ALLOW_EXTENDED_HOURS=true` opts into dispatching there, still
-  flagged as illiquid).
-- **Earnings/split lockout guard** — refuses a new entry within
-  `EARNINGS_LOCKOUT_HOURS` (default 48) of a scheduled earnings release or
-  stock split, on either side of it. Fails *open* (does not block) if the
-  earnings/split calendar can't be fetched for the ticker — a data-provider
-  gap is not treated as a clean bill of health, but it also must not brick
-  order dispatch.
+Order guards (`execution/guards.py`'s `enforce_order_guards`) run on every
+order, on this route and on `POST /api/v1/orders/submit`. They cannot be
+switched off.
 
-A rejected order never reaches Alpaca: guard failures come back as a `422`
-with every reason that applied, not just the first one hit.
+- **EXIT** always goes through and makes no lookups, so you can always get
+  out of a position.
+- **ENTRY** is refused unless all of these pass:
+  - **Session**: Alpaca's trading calendar says the regular session is open
+    now. Holidays, weekends and the time after a half-day's early close are
+    closed. Pre-market/after-hours are refused too, unless
+    `EXECUTION_ALLOW_EXTENDED_HOURS=true`.
+  - **Earnings/split lockout**: no earnings release or stock split within
+    `EARNINGS_LOCKOUT_HOURS` (default 48) on either side.
+  - **Fail closed**: if the calendar, earnings or split lookup fails, or
+    Alpaca keys are missing, the entry is refused.
+
+A refused order never reaches the broker. It comes back as a `422` listing
+every reason that applied. Real response, from a `TestClient` call on a day
+with no trading session and earnings due tomorrow:
+
+```json
+{
+  "detail": "Order blocked (ENTRY): Market is closed (2026-11-23 is not a trading day) - entries blocked. Within 48h of a scheduled earnings date (2026-11-24) - new entries suppressed."
+}
+```
 
 ### `POST /api/v1/execution/close-all`
 
@@ -922,6 +933,7 @@ rather than in-process memory, so order state survives a process restart.
 | `order_type` | string | `"MARKET"` | `"MARKET"` or `"LIMIT"` |
 | `limit_price` | float \| null | `null` | — |
 | `reference_price` | float \| null | `null` | Required for `broker="PAPER"` + `order_type="MARKET"` (the quote it fills against); ignored by `ALPACA`, which prices its own fill |
+| `intent` | string \| null | `null` | `"ENTRY"` or `"EXIT"`. Unset: `buy` = `ENTRY`, `sell` = `EXIT`. Guarded like `POST /api/v1/execution/orders` |
 
 ```json
 {
@@ -934,7 +946,8 @@ rather than in-process memory, so order state survives a process restart.
 ```
 
 `422` for an unknown `broker`, a `PAPER` `MARKET` order missing
-`reference_price`, or a `ValueError` from the broker.
+`reference_price`, an ENTRY refused by the order guards (same body as
+above; nothing is stored), or a `ValueError` from the broker.
 
 ### `POST /api/v1/orders/cancel/{order_id}`
 

@@ -264,9 +264,8 @@ cp .env.example .env
 | `GENERIC_WEBHOOK_URL` | *(unset)* | Generic HTTP alert channel — setups are POSTed here as flat JSON. |
 | `ALERT_CONFIG_PATH` | `config/alerts_channels.json` | Where the Alerts tab's **Save Channel Settings** persists Telegram/Discord/webhook credentials, so they can be configured from the browser without editing `.env` or restarting. A field saved here overrides the matching variable above; gitignored, since it can hold real secrets. |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | *(unset)* | Alpaca **paper-trading** credentials for `/api/v1/execution/*`. The SDK always points at Alpaca's paper endpoint regardless of these values — there is no setting that makes this platform place live orders. |
-| `EXECUTION_GUARDS_ENABLED` | `true` | Whether `POST /api/v1/execution/orders` runs the session-clock and earnings/split lockout guards before dispatching (see `execution/guards.py`). Only turn off for local/paper testing outside market hours. |
-| `EXECUTION_ALLOW_EXTENDED_HOURS` | `false` | Whether pre-market/after-hours count as dispatchable sessions (still illiquid) instead of being blocked like a closed market. |
-| `EARNINGS_LOCKOUT_HOURS` | `48` | Hours before/after a scheduled earnings release or stock split during which `POST /api/v1/execution/orders` refuses a new entry. |
+| `EXECUTION_ALLOW_EXTENDED_HOURS` | `false` | Whether new entries may go out pre-market/after-hours (still illiquid) instead of being blocked like a closed market. Order guards always run on both order routes; entries fail closed if Alpaca's calendar or the earnings/split lookup is unavailable, and exits always go through (see `execution/guards.py`). |
+| `EARNINGS_LOCKOUT_HOURS` | `48` | Hours before/after a scheduled earnings release or stock split during which both order routes refuse a new entry. |
 
 > **Never commit a real `.env` file.** It's already excluded via
 > `.gitignore` — only `.env.example` (with no real keys in it) is tracked.

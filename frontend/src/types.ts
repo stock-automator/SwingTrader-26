@@ -402,6 +402,8 @@ export interface ExecutionOrderRequest {
   limit_price?: number | null;
   stop_loss?: number | null;
   take_profit?: number | null;
+  /** ENTRY is guarded (422 if blocked); EXIT always goes through. Unset: buy = ENTRY, sell = EXIT. */
+  intent?: "ENTRY" | "EXIT" | null;
 }
 
 export interface ExecutionOrderResponse {
