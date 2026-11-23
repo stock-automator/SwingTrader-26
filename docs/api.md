@@ -55,6 +55,7 @@ every number in the response is computed.
 | `risk_free_rate` | float | `0.0` | Annualised risk-free rate used in Sharpe/alpha; `>= 0` |
 | `include_buy_and_hold` | bool | `true` | Emit the buy & hold curve |
 | `benchmark` | string | `"SPY"` | Ticker for the second benchmark curve |
+| `fx_cost_pct` | float \| null | `null` | Currency-conversion cost per leg (fraction of notional), on top of commission; `>= 0`. `null` uses `FX_COST_PCT * FX_CONVERSIONS_PER_ROUND_TRIP / 2` (0 by default: USD balance) |
 
 Both `tickers` and `strategy` are validated by Pydantic: an empty/blank
 ticker list or an unregistered strategy name is rejected before any data is
@@ -114,9 +115,15 @@ curl -X POST http://localhost:8000/api/v1/backtest \
     { "ticker": "AAPL", "entry_time": "2022-03-01", "exit_time": "2022-04-12",
       "entry_price": 165.2, "exit_price": 172.4, "size": 6, "pnl": 43.2, "return_pct": 4.36 }
   ],
+  "costs": { "commission": 0.001, "slippage_pct": 0.0005, "fee_per_share": 0.0,
+             "atr_slippage_multiple": 0.0, "fx_cost_pct_per_leg": 0.0015 },
   "warnings": []
 }
 ```
+
+`costs` echoes the cost inputs the run used. The block above is a real
+response with `FX_CONVERSIONS_PER_ROUND_TRIP=2`; with the default `0`,
+`fx_cost_pct_per_leg` is `0.0`.
 
 `vs_spy` and `vs_buy_and_hold` are `null` when that benchmark curve could
 not be built (e.g. SPY unreachable, `include_buy_and_hold: false`) — check
@@ -677,8 +684,9 @@ failing the whole response.
 Turns one already-resolved setup (entry/stop/target, as read off the
 screener grid or a backtest) into broker-ready tickets side-by-side across
 account-size tiers ($1k/$5k/$10k by default), each sized and gated by
-`RiskManager.build_risk_managed_order`. Stateless — the caller supplies the
-setup's own numbers, so this never touches price data itself.
+`RiskManager.build_risk_managed_order`. The caller supplies the setup's own
+numbers; the only data read is the cached `GBPUSD=X` close (USD per 1 GBP)
+for the display-only GBP figures.
 
 ### Request body
 
@@ -695,17 +703,27 @@ setup's own numbers, so this never touches price data itself.
 
 ### Response body
 
+Real response for `entry_price: 231.42`, 3%/9% percentage stop/target, one
+$5,000 tier, `FX_CONVERSIONS_PER_ROUND_TRIP=2` and a GBPUSD close of 1.28:
+
 ```json
 {
   "tickets": [
-    { "ticker": "AAPL", "account_equity": 1000.0, "order_type": "MARKET",
-      "entry_price": 231.42, "stop_loss": 225.1, "take_profit": 240.0,
-      "quantity": 3, "notional_value": 694.26, "risk_amount": 20.0,
-      "reward_risk_ratio": 2.9, "tradable": true, "note": null }
+    { "ticker": "AAPL", "account_equity": 5000.0, "order_type": "MARKET",
+      "entry_price": 231.42, "stop_loss": 224.4774, "take_profit": 252.2478,
+      "quantity": 9, "notional_value": 2082.78, "risk_amount": 62.48,
+      "reward_risk_ratio": 3.0, "tradable": true, "note": null,
+      "fx_cost_usd": 6.25, "risk_gbp": 48.82, "notional_gbp": 1627.17,
+      "fx_note": null }
   ],
   "min_reward_risk_ratio": 2.5
 }
 ```
+
+`fx_cost_usd` is `notional_value * FX_COST_PCT * FX_CONVERSIONS_PER_ROUND_TRIP`
+(`0.0` by default). With no cached rate, `risk_gbp` and `notional_gbp` are
+`null` and `fx_note` is `"GBP figures unavailable: no cached GBPUSD=X rate."`;
+the ticket is still issued.
 
 A tier too small to size even 1 share comes back `tradable: false` with a
 `note`, not omitted from `tickets` — the UI shows every tier it asked for.

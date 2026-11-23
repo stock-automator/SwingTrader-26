@@ -163,6 +163,7 @@ export interface BacktestRequest {
   benchmark: string;
   fee_per_share: number;
   atr_slippage_multiple: number;
+  fx_cost_pct?: number | null;
   earnings_blackout: boolean;
   regime_gating: boolean;
 }
@@ -238,7 +239,16 @@ export interface BacktestResponse {
   trade_metrics: TradeMetrics;
   equity_curves: EquityCurvePoint[];
   trades: Trade[];
+  costs: BacktestCosts;
   warnings: string[];
+}
+
+export interface BacktestCosts {
+  commission: number;
+  slippage_pct: number;
+  fee_per_share: number;
+  atr_slippage_multiple: number;
+  fx_cost_pct_per_leg: number;
 }
 
 // ---- Order Ticket ----
@@ -269,6 +279,10 @@ export interface OrderTicket {
   reward_risk_ratio: number;
   tradable: boolean;
   note: string | null;
+  fx_cost_usd: number;
+  risk_gbp: number | null;
+  notional_gbp: number | null;
+  fx_note: string | null;
 }
 
 export interface OrderTicketsResponse {
