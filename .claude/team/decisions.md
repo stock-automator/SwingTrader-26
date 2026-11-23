@@ -39,7 +39,7 @@ Format: `## YYYY-MM-DD — Decision` then Why / Alternatives considered.
 - **How:** fetch only the latest quote, cache it ~60s, and fall back to the stored daily `GBPUSD=X` close (refreshed by the data sync). Show the rate's timestamp and source (live or daily).
 - **Alternatives:** stored daily close only (stale intraday); full-history download per request (slow, the reviewer blocked it).
 
-## 2026-11-23 — Backtests cap orders to available cash (pending A's sign-off at F2 Gate 2)
+## 2026-11-23 — Backtests cap orders to available cash (A signed off at F2 Gate 2, 12:07)
 - **Why:** backtesting.py silently cancelled oversized orders, which hid trades. Orders are now sized down to the cash available and counted in `skipped_signals` ("size capped to cash", "insufficient cash", "insufficient cash at fill").
 - **Impact:** every existing backtest result changes. For example, KO with $1k went from 5 to 33 trades, and final values moved by up to 20%. The cap always applies; there's no opt-out.
 - **Alternatives:** keep the old silent cancel (dishonest), or make the cap opt-in (two answers to one question).
