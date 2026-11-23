@@ -120,3 +120,20 @@ def test_f6_repo_gbpusd_cached_and_fresh() -> None:
     assert last.date() >= date(2026, 11, 19)
     closes = df["Close"].dropna()
     assert len(closes) > 100 and (closes > 0).all()
+
+
+def test_f2_default_sync_includes_spy_once(client, monkeypatch) -> None:
+    monkeypatch.setattr(data_sync, "_run_sync", lambda t, d: None)
+    r = client.post("/api/v1/data/sync", json={})
+    assert r.status_code == 202
+    tickers = r.json()["tickers"]
+    assert tickers.count("SPY") == 1
+    assert tickers.count("GBPUSD=X") == 1
+
+
+def test_f2_spy_parquet_is_committed_and_fresh() -> None:
+    path = REPO_ROOT / "data" / "raw" / "SPY.parquet"
+    assert path.exists()
+    df = pd.read_parquet(path)
+    assert (df["Close"] > 0).all()
+    assert pd.Timestamp(df.index.max()) >= pd.Timestamp("2026-11-19")

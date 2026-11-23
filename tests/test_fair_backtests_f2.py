@@ -740,3 +740,45 @@ class TestF2R10BaselineCostsMatchApi:
         assert baseline["summaries"][STRATEGY_KEY]["final_value"] == pytest.approx(
             api_body["summaries"][STRATEGY_KEY]["final_value"], abs=0.01
         )
+
+
+# --------------------------------------------------------------------------
+# Rework 2 reviewer warnings
+# --------------------------------------------------------------------------
+
+
+class TestF2Rework2:
+    @pytest.mark.parametrize("gate", [False, True])
+    def test_f2_gap_up_cancelled_fill_is_counted(self, gate):
+        close = [100.0] * 30
+        df = _frame(close)
+        # Bar 6 opens 50% above the signal bar's close: the cash-capped
+        # order cannot fill, so backtesting cancels it.
+        for col in ("Open", "High", "Low", "Close"):
+            df.iloc[6:, df.columns.get_loc(col)] = 150.0
+        result = run_backtest(
+            Scripted(entries=[5], sl=0.01, tp=0.05),
+            df,
+            RiskManager(account_equity=10_000, risk_per_trade_pct=0.02),
+            use_risk_gate=gate,
+        )
+        assert len(result.trades) == 0
+        assert result.skipped_signals.get("insufficient cash at fill", 0) >= 1
+
+    def test_f2_walk_forward_hold_rows_have_no_sl_tp(self):
+        from backend.app.quant.walk_forward import _TradeFrom
+
+        df = _ramp(30)
+        inner = Scripted(entries=[2, 20], sl=0.05, tp=0.1)  # bar 2 is warm-up
+        out = _TradeFrom(inner, df.index[10]).generate_signals(df)
+        BaseStrategy.validate_output(out)
+        held = out.iloc[:10]
+        assert (held["signal"] == 0).all()
+        assert held["sl_value"].isna().all() and held["tp_value"].isna().all()
+        assert held["sl_type"].isna().all() and held["tp_type"].isna().all()
+        assert out["signal"].iloc[20] == 1 and out["sl_value"].iloc[20] == 0.05
+
+    def test_f2_risk_gate_warning_names_starting_equity(self):
+        from backend.app.quant.backtest import RISK_GATE_WARNING
+
+        assert "starting equity" in RISK_GATE_WARNING
