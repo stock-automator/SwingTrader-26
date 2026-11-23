@@ -53,6 +53,8 @@ def refresh_daily_brief(
 ) -> dict:
     """Rebuild the cached brief after the response is sent. Nothing is sent
     to Telegram; poll `GET /daily` and compare `computed_at`."""
+    if daily.BRIEF_LOCK.locked():
+        return {"status": "already_running"}
     background_tasks.add_task(daily.refresh_cached_brief, settings)
     return {"status": "started"}
 

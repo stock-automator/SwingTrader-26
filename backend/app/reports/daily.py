@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
@@ -420,9 +421,19 @@ def cache_path(settings: Settings) -> Path:
     return Path(settings.data_dir) / CACHE_RELATIVE_PATH
 
 
+#: One process-wide lock: brief builds and cache writes never overlap.
+BRIEF_LOCK = threading.Lock()
+
+
 def refresh_cached_brief(settings: Settings) -> DailyBrief:
     """Build today's brief and cache it with a UTC `computed_at` stamp.
-    The write goes through a temp file so a reader never sees half a file."""
+    The write goes through a temp file so a reader never sees half a file;
+    `BRIEF_LOCK` makes concurrent callers take turns."""
+    with BRIEF_LOCK:
+        return _refresh_cached_brief(settings)
+
+
+def _refresh_cached_brief(settings: Settings) -> DailyBrief:
     brief = build_daily_brief(settings)
     body = brief_to_dict(brief)
     body["computed_at"] = datetime.now(timezone.utc).isoformat()

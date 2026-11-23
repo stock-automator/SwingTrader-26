@@ -38,5 +38,18 @@ plutil -lint "$DEST" >/dev/null
 
 domain="gui/$(id -u)"
 launchctl bootout "$domain/$LABEL" 2>/dev/null || true
-launchctl bootstrap "$domain" "$DEST"
+sleep 2
+launchctl bootstrap "$domain" "$DEST" || {
+    # bootout can still be tearing the old job down; retry a few times.
+    for attempt in 1 2 3 4; do
+        sleep 2
+        if launchctl bootstrap "$domain" "$DEST"; then
+            break
+        fi
+        if [[ "$attempt" == 4 ]]; then
+            echo "error: launchctl bootstrap failed" >&2
+            exit 1
+        fi
+    done
+}
 echo "Installed $LABEL using $python; logs in $REPO/logs/"
