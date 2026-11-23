@@ -44,7 +44,7 @@ from ..data.loader import (
 from ..execution.guards import EarningsLockoutGuard
 from ..execution.market_clock import NY, _clock_for
 from ..quant.regime import MACRO_REGIME_UNKNOWN, MacroRegimeDetector
-from ..quant.risk import CircuitBreaker, RiskManager
+from ..quant.risk import MIN_REWARD_RISK_RATIO, CircuitBreaker, RiskManager
 from ..quant.setups import DIRECTION_LONG, Setup, scan_universe
 from ..quant.strategies import REGISTRY, build_strategy
 
@@ -236,12 +236,30 @@ def _pick(
             return [], "the SPY drawdown circuit breaker is active"
 
     candidates, too_wide = _candidates(frames, settings)
+    gate = RiskManager(
+        account_equity=DEFAULT_SCREENER_EQUITY, risk_per_trade_pct=RISK_PER_TRADE_PCT
+    )
     guard = EarningsLockoutGuard(settings.earnings_lockout_hours)
     picked: list[BriefSetup] = []
-    locked = failed = 0
+    locked = failed = low_rr = gated = 0
     for strategy, setup in candidates:
         if len(picked) == MAX_SETUPS:
             break
+        entry, stop = float(setup.entry_price), float(setup.stop_loss)
+        order = gate.build_risk_managed_order(
+            entry_price=entry,
+            sl_type="FIXED",
+            sl_value=entry - stop,
+            tp_type="FIXED",
+            tp_value=float(setup.take_profit) - entry,
+            atr=setup.atr,
+        )
+        if order.rejected:
+            if order.reward_risk_ratio < MIN_REWARD_RISK_RATIO:
+                low_rr += 1
+            else:
+                gated += 1
+            continue
         try:
             earnings = fetch_earnings_dates(setup.ticker)
             splits = fetch_stock_splits(setup.ticker)
@@ -252,16 +270,15 @@ def _pick(
         if guard.is_blocked(now.astimezone(NY), earnings, splits)[0]:
             locked += 1
             continue
-        entry, stop = float(setup.entry_price), float(setup.stop_loss)
-        risk_usd = round(setup.shares * (entry - stop), 2)
+        risk_usd = round(order.risk_amount, 2)
         picked.append(
             BriefSetup(
                 ticker=setup.ticker,
                 strategy=strategy,
                 entry=round(entry, 2),
-                stop=round(stop, 2),
-                target=round(float(setup.take_profit), 2),
-                shares=int(setup.shares),
+                stop=round(order.stop_loss, 2),
+                target=round(order.take_profit, 2),
+                shares=order.shares,
                 risk_usd=risk_usd,
                 risk_gbp=None if rate is None else round(risk_usd / rate.rate, 2),
                 reason=_reason(strategy, setup),
@@ -275,6 +292,13 @@ def _pick(
         reasons.append(f"{locked} setup(s) inside the earnings/split lockout")
     if failed:
         reasons.append(f"earnings lookup failed for {failed} setup(s)")
+    if low_rr:
+        reasons.append(
+            f"{low_rr} setup(s) below the {MIN_REWARD_RISK_RATIO:.1f} "
+            "minimum reward:risk"
+        )
+    if gated:
+        reasons.append(f"{gated} setup(s) rejected by the risk gate")
     if too_wide:
         reasons.append(f"{too_wide} setup(s) too wide to size one whole share")
     if not reasons:
