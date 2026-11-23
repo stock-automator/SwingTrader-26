@@ -181,6 +181,7 @@ export interface CurveSummary {
   max_drawdown_pct: number | null;
   volatility_pct: number | null;
   exposure_pct: number | null;
+  avg_invested_pct: number | null;
 }
 
 export interface RelativeMetrics {

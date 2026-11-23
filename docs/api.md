@@ -129,11 +129,17 @@ response with `FX_CONVERSIONS_PER_ROUND_TRIP=2`; with the default `0`,
 `fx_cost_pct_per_leg` is `0.0`.
 
 Every response also carries `oos_summary` (first; `null` unless
-`walk_forward`), `exposure_pct` (0-100, % of bars invested) on each summary,
-a `spy_exposure_matched` curve and summary (SPY held only while the strategy
-was invested; omitted without SPY) and `skipped_signals`. `warnings` always
-includes the survivorship label, plus a fractional label and a "too few
-trades" warning below 30 trades. Real excerpt (synthetic data via
+`walk_forward`, or when it cannot be computed - see `warnings`),
+`exposure_pct` (0-100, % of bars in a trade) and `avg_invested_pct` (0-100,
+mean |position notional| / equity) on each summary, a `spy_exposure_matched`
+curve and summary (SPY held at the strategy's invested fraction of equity
+each bar; omitted without SPY) and `skipped_signals` (risk-gate refusals,
+plus entries shrunk to cash, `size capped to cash`, or emptied,
+`insufficient cash`). Each `oos_summary` window computes signals from its
+in-sample start (warm-up) but trades and is measured only on the OOS bars.
+`warnings` always includes the survivorship label, plus a fractional label,
+a risk-gate label (portfolio risk cap not modelled) and a "too few trades"
+warning below 30 trades. Real excerpt (synthetic data via
 `TestClient`, `walk_forward`, `fractional` and `use_risk_gate` all `true`,
 windows and curves trimmed):
 
@@ -172,18 +178,20 @@ windows and curves trimmed):
       "sharpe_ratio": 0.965513364091246,
       "max_drawdown_pct": -0.9689520909379977,
       "volatility_pct": 1.4232067477772492,
-      "exposure_pct": 3.166666666666667
+      "exposure_pct": 3.166666666666667,
+      "avg_invested_pct": 2.1373509331824603
     },
     "spy_exposure_matched": {
       "label": "SPY at the strategy's exposure",
       "initial_value": 1000.0,
-      "final_value": 995.58,
-      "total_return_pct": -0.4424827015979127,
-      "cagr_pct": -0.19333190281825008,
-      "sharpe_ratio": -0.1605383921112468,
-      "max_drawdown_pct": -1.5077900277346188,
-      "volatility_pct": 1.1228657726739666,
-      "exposure_pct": 3.166666666666667
+      "final_value": 997.06,
+      "total_return_pct": -0.2944795085133567,
+      "cagr_pct": -0.12861175356640997,
+      "sharpe_ratio": -0.16010721932144553,
+      "max_drawdown_pct": -1.0151247146858566,
+      "volatility_pct": 0.7570361939158169,
+      "exposure_pct": 3.166666666666667,
+      "avg_invested_pct": 2.1373509331824603
     }
   },
   "equity_curves": [
@@ -192,13 +200,14 @@ windows and curves trimmed):
       "strategy": 1032.95,
       "buy_and_hold": 2294.34,
       "spy": 1216.75,
-      "spy_exposure_matched": 995.58
+      "spy_exposure_matched": 997.06
     }
   ],
   "skipped_signals": {},
   "warnings": [
-    "Survivorship bias: tickers are today's index members (current-constituent universe), so names that were delisted or dropped are missing and results are optimistic.",
+    "Survivorship bias: if these tickers were picked from today's index members, names that were delisted or dropped since are missing and results are optimistic.",
     "Fractional sizing: this backtest trades fractional shares; live and paper orders use whole shares, so they will size smaller or skip.",
+    "Risk gate: sleeves run independently, so the live portfolio risk cap (total open risk across positions) is not modelled; dynamic risk is set by the live gate from each sleeve's own equity.",
     "Too few trades (1) to judge an edge: under 30, the result is mostly noise."
   ]
 }

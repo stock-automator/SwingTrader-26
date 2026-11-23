@@ -208,7 +208,14 @@ old behaviour):
   live/paper orders stay whole shares (Alpaca can't do fractional brackets).
 - `use_risk_gate=True` sizes entries with `RiskManager.build_risk_managed_order`
   (the live gate) at the signal bar's close; refused entries are counted per
-  reason in `result.skipped_signals` (`dict[str, int]`, empty otherwise).
+  reason in `result.skipped_signals` (`dict[str, int]`).
+
+Always on: every entry is capped at what current equity buys after spread
+and costs (whole shares or fractional steps); shrunk entries count as
+`size capped to cash`, emptied ones as `insufficient cash` in
+`skipped_signals`. Trades still open at the end are closed at the last bar
+(`finalize_trades=True`), and `result.position_value` is |position
+notional| per bar.
 
 `result.trades` is the `backtesting` library's native trades DataFrame
 (`Size`, `EntryPrice`, `ExitPrice`, `PnL`, `ReturnPct`, `EntryTime`,
