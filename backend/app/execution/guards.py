@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Callable, Literal
 import pandas as pd
 
 from ..data.loader import fetch_earnings_dates, fetch_stock_splits
+from .market_clock import NY
 
 if TYPE_CHECKING:
     from ..config import Settings
@@ -178,7 +179,7 @@ def enforce_order_guards(
     if intent == "EXIT":
         return GuardResult(allowed=True)
 
-    now = pd.Timestamp.now(tz="America/New_York")
+    now = pd.Timestamp.now(tz=NY)
     reasons = _session_reasons(now, settings, clock)
     earnings, earnings_error = _catalyst_dates("earnings", fetch_earnings_dates, ticker)
     splits, splits_error = _catalyst_dates("split", fetch_stock_splits, ticker)

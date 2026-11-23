@@ -260,7 +260,7 @@ async def submit_order(
         request.side,
         request.qty,
         request.intent,
-        (lambda: alpaca.get_positions()) if alpaca is not None else None,
+        alpaca.get_positions if alpaca is not None else None,
         settings,
         clock,
     )
