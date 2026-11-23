@@ -523,14 +523,18 @@ a live order.
 | `limit_price` | float \| null | `null` | Required for `LIMIT`; optional entry price for a `BRACKET` (omit for a market-entry bracket) |
 | `stop_loss` / `take_profit` | float \| null | `null` | Required for `BRACKET` |
 
-| `intent` | string \| null | `null` | `"ENTRY"` or `"EXIT"`. Unset: `buy` = `ENTRY`, `sell` = `EXIT` |
+| `intent` | string \| null | `null` | `"ENTRY"` or `"EXIT"`. `"ENTRY"` always guards; otherwise only a sell of a held long is an EXIT (see below) |
 
 Order guards (`execution/guards.py`'s `enforce_order_guards`) run on every
 order, on this route and on `POST /api/v1/orders/submit`. They cannot be
 switched off.
 
-- **EXIT** always goes through and makes no lookups, so you can always get
-  out of a position.
+- **EXIT** always goes through, even when the market is closed or the
+  calendar is down, so you can always get out of a position. An order is an
+  EXIT only if it is a sell and the Alpaca account holds at least `qty` long
+  of that ticker; `intent="EXIT"` alone never makes it one. Every buy, an
+  unheld, oversized or short-side sell, and a sell whose position lookup
+  fails are guarded as ENTRY.
 - **ENTRY** is refused unless all of these pass:
   - **Session**: Alpaca's trading calendar says the regular session is open
     now. Holidays, weekends and the time after a half-day's early close are
@@ -542,12 +546,12 @@ switched off.
     Alpaca keys are missing, the entry is refused.
 
 A refused order never reaches the broker. It comes back as a `422` listing
-every reason that applied. Real response, from a `TestClient` call on a day
-with no trading session and earnings due tomorrow:
+every reason that applied. Real response, from a `TestClient` buy at 05:51 ET
+on Monday 2026-11-23 (before the 09:30 open) with earnings due the next day:
 
 ```json
 {
-  "detail": "Order blocked (ENTRY): Market is closed (2026-11-23 is not a trading day) - entries blocked. Within 48h of a scheduled earnings date (2026-11-24) - new entries suppressed."
+  "detail": "Order blocked (ENTRY): Market is closed (outside regular hours (09:30-16:00 ET)) - entries blocked. Within 48h of a scheduled earnings date (2026-11-24) - new entries suppressed."
 }
 ```
 
@@ -933,7 +937,7 @@ rather than in-process memory, so order state survives a process restart.
 | `order_type` | string | `"MARKET"` | `"MARKET"` or `"LIMIT"` |
 | `limit_price` | float \| null | `null` | — |
 | `reference_price` | float \| null | `null` | Required for `broker="PAPER"` + `order_type="MARKET"` (the quote it fills against); ignored by `ALPACA`, which prices its own fill |
-| `intent` | string \| null | `null` | `"ENTRY"` or `"EXIT"`. Unset: `buy` = `ENTRY`, `sell` = `EXIT`. Guarded like `POST /api/v1/execution/orders` |
+| `intent` | string \| null | `null` | `"ENTRY"` or `"EXIT"`. Guarded like `POST /api/v1/execution/orders`; a `PAPER` sell is always guarded as an ENTRY (the paper broker keeps no positions) |
 
 ```json
 {

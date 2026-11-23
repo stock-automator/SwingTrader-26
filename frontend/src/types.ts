@@ -402,7 +402,7 @@ export interface ExecutionOrderRequest {
   limit_price?: number | null;
   stop_loss?: number | null;
   take_profit?: number | null;
-  /** ENTRY is guarded (422 if blocked); EXIT always goes through. Unset: buy = ENTRY, sell = EXIT. */
+  /** ENTRY always guards (422 if blocked). A sell skips the guards only if the account holds >= qty long of the ticker. */
   intent?: "ENTRY" | "EXIT" | null;
 }
 
