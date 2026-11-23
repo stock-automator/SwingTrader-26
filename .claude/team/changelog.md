@@ -10,3 +10,4 @@ Every approved change to agents, skills or CLAUDE.md:
 - 2026-11-23 .claude/skills/ticker-lifecycle-check/SKILL.md (new), CLAUDE.md — data-first rename/merger/buyout classification — repeated workflow (3+ in cycle 01) — approved by A
 - 2026-11-23 backend/app/quant/engine.py — every backtest caps orders to available cash (existing results change) — F2 reviewer WARNING 1 — approved by A
 - 2026-11-23 .claude/hooks/block-dangerous-git.sh, CLAUDE.md — agents may push feature branches and open PRs; force push, push/commit/merge on main and gh pr merge stay blocked — A's request in the thread — approved by A
+- 2026-11-23 .claude/hooks/block-dangerous-git.sh, CLAUDE.md — agents may merge a PR once all CI checks pass and A confirmed Gate 2 (no --admin) — A's request in the thread — approved by A

@@ -40,8 +40,10 @@ DANGEROUS_PATTERNS=(
   "${PUSH}(.*[[:space:]])?(-f|--force|--force-with-lease|--force-if-includes|--mirror|--all|--delete|-d)([[:space:]=]|$)"
   "${PUSH}(.*[[:space:]])?\+[^[:space:]]+"
   "${PUSH}(.*[[:space:]])?([^[:space:]]*:)?(refs/heads/)?(main|master)([[:space:]]|$)"
-  # Merging a PR lands it on main: A merges.
-  "${START}gh[[:space:]]+pr[[:space:]]+merge"
+  # `gh pr merge` is allowed (A, 2026-11-23) but never with --admin, which
+  # bypasses required checks; rule: merge only after all CI checks pass and
+  # A has confirmed Gate 2 for what the PR contains.
+  "${START}gh[[:space:]]+pr[[:space:]]+merge(.*[[:space:]])?--admin"
   "${GIT}reset[[:space:]]+(.*[[:space:]])?--hard"
   "${GIT}clean[[:space:]]+(.*[[:space:]])?-[a-zA-Z]*f"
   "${GIT}branch[[:space:]]+(.*[[:space:]])?(-D|--delete[[:space:]]+--force)"
