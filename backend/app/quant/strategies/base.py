@@ -10,6 +10,8 @@ See AGENTS.md for the full schema contract and instructions on adding a new
 strategy.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -56,6 +58,13 @@ class BaseStrategy(ABC):
             there is no trade to size.
         """
         raise NotImplementedError
+
+    def signal_strength(self, signals: pd.DataFrame) -> pd.Series | None:
+        """Optional, opt-in: how strong each bar's signal is, higher is
+        stronger, from this strategy's own `generate_signals` output. Used
+        only to rank one strategy's own picks (the daily shortlist); values
+        are not comparable across strategies. `None` = no ranking."""
+        return None
 
     @staticmethod
     def validate_output(df: pd.DataFrame) -> None:
