@@ -2,10 +2,10 @@
 
 Every test injects a fake `AlpacaExecutionClient` via FastAPI's dependency
 override; none touches the network or a real Alpaca account. Dispatch-guard
-behavior (`TestDispatchGuards`) is exercised separately with the clock and
-earnings/split calendars monkeypatched - every other test here disables
-guards via a `get_settings` override so they stay focused on Alpaca dispatch
-plumbing, not incidentally depending on session guard.
+behavior (`TestDispatchGuards`) is exercised with the `market` fixture's fake
+clock (conftest.py); every other test here runs with that clock in a REGULAR
+session and empty earnings/split calendars, so they stay focused on Alpaca
+dispatch plumbing. Guards can no longer be switched off (batch 02, F1).
 """
 
 from types import SimpleNamespace
@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.app.api.execution as execution_module
+import backend.app.execution.guards as guards_module
 from backend.app.config import Settings, get_settings
 from backend.app.execution.alpaca_client import (
     AlpacaExecutionClient,
@@ -29,10 +30,8 @@ def client() -> TestClient:
 
 
 @pytest.fixture(autouse=True)
-def _clear_overrides():
-    app.dependency_overrides[get_settings] = lambda: Settings(
-        execution_guards_enabled=False
-    )
+def _clear_overrides(market):
+    app.dependency_overrides[get_settings] = lambda: Settings()
     yield
     app.dependency_overrides.pop(execution_module._client, None)
     app.dependency_overrides.pop(get_settings, None)
@@ -255,103 +254,80 @@ class TestPortfolioHistory:
 
 
 class TestDispatchGuards:
-    """`_enforce_dispatch_guards` wiring - clock and calendars are all
-    monkeypatched so nothing here depends on wall-clock time or the network."""
+    """`enforce_order_guards` wiring - the fake clock and the calendars on
+    `execution.guards` are set per test, so nothing here depends on
+    wall-clock time or the network."""
 
-    def _enable_guards(self, monkeypatch, *, now, earnings=None, splits=None):
-        app.dependency_overrides[get_settings] = lambda: Settings(
-            execution_guards_enabled=True
-        )
-        monkeypatch.setattr(execution_module, "_current_moment", lambda: now)
+    def _set(self, monkeypatch, market, *, state="REGULAR", earnings=None, splits=None):
+        market.state = state
         monkeypatch.setattr(
-            execution_module, "fetch_earnings_dates", lambda ticker: earnings or []
+            guards_module, "fetch_earnings_dates", lambda t, *a, **k: earnings or []
         )
         monkeypatch.setattr(
-            execution_module, "fetch_stock_splits", lambda ticker: splits or []
+            guards_module, "fetch_stock_splits", lambda t, *a, **k: splits or []
         )
 
-    def test_regular_session_no_catalyst_dispatches(self, client, monkeypatch):
-        _override_with_configured_client()
-        # Wednesday 10:00 ET - regular session.
-        self._enable_guards(monkeypatch, now=pd.Timestamp("2026-09-16 10:00"))
-        response = client.post(
+    def _buy(self, client):
+        return client.post(
             "/api/v1/execution/orders",
             json={"ticker": "AAPL", "side": "buy", "qty": 10, "order_type": "MARKET"},
         )
-        assert response.status_code == 200
 
-    def test_weekend_dispatch_is_422(self, client, monkeypatch):
+    def test_regular_session_no_catalyst_dispatches(self, client, monkeypatch, market):
         _override_with_configured_client()
-        # Saturday.
-        self._enable_guards(monkeypatch, now=pd.Timestamp("2026-09-19 10:00"))
-        response = client.post(
-            "/api/v1/execution/orders",
-            json={"ticker": "AAPL", "side": "buy", "qty": 10, "order_type": "MARKET"},
-        )
+        self._set(monkeypatch, market)
+        assert self._buy(client).status_code == 200
+
+    def test_weekend_dispatch_is_422(self, client, monkeypatch, market):
+        _override_with_configured_client()
+        self._set(monkeypatch, market, state="CLOSED")
+        response = self._buy(client)
         assert response.status_code == 422
-        assert "closed" in response.json()["detail"].lower()
+        assert "closed" in str(response.json()["detail"]).lower()
 
-    def test_earnings_lockout_blocks_dispatch(self, client, monkeypatch):
+    def test_earnings_lockout_blocks_dispatch(self, client, monkeypatch, market):
         _override_with_configured_client()
-        self._enable_guards(
-            monkeypatch,
-            now=pd.Timestamp("2026-09-16 10:00"),
-            earnings=[pd.Timestamp("2026-09-17")],
-        )
-        response = client.post(
-            "/api/v1/execution/orders",
-            json={"ticker": "AAPL", "side": "buy", "qty": 10, "order_type": "MARKET"},
-        )
+        self._set(monkeypatch, market, earnings=[_tomorrow()])
+        response = self._buy(client)
         assert response.status_code == 422
-        assert "earnings" in response.json()["detail"].lower()
+        assert "earnings" in str(response.json()["detail"]).lower()
 
-    def test_split_lockout_blocks_dispatch(self, client, monkeypatch):
+    def test_split_lockout_blocks_dispatch(self, client, monkeypatch, market):
         _override_with_configured_client()
-        self._enable_guards(
-            monkeypatch,
-            now=pd.Timestamp("2026-09-16 10:00"),
-            splits=[pd.Timestamp("2026-09-15")],
-        )
-        response = client.post(
-            "/api/v1/execution/orders",
-            json={"ticker": "AAPL", "side": "buy", "qty": 10, "order_type": "MARKET"},
-        )
+        self._set(monkeypatch, market, splits=[_tomorrow()])
+        response = self._buy(client)
         assert response.status_code == 422
-        assert "split" in response.json()["detail"].lower()
+        assert "split" in str(response.json()["detail"]).lower()
 
-    def test_close_all_is_never_guarded(self, client, monkeypatch):
+    def test_close_all_is_never_guarded(self, client, monkeypatch, market):
         """The kill-switch must work even outside market hours."""
         _override_with_configured_client()
-        self._enable_guards(monkeypatch, now=pd.Timestamp("2026-09-19 10:00"))
+        self._set(monkeypatch, market, state="CLOSED")
         response = client.post("/api/v1/execution/close-all", json={"confirm": True})
         assert response.status_code == 200
 
-    def test_earnings_calendar_unavailable_fails_open(self, client, monkeypatch):
-        """A data-provider failure on the earnings/split lookup must not
-        block dispatch - only an actual catalyst date, or the clock, does."""
+    def test_earnings_calendar_unavailable_fails_closed(
+        self, client, monkeypatch, market
+    ):
+        """F1: a data-provider failure on the earnings/split lookup now
+        blocks a new entry (it used to fail open)."""
         from backend.app.data.loader import DataUnavailableError
 
         _override_with_configured_client()
-        app.dependency_overrides[get_settings] = lambda: Settings(
-            execution_guards_enabled=True
-        )
-        monkeypatch.setattr(
-            execution_module,
-            "_current_moment",
-            lambda: pd.Timestamp("2026-09-16 10:00"),
-        )
 
-        def _raise(ticker):
+        def _raise(ticker, *a, **k):
             raise DataUnavailableError("provider down")
 
-        monkeypatch.setattr(execution_module, "fetch_earnings_dates", _raise)
-        monkeypatch.setattr(execution_module, "fetch_stock_splits", _raise)
+        monkeypatch.setattr(guards_module, "fetch_earnings_dates", _raise)
+        monkeypatch.setattr(guards_module, "fetch_stock_splits", _raise)
 
-        response = client.post(
-            "/api/v1/execution/orders",
-            json={"ticker": "AAPL", "side": "buy", "qty": 10, "order_type": "MARKET"},
-        )
-        assert response.status_code == 200
+        response = self._buy(client)
+        assert response.status_code == 422
+        assert "unavailable" in str(response.json()["detail"]).lower()
+
+
+def _tomorrow() -> pd.Timestamp:
+    return pd.Timestamp.now().normalize() + pd.Timedelta(days=1)
 
 
 class TestClientRaisesMidRequest:

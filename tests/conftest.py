@@ -36,3 +36,40 @@ def ohlcv() -> pd.DataFrame:
         },
         index=index,
     )
+
+
+class FakeMarketClock:
+    """Stand-in for `execution.market_clock.MarketClock` - returns a fixed
+    session (or raises) and counts calls, never touching Alpaca."""
+
+    def __init__(self, state: str = "REGULAR", raises: Exception | None = None):
+        self.state = state
+        self.raises = raises
+        self.calls = 0
+
+    def session(self, now=None):
+        from backend.app.execution.market_clock import SessionInfo
+
+        self.calls += 1
+        if self.raises is not None:
+            raise self.raises
+        return SessionInfo(
+            state=self.state, open=None, close=None, reason=f"fake {self.state}"
+        )
+
+
+@pytest.fixture
+def market(monkeypatch):
+    """Installs a REGULAR-session fake clock and empty earnings/split
+    calendars for every order route. Tests mutate `market.state`/`.raises`
+    to simulate closed sessions or calendar outages."""
+    import backend.app.execution.guards as guards
+    from backend.app.execution.market_clock import get_market_clock
+    from backend.app.main import app
+
+    clock = FakeMarketClock()
+    app.dependency_overrides[get_market_clock] = lambda: clock
+    monkeypatch.setattr(guards, "fetch_earnings_dates", lambda ticker, *a, **k: [])
+    monkeypatch.setattr(guards, "fetch_stock_splits", lambda ticker, *a, **k: [])
+    yield clock
+    app.dependency_overrides.pop(get_market_clock, None)

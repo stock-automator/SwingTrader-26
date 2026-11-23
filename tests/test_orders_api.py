@@ -19,7 +19,9 @@ from backend.app.main import app
 
 
 @pytest.fixture(autouse=True)
-def _isolated_duckdb(tmp_path, monkeypatch):
+def _isolated_duckdb(tmp_path, monkeypatch, market):
+    """Isolated DuckDB plus a REGULAR-session fake clock (`market`, from
+    conftest.py) - order guards always run since batch 02 F1."""
     monkeypatch.setenv("SCANS_DB_PATH", str(tmp_path / "orders.duckdb"))
     session.reset_for_tests()
     yield
