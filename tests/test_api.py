@@ -532,7 +532,7 @@ class TestDataSyncEndpoint:
 
         response = client.post("/api/v1/data/sync", json={})
         assert response.status_code == 202
-        assert response.json()["tickers"] == ["AAPL", "MSFT", "GBPUSD=X"]
+        assert response.json()["tickers"] == ["AAPL", "MSFT", "GBPUSD=X", "SPY"]
 
     def test_empty_watchlist_and_no_tickers_is_422(self, client, monkeypatch):
         import backend.app.api.data_sync as data_sync_module
