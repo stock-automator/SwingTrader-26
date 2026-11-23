@@ -91,3 +91,15 @@ def _no_live_fx_quote(monkeypatch):
 
     monkeypatch.setattr(yfinance, "Ticker", _offline_ticker)
     monkeypatch.setattr(fx, "_live_cache", None)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_alpaca_account(monkeypatch):
+    """Tests that set fake Alpaca keys must not reach Alpaca for the
+    day-trades line; tests that need an account patch get_account themselves."""
+    from alpaca.trading.client import TradingClient
+
+    def _offline_account(self, *args, **kwargs):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(TradingClient, "get_account", _offline_account)

@@ -44,6 +44,10 @@ Format: `## YYYY-MM-DD — Decision` then Why / Alternatives considered.
 - **Impact:** every existing backtest result changes. For example, KO with $1k went from 5 to 33 trades, and final values moved by up to 20%. The cap always applies; there's no opt-out.
 - **Alternatives:** keep the old silent cancel (dishonest), or make the cap opt-in (two answers to one question).
 
+## 2026-11-23 — Scheduled jobs run on UK time (Europe/London)
+- **Why:** the brief is for A in the UK, and the customer asked for it at ~08:00 UK. The jobs are anchored to A's day, not to the US session. APScheduler handles UK daylight-saving changes. The brief still uses the last completed NYSE session for its data.
+- **Alternatives:** New York time (the Gate 1 design note). It would drift by an hour during the weeks when UK and US clock changes don't line up.
+
 ## 2026-11-22 — Work on local branch only until A pushes
 - **Why:** no GitHub credentials on this Mac; A will push at the end.
 - **Alternatives:** `gh auth login` now.
