@@ -11,7 +11,7 @@ from backend.app.quant.portfolio import PortfolioConfig, suspect_spike
 from backend.app.quant.regime import MACRO_BLOCKED_REGIMES
 from backend.app.quant.scorecard import param_variants
 from backend.app.quant.strategies.base import BaseStrategy
-from tests.test_portfolio_scorecard_c3 import free, frame, neutral, run, signal_on
+from tests.test_portfolio_scorecard_c3 import frame, free, neutral, run, signal_on
 
 
 def closes(seq: list[float], pad: int = 30) -> pd.Series:
@@ -77,6 +77,7 @@ def test_param_variants_keep_positive_int_params_at_one_or_more():
 # --------------------------------------------------------------------------
 # Long entry filters in PortfolioConfig (regime and trend)
 # --------------------------------------------------------------------------
+
 
 def test_long_filters_off_by_default():
     c = PortfolioConfig()
