@@ -3,7 +3,7 @@ ticket reads it cache-only."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.api import data_sync
 from backend.app.config import Settings, get_settings
+from backend.app.data import fx
 from backend.app.data.universe import sanitize_ticker
 from backend.app.main import app
 
@@ -68,35 +69,42 @@ def test_f6_default_sync_gbpusd_not_duplicated(client, tmp_path, monkeypatch) ->
 
 
 def _post(client, monkeypatch, result):
-    calls: list[dict] = []
-
-    def fake(amount, as_of=None, data_dir=None, allow_download=False):
-        calls.append({"allow_download": allow_download})
-        return result
-
-    monkeypatch.setattr("backend.app.api.order_ticket.usd_to_gbp", fake)
+    """The ticket now reads `fx.latest_gbp_rate` (live quote, else daily);
+    patch that seam with a fixed `FxRate` or None."""
+    monkeypatch.setattr("backend.app.data.fx.latest_gbp_rate", lambda *a, **k: result)
     r = client.post("/api/v1/order-ticket", json=TICKET)
     assert r.status_code == 200, r.text
-    return calls, r.json()["tickets"][0]
+    return r.json()["tickets"][0]
 
 
-def test_f6_ticket_never_downloads(client, monkeypatch) -> None:
+def test_f6_ticket_never_downloads_history(client, monkeypatch) -> None:
+    """Even with downloads allowed, the daily fallback reads the cache only
+    (no full-history download per request)."""
     app.dependency_overrides[get_settings] = lambda: Settings(
         allow_downloads=True, data_dir=Path("/nonexistent-fx")
     )
-    calls, _ = _post(client, monkeypatch, (1.0, 1.25, date(2026, 11, 20)))
-    assert calls == [{"allow_download": False}]
+    calls: list[bool] = []
+
+    def fake_load_prices(ticker, data_dir=None, allow_download=True, **_):
+        calls.append(allow_download)
+        raise fx.DataUnavailableError("not cached")
+
+    monkeypatch.setattr(fx, "_live_quote", lambda now: None)
+    monkeypatch.setattr(fx, "load_prices", fake_load_prices)
+    r = client.post("/api/v1/order-ticket", json=TICKET)
+    assert r.status_code == 200, r.text
+    assert calls == [False]
 
 
 def test_f6_ticket_has_fx_rate_date(client, monkeypatch) -> None:
-    _, t = _post(client, monkeypatch, (1.0, 1.25, date(2026, 11, 20)))
-    assert t["fx_rate_date"] == "2026-11-20"
+    t = _post(client, monkeypatch, fx.FxRate(1.25, datetime(2026, 11, 20), "daily"))
+    assert t["fx_rate_date"].startswith("2026-11-20")
     assert t["fx_note"] is None
     assert t["notional_gbp"] is not None
 
 
 def test_f6_ticket_no_rate_note_and_null_date(client, monkeypatch) -> None:
-    _, t = _post(client, monkeypatch, None)
+    t = _post(client, monkeypatch, None)
     assert "fx_rate_date" in t and t["fx_rate_date"] is None
     assert t["risk_gbp"] is None and t["notional_gbp"] is None
     assert "GBP rate unavailable" in t["fx_note"]
