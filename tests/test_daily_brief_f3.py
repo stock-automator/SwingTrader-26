@@ -8,8 +8,9 @@ synthetic parquet files in `tmp_path`; Telegram HTTP is a fake `requests.post`.
 
 from __future__ import annotations
 
+import math
 import re
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -429,3 +430,444 @@ class TestF3TelegramChannel:
         self._capture(monkeypatch, statuses=[200, 400])
         with pytest.raises(requests.HTTPError):
             TelegramAlertChannel("T", "1").send_text("z" * 5000 + "\n" + "z" * 100)
+
+
+# ======================================================= rework loop 1 (F3a)
+
+SECRET = "123456:SECRETtokenXYZ"
+TG_URL = f"https://api.telegram.org/bot{SECRET}/sendMessage"
+
+
+def _long_scan_setup(df, ticker, rr, gap=2.0, shares=None, risk_manager=None):
+    entry = round(float(df["Close"].iloc[-1]), 2)
+    stop = round(entry - gap, 2)
+    n = shares if shares is not None else risk_manager.position_size(entry, stop)
+    return Setup(
+        ticker=ticker,
+        direction=DIRECTION_LONG,
+        tradable=n > 0,
+        as_of=df.index[-1],
+        close=entry,
+        regime="BULL_TREND",
+        adx=30.0,
+        atr=1.0,
+        entry_price=entry,
+        stop_loss=stop,
+        take_profit=round(entry + rr * gap, 2),
+        shares=n,
+        risk_amount=n * gap,
+        reward_risk_ratio=rr,
+    )
+
+
+class RRScan:
+    """`rr[(strategy_key, ticker)]` -> reward:risk of that LONG (absent: none)."""
+
+    def __init__(self, rr):
+        self.rr = rr
+
+    def __call__(self, frames, strategy, risk_manager, *a, **k):
+        from backend.app.quant.strategies import REGISTRY
+
+        key = next(n for n, cls in REGISTRY.items() if type(strategy) is cls)
+        report = ScanReport()
+        for ticker, df in frames.items():
+            if (key, ticker) in self.rr:
+                report.setups.append(
+                    _long_scan_setup(
+                        df, ticker, self.rr[(key, ticker)], risk_manager=risk_manager
+                    )
+                )
+        return report
+
+
+class TestF3BoundedHistory:
+    """The brief evaluates only the last SIGNAL_LOOKBACK_BARS bars."""
+
+    def test_f3_lookback_constant_is_sane(self, daily):
+        n = daily.SIGNAL_LOOKBACK_BARS
+        assert isinstance(n, int) and n >= 500
+
+    def test_f3_scan_receives_at_most_lookback_bars(self, daily, tmp_path):
+        settings = _settings(tmp_path)
+        for i, t in enumerate(TICKERS):
+            _bars("2026-11-17", n=1500, start=50.0 + i).to_parquet(
+                settings.data_dir / f"{t}.parquet"
+            )
+        seen = []
+
+        def spy_scan(frames, strategy, rm, *a, **k):
+            seen.extend(len(df) for df in frames.values())
+            return ScanReport()
+
+        daily.scan_universe = spy_scan
+        daily.build_daily_brief(settings, now=WED_0800)
+        assert seen and max(seen) <= daily.SIGNAL_LOOKBACK_BARS
+        assert max(seen) > 300  # not trimmed to nothing
+
+    @pytest.mark.parametrize(
+        "name",
+        sorted(
+            __import__("backend.app.quant.strategies", fromlist=["REGISTRY"]).REGISTRY
+        ),
+    )
+    def test_f3_last_bars_signal_matches_full_history(self, daily, name):
+        """Latest-bar signal/sl/tp on the last-N slice == on full history, for
+        several price shapes and several end points. Failure names the
+        strategy that needs a larger SIGNAL_LOOKBACK_BARS."""
+        import numpy as np
+
+        from backend.app.quant.strategies import REQUIRES_BENCHMARK, build_strategy
+
+        n_bars, lookback = 1600, daily.SIGNAL_LOOKBACK_BARS
+        index = pd.bdate_range(end="2026-11-17", periods=n_bars)
+
+        def frame(close):
+            close = pd.Series(close, index=index)
+            rng = np.random.default_rng(7)
+            span = close * (0.004 + 0.01 * rng.random(n_bars))
+            return pd.DataFrame(
+                {
+                    "Open": close.shift(1).fillna(close.iloc[0]),
+                    "High": close + span,
+                    "Low": close - span,
+                    "Close": close,
+                    "Volume": (1_000_000 * (1 + rng.random(n_bars))).astype(int),
+                },
+                index=index,
+            )
+
+        t = np.arange(n_bars)
+        rng = np.random.default_rng(1)
+        shapes = {
+            "uptrend_noise": 50
+            * np.exp(0.0006 * t + np.cumsum(rng.normal(0, 0.012, n_bars))),
+            "sine_range": 100 + 12 * np.sin(t / 9.0) + rng.normal(0, 0.8, n_bars),
+            "downtrend": 300
+            * np.exp(-0.0005 * t + np.cumsum(rng.normal(0, 0.01, n_bars))),
+            "base_then_breakout": np.where(
+                t < n_bars - 60,
+                80 + rng.normal(0, 1, n_bars),
+                80 + (t - (n_bars - 60)) * 0.9,
+            ),
+        }
+        bench = frame(
+            100 * np.exp(0.0003 * t + np.cumsum(rng.normal(0, 0.008, n_bars)))
+        )
+
+        def tail_rows(strategy, df):
+            # The latest bar plus the 7 before it (each still has >= N-7 bars
+            # of history in the slice), so a quiet last bar can't hide a gap.
+            out = strategy.generate_signals(df).iloc[-8:]
+            return [
+                (int(r["signal"]), float(r["sl_value"]), float(r["tp_value"]))
+                for _, r in out.iterrows()
+            ]
+
+        def close_enough(a, b):
+            return (math.isnan(a) and math.isnan(b)) or math.isclose(
+                a, b, rel_tol=1e-6, abs_tol=1e-12
+            )
+
+        mismatches = []
+        for shape, close in shapes.items():
+            full = frame(close)
+            for cut in (0, 17, 34):
+                part = full.iloc[: n_bars - cut]
+                strategy = build_strategy(name)
+                if name in REQUIRES_BENCHMARK:
+                    strategy.set_benchmark(bench)
+                want = tail_rows(strategy, part)
+                got = tail_rows(strategy, part.iloc[-lookback:])
+                same = all(
+                    w[0] == g[0]
+                    and close_enough(w[1], g[1])
+                    and close_enough(w[2], g[2])
+                    for w, g in zip(want, got)
+                )
+                if not same:
+                    mismatches.append((shape, cut, want[-1], got[-1]))
+        assert not mismatches, (
+            f"{name}: last-{lookback}-bar slice differs from full history "
+            f"(raise SIGNAL_LOOKBACK_BARS): {mismatches[:3]}"
+        )
+
+
+class TestF3TokenScrub:
+    def _boom(self, monkeypatch, exc_type=requests.ConnectionError):
+        def post(url, **k):
+            raise exc_type(f"HTTPSConnectionPool: Max retries, url: {TG_URL}")
+
+        monkeypatch.setattr(requests, "post", post)
+
+    def test_f3_send_text_error_has_no_secret(self, monkeypatch):
+        from backend.app.alerts.dispatcher import TelegramAlertChannel
+
+        self._boom(monkeypatch)
+        with pytest.raises(requests.RequestException) as info:
+            TelegramAlertChannel(SECRET, "1").send_text("hi")
+        assert SECRET not in str(info.value) and "<token>" in str(info.value)
+
+    def test_f3_send_error_has_no_secret(self, monkeypatch):
+        from backend.app.alerts.dispatcher import AlertMessage, TelegramAlertChannel
+
+        self._boom(monkeypatch)
+        with pytest.raises(requests.RequestException) as info:
+            TelegramAlertChannel(SECRET, "1").send(AlertMessage(title="t", body="b"))
+        assert SECRET not in str(info.value)
+
+    def test_f3_http_error_status_url_scrubbed(self, monkeypatch):
+        from backend.app.alerts.dispatcher import TelegramAlertChannel
+
+        class Bad:
+            def raise_for_status(self):
+                raise requests.HTTPError(
+                    f"400 Client Error: Bad Request for url: {TG_URL}"
+                )
+
+        monkeypatch.setattr(requests, "post", lambda *a, **k: Bad())
+        with pytest.raises(requests.HTTPError) as info:
+            TelegramAlertChannel(SECRET, "1").send_text("hi")
+        assert SECRET not in str(info.value) and "400" in str(info.value)
+
+    def test_f3_dispatch_result_has_no_secret(self, monkeypatch):
+        from backend.app.alerts.dispatcher import AlertDispatcher, AlertMessage
+
+        self._boom(monkeypatch)
+        dispatcher = AlertDispatcher.from_channel_config(
+            {"telegram_bot_token": SECRET, "telegram_chat_id": "1"}
+        )
+        results = dispatcher.dispatch(AlertMessage(title="t", body="b"))
+        assert results["telegram"].startswith("failed")
+        assert SECRET not in results["telegram"]
+
+    def test_f3_alerts_test_502_detail_has_no_secret(
+        self, tmp_path, client, monkeypatch
+    ):
+        self._boom(monkeypatch)
+        _use(_settings(tmp_path, telegram_bot_token=SECRET, telegram_chat_id="1"))
+        res = client.post("/api/v1/alerts/test", json={"channel": "telegram"})
+        assert res.status_code == 502
+        assert SECRET not in res.text and "<token>" in res.text
+
+    def test_f3_daily_send_error_has_no_secret(
+        self, daily, tmp_path, client, monkeypatch
+    ):
+        self._boom(monkeypatch)
+        _use(_settings(tmp_path, telegram_bot_token=SECRET, telegram_chat_id="1"))
+        res = client.post("/api/v1/reports/daily/send")
+        assert res.status_code == 200 and res.json()["sent"] is False
+        assert SECRET not in res.text
+
+
+class TestF3PartialSend:
+    def _long_brief(self, daily, monkeypatch):
+        text = "\n".join(["a" * 3000, "b" * 3000, "c" * 3000])
+        brief = daily.DailyBrief(
+            as_of=date(2026, 11, 17),
+            last_session=date(2026, 11, 17),
+            regime="BULL_TRENDING",
+            stale=False,
+            text=text,
+        )
+        monkeypatch.setattr(daily, "build_daily_brief", lambda *a, **k: brief)
+
+    def test_f3_part_two_of_three_fails_reports_one_part_sent(
+        self, daily, tmp_path, client, monkeypatch
+    ):
+        self._long_brief(daily, monkeypatch)
+        posted = []
+
+        def post(url, json=None, **k):
+            posted.append(json)
+            return _Resp(400 if len(posted) == 2 else 200)
+
+        monkeypatch.setattr(requests, "post", post)
+        _use(_settings(tmp_path, telegram_bot_token="T", telegram_chat_id="1"))
+        res = client.post("/api/v1/reports/daily/send")
+        assert res.status_code == 200, res.text
+        assert len(posted) == 2  # stops at the failure
+        assert res.json()["sent"] is False
+        assert res.json()["parts"] == 1
+        assert "400" in res.json()["error"]
+
+    def test_f3_first_part_fails_reports_zero_parts(
+        self, daily, tmp_path, client, monkeypatch
+    ):
+        self._long_brief(daily, monkeypatch)
+        monkeypatch.setattr(requests, "post", lambda *a, **k: _Resp(400))
+        _use(_settings(tmp_path, telegram_bot_token="T", telegram_chat_id="1"))
+        res = client.post("/api/v1/reports/daily/send")
+        assert res.json()["sent"] is False and res.json()["parts"] == 0
+
+
+class TestF3OfflineCalendar:
+    @pytest.mark.parametrize(
+        "now, expected",
+        [
+            # Thanksgiving Thu 11-26 closed; Fri 11-27 03:00 NY not yet closed.
+            (datetime(2026, 11, 27, 8, 0, tzinfo=UK), date(2026, 11, 25)),
+            # Fri 11-27 after the 16:00 regular close (offline has no half-days).
+            (datetime(2026, 11, 27, 22, 0, tzinfo=UK), date(2026, 11, 27)),
+            # Thanksgiving morning and evening: Wed is still the last session.
+            (datetime(2026, 11, 26, 22, 0, tzinfo=UK), date(2026, 11, 25)),
+            # Good Friday 2026-04-03: Monday morning -> Thursday.
+            (datetime(2026, 4, 6, 8, 0, tzinfo=UK), date(2026, 4, 2)),
+            # July 4 2026 is a Saturday: observed Fri 07-03 -> Thu 07-02.
+            (datetime(2026, 7, 6, 8, 0, tzinfo=UK), date(2026, 7, 2)),
+            # Juneteenth Fri 2026-06-19.
+            (datetime(2026, 6, 22, 8, 0, tzinfo=UK), date(2026, 6, 18)),
+            # New Year's Day 2027 is a Friday.
+            (datetime(2027, 1, 4, 8, 0, tzinfo=UK), date(2026, 12, 31)),
+            # Christmas Fri 2026-12-25.
+            (datetime(2026, 12, 28, 8, 0, tzinfo=UK), date(2026, 12, 24)),
+            # Plain weekend.
+            (datetime(2026, 11, 21, 12, 0, tzinfo=UK), date(2026, 11, 20)),
+        ],
+    )
+    def test_f3_offline_last_session(self, daily, now, expected):
+        assert daily.last_completed_session(now) == expected
+
+    def test_f3_build_uses_offline_rules_without_alpaca_keys(self, daily, tmp_path):
+        daily.scan_universe = FakeScan(["AAA"])
+        brief = daily.build_daily_brief(
+            _settings(tmp_path, last_day="2026-11-25"),
+            now=datetime(2026, 11, 27, 8, 0, tzinfo=UK),
+        )
+        assert brief.last_session == date(2026, 11, 25) and brief.stale is False
+
+
+class TestF3AlpacaCalendar:
+    NOW = datetime(2026, 11, 27, 19, 0, tzinfo=UK)  # 14:00 NY, after a 13:00 close
+
+    def _alpaca(self, tmp_path):
+        return _settings(
+            tmp_path,
+            last_day="2026-11-25",
+            alpaca_api_key="k",
+            alpaca_api_secret="s",
+        )
+
+    def test_f3_alpaca_half_day_close_is_used(self, daily, tmp_path, monkeypatch):
+        from backend.app.execution.market_clock import NY
+
+        asked = []
+
+        class Clock:
+            def close_on(self, day):
+                asked.append(day)
+                if day.weekday() >= 5 or day == date(2026, 11, 26):
+                    return None
+                hour = 13 if day == date(2026, 11, 27) else 16
+                return datetime(day.year, day.month, day.day, hour, 0, tzinfo=NY)
+
+        monkeypatch.setattr(daily, "_clock_for", lambda *a, **k: Clock())
+        brief = daily.build_daily_brief(self._alpaca(tmp_path), now=self.NOW)
+        assert asked
+        assert brief.last_session == date(2026, 11, 27)
+        assert brief.stale is True and "data stale" in brief.text.lower()
+
+    def test_f3_alpaca_failure_falls_back_to_offline(
+        self, daily, tmp_path, monkeypatch
+    ):
+        class Clock:
+            def close_on(self, day):
+                raise RuntimeError("alpaca 503")
+
+        monkeypatch.setattr(daily, "_clock_for", lambda *a, **k: Clock())
+        brief = daily.build_daily_brief(self._alpaca(tmp_path), now=self.NOW)
+        # Offline: 11-27 closes 16:00 NY, not yet reached -> Wed 11-25.
+        assert brief.last_session == date(2026, 11, 25)
+        assert brief.stale is False
+
+    def test_f3_alpaca_not_consulted_without_keys(self, daily, tmp_path, monkeypatch):
+        def boom(*a, **k):
+            raise AssertionError("Alpaca clock used without keys")
+
+        monkeypatch.setattr(daily, "_clock_for", boom)
+        daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+
+
+class TestF3NoTradesReasons:
+    def test_f3_regime_block_reason(self, daily, tmp_path):
+        settings = _settings(tmp_path)
+        n = 300
+        index = pd.bdate_range(end="2026-11-17", periods=n)
+        close = pd.Series([400.0 - i * 0.8 for i in range(n)], index=index)
+        pd.DataFrame(
+            {
+                "Open": close,
+                "High": close + 1,
+                "Low": close - 1,
+                "Close": close,
+                "Volume": 1_000_000,
+            },
+            index=index,
+        ).to_parquet(settings.data_dir / "SPY.parquet")
+        scan = FakeScan(TICKERS)
+        daily.scan_universe = scan
+        brief = daily.build_daily_brief(settings, now=WED_0800)
+        assert brief.setups == [] and brief.text.startswith("No trades today")
+        assert "regime" in brief.text.splitlines()[0].lower()
+        assert scan.risk_managers == []  # blocked before any scan
+
+    def test_f3_circuit_breaker_reason(self, daily, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            daily.MacroRegimeDetector, "is_long_blocked", lambda s, d: False
+        )
+        monkeypatch.setattr(daily.CircuitBreaker, "is_triggered", lambda s, eq: True)
+        scan = FakeScan(TICKERS)
+        daily.scan_universe = scan
+        brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+        first = brief.text.splitlines()[0]
+        assert brief.setups == [] and first.startswith("No trades today")
+        assert "circuit breaker" in first.lower()
+        assert scan.risk_managers == []
+
+    def test_f3_too_wide_reason(self, daily, tmp_path):
+        daily.scan_universe = FakeScan(
+            ["AAA", "BBB"], stop_gap={"AAA": 40.0, "BBB": 40.0}
+        )
+        brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+        first = brief.text.splitlines()[0]
+        assert brief.setups == [] and first.startswith("No trades today")
+        assert "too wide" in first and "2" in first
+
+
+class TestF3Ranking:
+    def test_f3_ranked_by_reward_risk_across_tickers(self, daily, tmp_path):
+        rr = {
+            ("donchian_breakout", "AAA"): 1.5,
+            ("donchian_breakout", "BBB"): 4.0,
+            ("donchian_breakout", "CCC"): 2.5,
+            ("donchian_breakout", "DDD"): 3.5,
+            ("donchian_breakout", "EEE"): 1.1,
+        }
+        daily.scan_universe = RRScan(rr)
+        brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+        assert [s.ticker for s in brief.setups] == ["BBB", "DDD", "CCC"]
+
+    def test_f3_ticker_uses_highest_reward_risk_strategy_not_first(
+        self, daily, tmp_path
+    ):
+        from backend.app.quant.strategies import REGISTRY
+
+        keys = list(REGISTRY)
+        first, last = keys[0], keys[-1]
+        daily.scan_universe = RRScan(
+            {(first, "AAA"): 1.5, (keys[3], "AAA"): 2.0, (last, "AAA"): 4.0}
+        )
+        brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+        (setup,) = brief.setups
+        assert setup.ticker == "AAA" and setup.strategy == last
+        assert setup.target == pytest.approx(
+            setup.entry + 4.0 * (setup.entry - setup.stop), abs=0.02
+        )
+
+    def test_f3_ticker_listed_once_across_strategies(self, daily, tmp_path):
+        from backend.app.quant.strategies import REGISTRY
+
+        keys = list(REGISTRY)
+        daily.scan_universe = RRScan({(k, "AAA"): 1.0 + i for i, k in enumerate(keys)})
+        brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
+        assert [s.ticker for s in brief.setups] == ["AAA"]
