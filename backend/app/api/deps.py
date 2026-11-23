@@ -16,7 +16,7 @@ import pandas as pd
 
 from ..config import Settings, get_settings
 from ..data.loader import DataUnavailableError, load_prices
-from ..data.universe import DENYLIST, UniverseManager
+from ..data.universe import DENYLIST, UniverseManager, sanitize_ticker
 
 log = logging.getLogger(__name__)
 
@@ -123,13 +123,14 @@ def load_frames(
 
 
 def _read_watchlist(settings: Settings) -> list[str]:
-    """Every symbol in `settings.universe_path`, uncapped, minus
+    """Every symbol in `settings.universe_path` (sanitized), uncapped, minus
     `data.universe.DENYLIST` (delisted, renamed or merged symbols that can no
     longer be fetched). Empty if the file is missing or malformed."""
     universe = UniverseManager(config_path=settings.universe_path).read()
     if universe is None:
         return []
-    return [s for s in universe.symbols if s not in DENYLIST]
+    symbols = (sanitize_ticker(s) for s in universe.symbols)
+    return [s for s in symbols if s and s not in DENYLIST]
 
 
 def load_watchlist(settings: Settings) -> list[str]:
