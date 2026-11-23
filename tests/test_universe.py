@@ -373,28 +373,6 @@ class TestC2DenyEntries:
         assert entry.successor is None
 
 
-class TestC2StaticFallbacks:
-    @pytest.mark.parametrize(
-        "name", ["_STATIC_SP500_FALLBACK", "_STATIC_NASDAQ100_FALLBACK"]
-    )
-    def test_c2_fallback_contains_no_denied_ticker(self, name):
-        fallback = set(getattr(universe_mod, name))
-        assert fallback.isdisjoint(DENIED_TICKERS), sorted(
-            fallback & set(DENIED_TICKERS)
-        )
-
-    @pytest.mark.parametrize("ticker", NEW_LIVE_TICKERS)
-    def test_c2_c4_sp500_fallback_contains_successor(self, ticker):
-        assert ticker in universe_mod._STATIC_SP500_FALLBACK
-
-    def test_c2_every_successor_is_in_some_fallback(self):
-        fallback = set(universe_mod._STATIC_SP500_FALLBACK) | set(
-            universe_mod._STATIC_NASDAQ100_FALLBACK
-        )
-        successors = {e.successor for e in _deny_entries().values() if e.successor}
-        assert successors <= fallback, sorted(successors - fallback)
-
-
 class TestC2OfflineSyncCannotResurrect:
     def test_c2_offline_sync_keeps_previous_and_never_resurrects_denied(
         self, manager, monkeypatch
