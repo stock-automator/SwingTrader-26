@@ -12,9 +12,10 @@ the same first common date:
     buy_and_hold  the target asset, bought once at the window's first close
     spy           SPY, bought once at the window's first close
     spy_exposure_matched
-                  SPY held only on the bars the strategy was invested, cash
+                  SPY held at the strategy's invested fraction of equity
+                  (|position notional| / equity at the prior close), cash
                   otherwise - so a low-exposure strategy is compared with
-                  the market at the same "% of time invested"
+                  the market at the same amount of capital at work
 
 Sharing a baseline *and* an index is what makes the curves comparable. A
 benchmark normalised to its own first bar rather than the strategy's, or
@@ -70,13 +71,18 @@ MATCHED_SPY_KEY = "spy_exposure_matched"
 MIN_TRADES_FOR_CONFIDENCE = 30
 
 SURVIVORSHIP_WARNING = (
-    "Survivorship bias: tickers are today's index members (current-constituent "
-    "universe), so names that were delisted or dropped are missing and "
+    "Survivorship bias: if these tickers were picked from today's index "
+    "members, names that were delisted or dropped since are missing and "
     "results are optimistic."
 )
 FRACTIONAL_WARNING = (
     "Fractional sizing: this backtest trades fractional shares; live and "
     "paper orders use whole shares, so they will size smaller or skip."
+)
+RISK_GATE_WARNING = (
+    "Risk gate: sleeves run independently, so the live portfolio risk cap "
+    "(total open risk across positions) is not modelled; dynamic risk is set "
+    "by the live gate from each sleeve's own equity."
 )
 
 
@@ -106,6 +112,8 @@ class CurveSummary:
     volatility_pct: float | None
     #: % of bars with capital invested (0-100).
     exposure_pct: float | None = None
+    #: Mean |position notional| / equity, in percent (0-100).
+    avg_invested_pct: float | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -118,6 +126,7 @@ class CurveSummary:
             "max_drawdown_pct": self.max_drawdown_pct,
             "volatility_pct": self.volatility_pct,
             "exposure_pct": self.exposure_pct,
+            "avg_invested_pct": self.avg_invested_pct,
         }
 
 
@@ -340,6 +349,7 @@ def summarize_curve(
     label: str,
     risk_free_rate: float = 0.0,
     exposure_pct: float | None = None,
+    avg_invested_pct: float | None = None,
 ) -> CurveSummary:
     """Absolute stats for one dollar curve."""
     initial_value = float(curve.iloc[0])
@@ -375,25 +385,16 @@ def summarize_curve(
         max_drawdown_pct=_finite(stats.get("max_drawdown_pct")),
         volatility_pct=_finite(volatility_pct),
         exposure_pct=_finite(exposure_pct),
+        avg_invested_pct=_finite(avg_invested_pct),
     )
-
-
-def invested_fraction(trades: pd.DataFrame, index: pd.Index) -> pd.Series:
-    """1.0 on bars where a trade from `run_backtest` is held at the close
-    (`EntryBar` up to, not including, `ExitBar`), else 0.0."""
-    delta = np.zeros(len(index) + 1)
-    if not trades.empty:
-        np.add.at(delta, trades["EntryBar"].to_numpy(dtype=int), 1)
-        np.add.at(delta, trades["ExitBar"].to_numpy(dtype=int), -1)
-    held = np.cumsum(delta)[: len(index)] > 0
-    return pd.Series(held.astype(float), index=index)
 
 
 def exposure_matched_curve(
     benchmark: pd.Series, invested: pd.Series, initial_capital: float
 ) -> pd.Series:
-    """`benchmark` held only while the strategy was invested at the prior
-    close, cash otherwise; `invested` is a 0-1 fraction on the same index."""
+    """`benchmark` held at the strategy's invested fraction of equity at
+    the prior close, the rest in cash; `invested` is a 0-1 fraction on the
+    same index."""
     returns = benchmark.pct_change().fillna(0.0)
     weight = invested.shift(1).fillna(0.0)
     return (1 + returns * weight).cumprod() * initial_capital
@@ -547,9 +548,11 @@ def run_comparison(
     warnings: list[str] = [SURVIVORSHIP_WARNING]
     if fractional:
         warnings.append(FRACTIONAL_WARNING)
+    if use_risk_gate:
+        warnings.append(RISK_GATE_WARNING)
 
     sleeve_curves: list[pd.Series] = []
-    sleeve_invested: list[pd.Series] = []
+    sleeve_notional: list[pd.Series] = []
     all_trades: list[pd.DataFrame] = []
     skipped: dict[str, int] = {}
 
@@ -571,9 +574,7 @@ def run_comparison(
         )
 
         sleeve_curves.append(extract_strategy_equity(result, sleeve_capital))
-        sleeve_invested.append(
-            invested_fraction(result.trades, result.equity_curve.index)
-        )
+        sleeve_notional.append(result.position_value)
         for reason, count in result.skipped_signals.items():
             skipped[reason] = skipped.get(reason, 0) + count
 
@@ -624,17 +625,15 @@ def run_comparison(
 
     aligned = rebase(align_curves(curves), initial_capital)
 
-    # Equal-weight sleeves: the portfolio's invested fraction is the mean.
+    notional = pd.concat(sleeve_notional, axis=1).ffill().fillna(0.0)
+    # Exposure: share of bars in a trade, averaged over equal-weight sleeves.
+    held = (notional > 0).mean(axis=1).reindex(aligned.index).fillna(0.0)
+    # Invested: total |notional| over total equity, per bar.
     invested = (
-        pd.concat(sleeve_invested, axis=1)
-        .ffill()
-        .fillna(0.0)
-        .mean(axis=1)
-        .reindex(aligned.index)
-        .fillna(0.0)
+        (notional.sum(axis=1) / strategy_equity).reindex(aligned.index).fillna(0.0)
     )
-    strategy_exposure = float(invested.mean()) * 100
-    exposures = {key: 100.0 for key in aligned.columns}
+    strategy_exposure = (float(held.mean()) * 100, float(invested.mean()) * 100)
+    exposures = {key: (100.0, 100.0) for key in aligned.columns}
     exposures[STRATEGY_KEY] = strategy_exposure
     if SPY_KEY in aligned.columns:
         aligned[MATCHED_SPY_KEY] = exposure_matched_curve(
@@ -647,7 +646,7 @@ def run_comparison(
             aligned[key],
             _curve_label(key, tickers),
             risk_free_rate,
-            exposure_pct=exposures[key],
+            *exposures[key],
         )
         for key in aligned.columns
     }

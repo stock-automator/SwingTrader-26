@@ -128,6 +128,7 @@ class CurveSummaryResponse(BaseModel):
     max_drawdown_pct: float | None
     volatility_pct: float | None
     exposure_pct: float | None = None
+    avg_invested_pct: float | None = None
 
 
 class RelativeMetricsResponse(BaseModel):
