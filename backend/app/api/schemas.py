@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..data.universe import DenyKind, sanitize_and_dedupe
 from ..quant.backtest import DEFAULT_INITIAL_CAPITAL
 from ..quant.engine import (
     DEFAULT_ACCOUNT_TIERS,
@@ -70,6 +71,15 @@ class BacktestRequest(BaseModel):
             "traded ticker's own mean ATR/Close ratio."
         ),
     )
+    fx_cost_pct: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Currency-conversion cost per leg, as a fraction of notional. "
+            "None (the default) uses FX_COST_PCT * "
+            "FX_CONVERSIONS_PER_ROUND_TRIP / 2 from settings."
+        ),
+    )
     earnings_blackout: bool = Field(
         default=False,
         description="Suppress long entries within 5 trading days of a known earnings date.",
@@ -77,6 +87,18 @@ class BacktestRequest(BaseModel):
     regime_gating: bool = Field(
         default=False,
         description="Suppress long entries while the SPY macro regime is BEAR_TRENDING or HIGH_VOLATILITY_CHOP.",
+    )
+    walk_forward: bool = Field(
+        default=False,
+        description="Add `oos_summary`: out-of-sample return per walk-forward window vs SPY.",
+    )
+    fractional: bool = Field(
+        default=False,
+        description="Backtest-only fractional shares. Live/paper orders stay whole shares.",
+    )
+    use_risk_gate: bool = Field(
+        default=False,
+        description="Size entries with the live risk gate; refused entries are counted in `skipped_signals`.",
     )
 
     @field_validator("tickers")
@@ -105,6 +127,8 @@ class CurveSummaryResponse(BaseModel):
     sharpe_ratio: float | None
     max_drawdown_pct: float | None
     volatility_pct: float | None
+    exposure_pct: float | None = None
+    avg_invested_pct: float | None = None
 
 
 class RelativeMetricsResponse(BaseModel):
@@ -120,7 +144,37 @@ class RelativeMetricsResponse(BaseModel):
     r_squared: float | None
 
 
+class BacktestCostsResponse(BaseModel):
+    """The cost inputs a backtest actually ran with."""
+
+    commission: float
+    slippage_pct: float
+    fee_per_share: float
+    atr_slippage_multiple: float
+    fx_cost_pct_per_leg: float
+
+
+class OosWindowResponse(BaseModel):
+    oos_start: str
+    oos_end: str
+    oos_return_pct: float | None
+    spy_oos_return_pct: float | None
+
+
+class OosSummaryResponse(BaseModel):
+    """Walk-forward out-of-sample results vs SPY (`walk_forward=true`)."""
+
+    is_window_months: int
+    oos_window_months: int
+    mean_oos_return_pct: float | None
+    mean_spy_oos_return_pct: float | None
+    windows_beating_spy: int
+    windows: list[OosWindowResponse]
+
+
 class BacktestResponse(BaseModel):
+    # Out-of-sample first: it is the honest headline when requested.
+    oos_summary: OosSummaryResponse | None = None
     strategy: str
     tickers: list[str]
     initial_capital: float
@@ -133,7 +187,9 @@ class BacktestResponse(BaseModel):
     trade_metrics: dict
     equity_curves: list[dict]
     trades: list[dict]
+    costs: BacktestCostsResponse
     warnings: list[str]
+    skipped_signals: dict[str, int] = Field(default_factory=dict)
 
 
 class SetupResponse(BaseModel):
@@ -227,6 +283,12 @@ class OrderTicketResponse(BaseModel):
     reward_risk_ratio: float
     tradable: bool
     note: str | None
+    fx_cost_usd: float
+    risk_gbp: float | None
+    notional_gbp: float | None
+    fx_note: str | None
+    fx_rate_date: str | None = None
+    fx_rate_source: str | None = None
 
 
 class OrderTicketsResponse(BaseModel):
@@ -244,15 +306,52 @@ class DataSyncRequest(BaseModel):
 
     @field_validator("tickers")
     @classmethod
-    def _upper_tickers(cls, value: list[str] | None) -> list[str] | None:
-        if value is None:
-            return None
-        return [t.strip().upper() for t in value if t and t.strip()]
+    def _sanitize_tickers(cls, value: list[str] | None) -> list[str] | None:
+        """Normalize via `universe.sanitize_ticker` (`brk.b` -> `BRK-B`) and
+        dedupe keeping first-seen order, so the route's DENYLIST split
+        reports each denied symbol once."""
+        return None if value is None else sanitize_and_dedupe(value)
 
 
 class DataSyncResponse(BaseModel):
     status: str
     tickers: list[str]
+    skipped: list[str] = Field(
+        default_factory=list,
+        description="Requested tickers dropped because they are delisted/renamed "
+        "(see `data.universe.DENY_ENTRIES`).",
+    )
+
+
+class DelistedEntry(BaseModel):
+    """One delisted/renamed symbol excluded from the universe."""
+
+    ticker: str
+    since: str | None = Field(
+        description="ISO date of the first session after the symbol's last "
+        "trading day; null for `broken_data`."
+    )
+    kind: DenyKind = Field(
+        description="`rename`, `stock_merger`, `cash_buyout` or `broken_data`."
+    )
+    reason: str
+    successor: str | None = None
+
+
+class DataHealthResponse(BaseModel):
+    """`GET /api/v1/data/health` response."""
+
+    total_tickers: int
+    newest_ticker: str | None
+    newest_date: str | None
+    oldest_ticker: str | None
+    oldest_date: str | None
+    stale_count: int
+    stale_tickers: list[str]
+    more_stale_tickers: bool = False
+    total_rows_estimate: int
+    as_of: str
+    delisted: list[DelistedEntry] = Field(default_factory=list)
 
 
 class CorporateActionResponse(BaseModel):
@@ -277,12 +376,25 @@ class DataSyncStatusResponse(BaseModel):
     results: list[SyncResultResponse]
 
 
+class UniverseChanges(BaseModel):
+    """Symbols added, removed and renamed by a universe sync."""
+
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    renamed: list[dict[str, str]] = Field(default_factory=list)
+
+
 class UniverseSyncResponse(BaseModel):
-    """`POST /api/v1/universe/sync` response."""
+    """`/api/v1/universe/sync` and `/symbols` response. `kept_previous`
+    means a source fell back or returned too few names, so the previous
+    list was kept unchanged."""
 
     symbols: list[str]
     synced_at: str
     source_counts: dict[str, int]
+    source_status: dict[str, str] = Field(default_factory=dict)
+    changes: UniverseChanges = Field(default_factory=UniverseChanges)
+    kept_previous: bool = False
 
 
 class MonteCarloRequest(BaseModel):
@@ -517,6 +629,12 @@ class ExecutionOrderRequest(BaseModel):
     limit_price: float | None = Field(default=None, gt=0)
     stop_loss: float | None = Field(default=None, gt=0)
     take_profit: float | None = Field(default=None, gt=0)
+    intent: Literal["ENTRY", "EXIT"] | None = Field(
+        default=None,
+        description="ENTRY always guards. Otherwise a sell skips the guards "
+        "only if the Alpaca account holds at least qty long of the ticker; "
+        "every other order is guarded as an entry.",
+    )
 
     @field_validator("ticker")
     @classmethod
@@ -1008,3 +1126,62 @@ class PositionSizerRequest(BaseModel):
 class PositionSizerResponse(BaseModel):
     shares: int
     risk_amount: float
+
+
+# ---- Daily brief ----
+
+
+class DailyBriefSetup(BaseModel):
+    ticker: str
+    strategy: str
+    entry: float
+    stop: float
+    target: float
+    shares: int
+    risk_usd: float
+    risk_gbp: float | None
+    reason: str
+
+
+class DailyBriefResponse(BaseModel):
+    """`GET /api/v1/reports/daily`: the cached brief, its plain-text
+    rendering and when it was built (`computed_at`, ISO 8601 UTC)."""
+
+    as_of: str | None
+    last_session: str
+    regime: str
+    stale: bool
+    setups: list[DailyBriefSetup]
+    text: str
+    computed_at: str
+
+
+class DailyBriefRefreshResponse(BaseModel):
+    """`POST /api/v1/reports/daily/refresh`: the rebuild was queued."""
+
+    status: str
+
+
+class DailyBriefSendResponse(BaseModel):
+    """`POST /api/v1/reports/daily/send`: `sent=false` with `error` when
+    Telegram refused the message or could not be reached."""
+
+    sent: bool
+    parts: int
+    error: str | None = None
+
+
+class WeeklyReportResponse(BaseModel):
+    """`GET /api/v1/reports/weekly`: the forward-test report built from the
+    stored Alpaca fills. `week_start` is the Monday of the reported week."""
+
+    week_start: str
+    trades_this_week: int
+    trades_total: int
+    open_positions: int
+    net_usd_total: float
+    text: str
+
+
+class WeeklyReportSendResponse(DailyBriefSendResponse):
+    """`POST /api/v1/reports/weekly/send`: same shape as the daily send."""

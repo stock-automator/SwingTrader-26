@@ -123,10 +123,10 @@ EXIT_LONG/FLAT).
 ## Beyond backtest/screener: the other subsystems
 
 The diagram above is the original backtest/screener data-flow path; every
-other API router (all shipped in Sprint 4/5, see `SPRINT_CHANGELOG.md`)
-builds on the same `quant/`/`data/` layer without duplicating it. Full
-request/response shapes for all of these are in `docs/api.md` — this is
-the "how does it fit together" view, not the wire format.
+other API router (all shipped in Sprint 4/5) builds on the same
+`quant/`/`data/` layer without duplicating it. Full request/response shapes
+for all of these are in `docs/api.md` — this is the "how does it fit
+together" view, not the wire format.
 
 | Subsystem | Backend module(s) | Router | Notes |
 |---|---|---|---|
@@ -136,7 +136,7 @@ the "how does it fit together" view, not the wire format.
 | Alerts | `alerts/dispatcher.py`, `alerts/config_store.py` | `api/alerts.py` | Multi-channel fan-out (Telegram/Discord/generic webhook); channel config is JSON-backed and browser-editable, no `.env` edit/restart needed. |
 | Market regime | `quant/regime.py`'s `MarketRegimeEngine` | `api/market.py` | SPY/QQQ EMA alignment + S&P 500 breadth + VIX bucket → one traffic-light state. Result is cached - see "Multi-threading & async patterns" below. |
 | ATR position sizer | `quant/risk.py`'s `PositionSizer` | `api/risk.py` | Stateless preview endpoint; the same class backs the risk engine's own sizing, so the UI preview can't drift from what a real order would compute. |
-| Universe sync | `data/universe.py`'s `UniverseManager` | `api/universe.py` | S&P 500 + Nasdaq-100 membership (not price data - that's `quant/data/parquet_manager.py`, a separate fetch path from `data/loader.py`). Persists to `config/universe.json`. |
+| Universe sync | `data/universe.py`'s `UniverseManager` | `api/universe.py` | S&P 500 + Nasdaq-100 membership (not price data - that's `quant/data/parquet_manager.py`, a separate fetch path from `data/loader.py`). Persists to `config/universe.json`, the only ticker list; refreshed monthly by the `universe_monthly` scheduler job. |
 | Background scans | `api/scans.py`, reuses `api/screener.py::_scan` | `api/scans.py` | Async, DuckDB-persisted version of the live screener - a job survives past the request/response cycle. See "DuckDB schema" below. |
 | Live-feed WebSocket | `api/ws.py` | `api/ws.py` | Multiplexes regime + signal + order-update events over one socket - see "WebSocket events" below. |
 

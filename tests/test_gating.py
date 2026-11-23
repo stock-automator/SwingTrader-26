@@ -62,11 +62,14 @@ class TestRegimeGatedStrategy:
         out = gated.generate_signals(asset)
 
         # Once the macro regime is classified (after its own warm-up), every
-        # bar should have its long suppressed.
+        # bar should have its long suppressed. The gate for bar t uses the
+        # regime known at t-1 (batch 02 F2: no lookahead), so suppression
+        # starts one bar after the first classified bar.
         detector = MacroRegimeDetector()
         regime = detector.detect_regime(benchmark)
-        classified = regime.notna()
-        assert (out.loc[classified, "signal"] == 0).all()
+        known_before_bar = regime.shift(1).notna()
+        assert known_before_bar.any()
+        assert (out.loc[known_before_bar, "signal"] == 0).all()
 
     def test_passes_through_longs_in_a_bull_trending_benchmark(self):
         n = 260

@@ -212,6 +212,67 @@ you've configured what they talk to:
 > the UI to show the round trip. That's also why they're a good source of
 > truth: nothing in them is staged data.
 
+### Daily Telegram brief
+
+The backend can send you a short plain-text brief: up to 3 setups (entry,
+stop, target, whole shares, $ and £ risk, one-line reason) or "No trades
+today" with the reason. It is research only, for paper trading.
+
+1. In Telegram, talk to **@BotFather**, send `/newbot` and copy the bot token
+   it gives you. Send your new bot any message.
+2. Find your chat id: open
+   `https://api.telegram.org/bot<your token>/getUpdates` in a browser and copy
+   `"chat":{"id": ...}`.
+3. Add both to the `.env` file in the repo root (it is gitignored; never
+   commit it):
+
+   ```
+   TELEGRAM_BOT_TOKEN=<your bot token>
+   TELEGRAM_CHAT_ID=<your chat id>
+   ```
+
+4. Restart the backend, build the brief now with
+   `curl -X POST http://localhost:8000/api/v1/reports/daily/refresh`, view it
+   with `curl http://localhost:8000/api/v1/reports/daily`, then send it with
+   `curl -X POST http://localhost:8000/api/v1/reports/daily/send`. A reply of
+   `{"sent": true, ...}` means it arrived; `{"sent": false, "error": ...}`
+   says why not. See [docs/api.md](docs/api.md).
+
+### Daily brief schedule
+
+While the backend runs, it does these jobs on UK time (clock changes
+handled):
+
+- **07:00 on the 1st of each month** refreshes the ticker universe
+  (`config/universe.json`, S&P 500 + Nasdaq-100). If Wikipedia fails or looks
+  wrong it keeps last month's list and records why in
+  `config/universe_status.json`.
+- **07:30**, Monday to Friday, syncs the universe, GBP/USD and SPY prices
+  into `DATA_DIR`.
+- **08:00**, Monday to Friday, builds the brief, caches it (`GET /api/v1/reports/daily` serves
+  that copy) and sends it to Telegram if configured. With Alpaca keys it
+  also shows `Day trades used: n/3 (last 5 days)`.
+
+If the Mac was asleep at that time, each missed job runs once when it wakes
+(up to 6 hours late). Set `SCHEDULER_ENABLED=false` to turn the jobs off.
+
+### Run it always-on (macOS launchd)
+
+To keep the backend running in the background and restart it after a
+crash or login, install it as a launchd agent (localhost only, port 8000):
+
+```bash
+scripts/install_launchd.sh
+```
+
+It uses `./venv/bin/python` if you made the venv in Step 2, else
+`/usr/local/bin/python3` (override with `PYTHON=/path/to/python3`). Secrets
+stay in `.env`; logs go to `logs/`. To remove it:
+`launchctl bootout gui/$(id -u)/com.swingtrader.backend`, then delete
+`~/Library/LaunchAgents/com.swingtrader.backend.plist`.
+
+Cron runs `scripts/paper_executor.py` at 14:35 UK on weekdays; it places the cached daily brief's setups as paper bracket orders.
+
 ### Running the tests (optional, for the curious)
 
 ```bash
@@ -250,7 +311,6 @@ cp .env.example .env
 | `ALLOW_DOWNLOADS` | `true` | Whether the backend may fetch a ticker it doesn't have cached. Set to `false` to run fully offline against only what's already downloaded. |
 | `DATA_DIR` | `data/raw` | Folder where downloaded price data is cached, so repeat requests don't re-download. |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Which frontend URLs the backend will accept requests from. Only change this if you're hosting the frontend somewhere other than your own machine. |
-| `WATCHLIST_PATH` | `config/watchlist.txt` | The list of tickers the live screener scans (one per line — already comes with ~500 S&P 500-ish names). |
 | `SCREENER_MAX_TICKERS` | `750` | Caps how many tickers one screener scan checks — a safety valve against an accidentally enormous watchlist, not a throttle (loading is parallelized, see below). |
 | `SCREENER_MAX_WORKERS` | `16` | Thread-pool size used to fetch tickers concurrently; also the de facto rate limit against the data provider. |
 | `SCREENER_MIN_AVG_VOLUME` | `100000` | Tickers below this trailing average daily volume are skipped as `VOLUME_FILTER_FAILED` rather than scanned. |
@@ -259,14 +319,16 @@ cp .env.example .env
 | `WS_POLL_SECONDS` | `15` | How often the live screener pushes a fresh scan over its live connection. |
 | `MAX_BACKTEST_TICKERS` | `10` | Caps how many tickers one backtest request can run at once. |
 | `JOURNAL_PATH` | `data/trades_live.csv` | Where the trade journal (entries/exits/MAE-MFE/decay analytics) reads and writes its CSV. |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(unset)* | Telegram alert channel for `POST /api/v1/alerts/dispatch`; both must be set to activate it. |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | *(unset)* | Telegram alert channel for `POST /api/v1/alerts/dispatch` and the daily brief (`POST /api/v1/reports/daily/send`); both must be set to activate it. |
 | `DISCORD_WEBHOOK_URL` | *(unset)* | Discord alert channel (incoming webhook). |
 | `GENERIC_WEBHOOK_URL` | *(unset)* | Generic HTTP alert channel — setups are POSTed here as flat JSON. |
 | `ALERT_CONFIG_PATH` | `config/alerts_channels.json` | Where the Alerts tab's **Save Channel Settings** persists Telegram/Discord/webhook credentials, so they can be configured from the browser without editing `.env` or restarting. A field saved here overrides the matching variable above; gitignored, since it can hold real secrets. |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | *(unset)* | Alpaca **paper-trading** credentials for `/api/v1/execution/*`. The SDK always points at Alpaca's paper endpoint regardless of these values — there is no setting that makes this platform place live orders. |
-| `EXECUTION_GUARDS_ENABLED` | `true` | Whether `POST /api/v1/execution/orders` runs the session-clock and earnings/split lockout guards before dispatching (see `execution/guards.py`). Only turn off for local/paper testing outside market hours. |
-| `EXECUTION_ALLOW_EXTENDED_HOURS` | `false` | Whether pre-market/after-hours count as dispatchable sessions (still illiquid) instead of being blocked like a closed market. |
-| `EARNINGS_LOCKOUT_HOURS` | `48` | Hours before/after a scheduled earnings release or stock split during which `POST /api/v1/execution/orders` refuses a new entry. |
+| `EXECUTION_ALLOW_EXTENDED_HOURS` | `false` | Whether new entries may go out pre-market/after-hours (still illiquid) instead of being blocked like a closed market. Order guards always run on both order routes; entries fail closed if Alpaca's calendar or the earnings/split lookup is unavailable, and exits always go through (see `execution/guards.py`). |
+| `EARNINGS_LOCKOUT_HOURS` | `48` | Hours before/after a scheduled earnings release or stock split during which both order routes refuse a new entry. |
+| `FX_COST_PCT` | `0.0015` | Broker currency-conversion fee per conversion (fraction of notional). |
+| `FX_CONVERSIONS_PER_ROUND_TRIP` | `0` | GBP<->USD conversions per round trip. `0` = USD balance, no FX cost; `2` = convert in and out every trade. |
+| `SCHEDULER_ENABLED` | `true` | Runs the scheduled jobs (07:30 UK data sync, 08:00 UK daily brief, universe refresh). Set `false` to turn them off. |
 
 > **Never commit a real `.env` file.** It's already excluded via
 > `.gitignore` — only `.env.example` (with no real keys in it) is tracked.
@@ -463,12 +525,12 @@ backend/
                            benchmark), metrics.py, slippage_model.py
                            (per-bar spread + market impact)
     alerts/                Telegram/Discord/webhook dispatch (dispatcher.py)
+    reports/               daily.py (the daily Telegram brief)
     execution/             Alpaca paper-trading client wrapper, guards.py
                            (session clock + earnings/split lockout)
-    data/                 Price loading/caching (loader.py, agent.py)
+    data/                 Price loading/caching (loader.py, universe.py)
     journal/              Trade journal persistence + decay/MAE-MFE analytics
-    analytics/             Console/report rendering, expectancy.py
-                           (win-probability engine)
+    analytics/             expectancy.py (win-probability engine)
 frontend/
   src/                    React + Vite + Tailwind UI (lightweight-charts,
                            Recharts, TanStack Table); Signal Matrix grid,
@@ -483,13 +545,14 @@ docs/
   architecture.md          Data-flow diagram, backend/frontend separation
   api.md                   Full endpoint reference
   benchmark_math.md         Alpha/beta/Sharpe/information-ratio, explained
-  code_review.md            Multi-persona review of this codebase
   media/                    Demo video recordings
 scripts/
   generate_demo_videos.py  Playwright walkthrough recorder
+  install_launchd.sh       Installs the always-on backend (launchd)
+deploy/launchd/            launchd plist for the backend
 tests/                     pytest suite, one file per backend/app module
 config/
-  watchlist.txt             Ticker universe the screener scans
+  universe.json             The ticker universe (S&P 500 + Nasdaq-100), refreshed monthly
 data/raw/                  Cached OHLCV parquet files
 docker-compose.yml          One-command local run via Docker
 AGENTS.md                  Engineering contract for strategies/risk/engines
@@ -500,97 +563,18 @@ AGENTS.md                  Engineering contract for strategies/risk/engines
 - **[`docs/architecture.md`](docs/architecture.md)** — full data-flow diagram
 - **[`docs/api.md`](docs/api.md)** — every endpoint, request/response shapes, curl examples
 - **[`docs/benchmark_math.md`](docs/benchmark_math.md)** — exactly how alpha/beta/Sharpe are computed
-- **[`docs/code_review.md`](docs/code_review.md)** — a multi-persona review of this codebase
 - **[`AGENTS.md`](AGENTS.md)** — the engineering contract for strategies, risk sizing, and the backtest/screener engines
 
 ## Status
 
-The project began as a Yahoo Finance historical-data pipeline and evolved
-into a systematic momentum/swing-trading research platform: a stock
-universe of 500+ tickers cached locally as Parquet, a modular strategy
-framework, a risk manager, full-history and live-screener engines, and now
-a FastAPI + React application on top of all of it. The target account size
-for eventual live deployment is small (low four figures); risk management
-takes priority over raw historical return, and a backtest is treated as
-evidence for further investigation, not proof of anything.
+A FastAPI + React swing-trading research platform over a locally cached
+500+ ticker Parquet universe: 10 strategies, a risk manager, backtest/replay
+engines with a $1,000-vs-buy&hold-vs-SPY benchmark, a live setup screener,
+Alpaca paper trading, alerts and a trade journal. Target account size is
+small, risk comes before return, and a backtest is evidence, not proof.
+What's next lives in [`.claude/team/backlog.md`](.claude/team/backlog.md).
 
-**Where this stands today**, roughly in the order it was built:
-
-1. Historical data pipeline, modular strategy framework, risk manager,
-   backtest/forward-test engines, analytics (original CLI-era foundation).
-2. Risk engine & position sizing, market-regime detection, first strategy
-   set (`donchian_breakout`, `moving_average_cross`, `vcp_breakout`,
-   `relative_strength`).
-3. Full-stack refactor onto FastAPI + React, the $1,000-vs-buy&hold-vs-SPY
-   benchmark backtester, and the live setup screener (REST + WebSocket).
-4. **Scanner reliability + strategy library expansion**: the live screener
-   silently truncated a full watchlist to 60 tickers and loaded them one at
-   a time; fixed with a raised, transparent cap, concurrent thread-pooled
-   loading with retry/backoff, and explicit skip-reason categorization
-   (`INSUFFICIENT_HISTORY` / `DATA_STALE` / `VOLUME_FILTER_FAILED` /
-   `ZERO_LIQUIDITY`). Strategy count went from 4 to 10, adding volatility
-   (`bollinger_keltner_squeeze`, `kama_trend`), mean-reversion
-   (`zscore_mean_reversion`, Hurst-filtered), momentum
-   (`supertrend_psar`, `dual_momentum`), and market-structure
-   (`obv_divergence`) coverage.
-5. Cross-strategy signal matrix, point-in-time historical replay (zero
-   lookahead by construction), trade execution simulation, multichannel
-   alerts (Telegram/Discord/generic webhook), Alpaca paper-trading order
-   placement + emergency close-all, trade-journal decay analytics (MAE/MFE,
-   30/60/90-day win-rate/expectancy windows), a real win-probability engine
-   (regime-matched historical backtest, falling back to a block-bootstrap
-   Monte Carlo percentile), and the matching frontend surface: a real-time
-   data-sync banner, the Signal Matrix grid (sortable/filterable, one-click
-   paper-trade action), toast notifications, and animated tab transitions.
-6. **This round** — the frontend panels for the backend surfaces §5 shipped
-   without one: a **Portfolio Dashboard** (Alpaca account/positions/equity
-   curve, emergency close-all behind a modal), an **Alert Channel
-   Configuration UI** (Telegram/Discord/webhook, no `.env` edit needed —
-   backed by two new endpoints, `GET`/`PUT /api/v1/alerts/config` and
-   `POST /api/v1/alerts/test`), and a **Trade Journal & Strategy Decay**
-   view (MAE/MFE scatter chart, rolling win-rate/expectancy vs. baseline —
-   backed by two new endpoints, `GET /api/v1/journal/trades` and
-   `/mae-mfe-distribution`). Also fixed the Signal Matrix's Win Prob.
-   column, which was still hard-coded to `—` from before §5's win-probability
-   engine landed. Playwright coverage expanded from one smoke test to 11
-   tests across 5 spec files (tab switching, filtering, paper-trade
-   submission, modal confirmations, configured/unconfigured empty states,
-   error toasts).
-7. **Sprints 4-6.1** — Unified Dashboard, Historical Simulator, universe
-   sync, async DuckDB-backed background scans; market regime engine, ATR
-   position sizer, broker-agnostic order routing, the unified live-feed
-   WebSocket, and mobile/Meshnet access; then a repo-wide dead-code/
-   documentation audit. Detailed per-sprint changes moved to
-   `SPRINT_CHANGELOG.md` starting here rather than growing this list
-   further — that file is now the canonical record.
-8. **Sprint 6 Phase 3 (this round)** — performance and resilience pass, no
-   new user-facing features: parallelized the universe-sync symbol filter
-   and closed an event-loop-blocking gap in the analytics endpoints
-   (`run_in_threadpool` around data loading, not just the backtest
-   computation that followed it); added DuckDB indexes and a short-TTL
-   cache for the market-regime computation (shared between the REST
-   endpoint and the live-feed WebSocket, removing a duplicated
-   computation); a global FastAPI error handler so an unexpected backend
-   exception now returns a consistent JSON error instead of an
-   unformatted one; and a React error boundary around every tab, so a
-   bug in one tab's render shows a "Something went wrong — try switching
-   tabs and back, or reload the page" message in that tab instead of
-   blanking the whole app. See `SPRINT_CHANGELOG.md` for the full list.
-
-**Deliberately not done yet** (so the next session doesn't have to rediscover
-this by reading code):
-
-- The Trade Journal's decay baseline is the journal's own all-time
-  expectancy/win-rate (`GET /api/v1/journal/summary`), not a per-strategy
-  backtest result — `trades_live.csv` has no strategy-attribution column, so
-  there's no way to join a logged trade back to the backtest that would have
-  predicted it without adding one.
-- Logging entries/exits into the trade journal is still done via the
-  `TradeJournal` class directly (script/notebook) — there is no "log this
-  fill" UI action yet; the frontend is read-only against the journal.
-- Statistical-arbitrage pairs trading (cointegration/Johansen) and the
-  macro/cross-asset strategies (yield curve, VIX term structure, COT
-  positioning, intermarket lead-lag, seasonality) were scoped out of the
-  strategy library expansion — they need a multi-symbol architecture and new
-  data sources (COT reports, yield curves) beyond the current single-ticker
-  `BaseStrategy` interface and Parquet/yfinance pipeline.
+Known gaps: the journal's decay baseline is its own all-time stats (no
+strategy-attribution column yet); journal entries are logged via the
+`TradeJournal` class, not the UI; pairs/macro strategies need a multi-symbol
+architecture the single-ticker `BaseStrategy` doesn't have.

@@ -7,6 +7,7 @@ itself, which forced its imports below a statement and required a blanket
 E402 exemption for `tests/` in `.flake8`.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -14,6 +15,24 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# F3 B-1: the app's APScheduler must never start under tests.
+os.environ["SCHEDULER_ENABLED"] = "false"
+
+# The app calls load_dotenv() at import, and A's real .env now exists. Set
+# every credential to "" first (load_dotenv never overrides an existing
+# variable), so no test can pick up a real key, token or chat id.
+for _secret in (
+    "ALPACA_API_KEY",
+    "ALPACA_API_SECRET",
+    "ALPACA_SECRET_KEY",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "DISCORD_WEBHOOK_URL",
+    "GENERIC_WEBHOOK_URL",
+    "FINNHUB_API_KEY",
+):
+    os.environ[_secret] = ""
 
 
 @pytest.fixture
@@ -36,3 +55,66 @@ def ohlcv() -> pd.DataFrame:
         },
         index=index,
     )
+
+
+class FakeMarketClock:
+    """Stand-in for `execution.market_clock.MarketClock` - returns a fixed
+    session (or raises) and counts calls, never touching Alpaca."""
+
+    def __init__(self, state: str = "REGULAR", raises: Exception | None = None):
+        self.state = state
+        self.raises = raises
+        self.calls = 0
+
+    def session(self, now=None):
+        from backend.app.execution.market_clock import SessionInfo
+
+        self.calls += 1
+        if self.raises is not None:
+            raise self.raises
+        return SessionInfo(
+            state=self.state, open=None, close=None, reason=f"fake {self.state}"
+        )
+
+
+@pytest.fixture
+def market(monkeypatch):
+    """Installs a REGULAR-session fake clock and empty earnings/split
+    calendars for every order route. Tests mutate `market.state`/`.raises`
+    to simulate closed sessions or calendar outages."""
+    import backend.app.execution.guards as guards
+    from backend.app.execution.market_clock import get_market_clock
+    from backend.app.main import app
+
+    clock = FakeMarketClock()
+    app.dependency_overrides[get_market_clock] = lambda: clock
+    monkeypatch.setattr(guards, "fetch_earnings_dates", lambda ticker, *a, **k: [])
+    monkeypatch.setattr(guards, "fetch_stock_splits", lambda ticker, *a, **k: [])
+    yield clock
+    app.dependency_overrides.pop(get_market_clock, None)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_fx_quote(monkeypatch):
+    """Keep the GBP/USD live quote off the network and out of the 60s cache."""
+    import yfinance
+
+    from backend.app.data import fx
+
+    def _offline_ticker(*args, **kwargs):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(yfinance, "Ticker", _offline_ticker)
+    monkeypatch.setattr(fx, "_live_cache", None)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_alpaca_account(monkeypatch):
+    """Tests that set fake Alpaca keys must not reach Alpaca for the
+    day-trades line; tests that need an account patch get_account themselves."""
+    from alpaca.trading.client import TradingClient
+
+    def _offline_account(self, *args, **kwargs):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(TradingClient, "get_account", _offline_account)

@@ -16,9 +16,15 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from ..config import Settings, get_settings
+from ..data.universe import DENYLIST
 from ..quant.data.parquet_manager import ParquetSyncManager, SyncResult
 from .deps import load_watchlist
 from .schemas import DataSyncRequest, DataSyncResponse, DataSyncStatusResponse
+
+# Cached for the order ticket's display-only GBP figures (see data/fx.py).
+FX_TICKER = "GBPUSD=X"
+# Cached so the baseline can compare against SPY.
+BENCHMARK_TICKER = "SPY"
 
 router = APIRouter(prefix="/api/v1/data", tags=["data-sync"])
 
@@ -71,6 +77,24 @@ def _run_sync(tickers: list[str], data_dir: Path) -> None:
         _job_state.finish()
 
 
+def watchlist_sync_tickers(settings: Settings) -> list[str]:
+    """The watchlist plus the FX and benchmark series, or `[]` if the
+    watchlist is empty."""
+    tickers = load_watchlist(settings)
+    if tickers and FX_TICKER not in tickers:
+        tickers = [*tickers, FX_TICKER]
+    if tickers and BENCHMARK_TICKER not in tickers:
+        tickers = [*tickers, BENCHMARK_TICKER]
+    return tickers
+
+
+def run_watchlist_sync(settings: Settings) -> None:
+    """Synchronous full-watchlist sync (the scheduler's 07:30 UK job)."""
+    tickers = watchlist_sync_tickers(settings)
+    if tickers:
+        ParquetSyncManager(data_dir=settings.data_dir).sync_universe(tickers)
+
+
 @router.post("/sync", response_model=DataSyncResponse, status_code=202)
 def start_data_sync(
     request: DataSyncRequest,
@@ -80,17 +104,28 @@ def start_data_sync(
     """Queue a staleness/corporate-action sync for `tickers` (or the full
     watchlist), and return immediately - the work happens after the
     response is sent."""
-    tickers = request.tickers if request.tickers else load_watchlist(settings)
+    skipped: list[str] = []
+    if request.tickers:
+        # Explicit names bypass the watchlist's DENYLIST filter, so apply it
+        # here too - otherwise a delisted/renamed symbol could be
+        # re-downloaded on request. `DataSyncRequest` already sanitizes
+        # (`universe.sanitize_ticker`) and dedupes, keeping first-seen order.
+        tickers = [t for t in request.tickers if t not in DENYLIST]
+        skipped = [t for t in request.tickers if t in DENYLIST]
+    else:
+        tickers = watchlist_sync_tickers(settings)
     if not tickers:
-        raise HTTPException(
-            status_code=422,
-            detail="No tickers to sync: request body was empty and the watchlist is empty.",
+        reason = (
+            f"every requested ticker is delisted or renamed: {', '.join(skipped)}."
+            if skipped
+            else "request body was empty and the watchlist is empty."
         )
+        raise HTTPException(status_code=422, detail=f"No tickers to sync: {reason}")
 
     _job_state.start()
     background_tasks.add_task(_run_sync, tickers, settings.data_dir)
 
-    return {"status": "started", "tickers": tickers}
+    return {"status": "started", "tickers": tickers, "skipped": skipped}
 
 
 @router.get("/sync/status", response_model=DataSyncStatusResponse)

@@ -5,7 +5,7 @@ __pycache__/
 /results/
 /data/
 /config/alerts_channels.json
-/config/universe.json
+/config/universe_status.json
 *.log
 .DS_Store
 .vscode/
@@ -16,3 +16,7 @@ download_checkpoint.json
 htmlcov/
 *.egg-info/
 .worktrees/
+.claude/settings.local.json
+
+# launchd service logs (deploy/launchd)
+logs/

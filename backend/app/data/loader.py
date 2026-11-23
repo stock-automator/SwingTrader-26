@@ -1,10 +1,10 @@
 """
 Historical bar access.
 
-Resolution order: the on-disk parquet cache written by `data/agent.py`
-first, then a live yfinance fetch for anything not cached - notably SPY,
-which the benchmark engine needs on every run and which the cache does not
-carry.
+Resolution order: the on-disk parquet cache in `data/raw/` (written by
+`quant/data/parquet_manager.py`) first, then a live yfinance fetch for
+anything not cached - notably SPY, which the benchmark engine needs on every
+run and which the cache does not carry.
 
 Both sources are normalised onto one contract before returning: flat
 `Open/High/Low/Close/Volume` columns, a sorted unique `DatetimeIndex`, and
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-#: Where `data/agent.py` writes its parquet cache.
+#: Where the parquet cache lives (see `quant/data/parquet_manager.py`).
 DATA_DIR = Path("data/raw")
 
 #: The contract every frame leaving this module satisfies.
@@ -196,18 +196,25 @@ def fetch_earnings_dates(ticker: str, limit: int = 8) -> list[pd.Timestamp]:
         limit: Max rows to request from the provider's earnings calendar.
 
     Returns:
-        Empty list if the provider has no earnings calendar for this
-        ticker (e.g. an ETF, or a symbol yfinance doesn't cover) - that is a
-        "nothing to filter on" result, not an error.
+        Empty list for an ETF with no earnings calendar, or an empty
+        calendar - a "nothing to filter on" result, not an error.
 
     Raises:
         DataUnavailableError: on a provider failure (network, rate limit,
-            schema change). A missing calendar is not this - see above.
+            schema change), or when yfinance returns no calendar at all
+            (`None`) for a non-ETF.
     """
     import yfinance as yf
 
     try:
-        raw = yf.Ticker(ticker.upper()).get_earnings_dates(limit=limit)
+        yf_ticker = yf.Ticker(ticker.upper())
+        raw = yf_ticker.get_earnings_dates(limit=limit)
+        # yfinance swallows scrape failures and returns None. That is only
+        # "no calendar" for an ETF; for anything else it is a failed lookup.
+        if raw is None and (yf_ticker.info or {}).get("quoteType") != "ETF":
+            raise DataUnavailableError(f"no earnings calendar returned for {ticker}")
+    except DataUnavailableError:
+        raise
     except Exception as exc:  # network, rate limit, schema change
         raise DataUnavailableError(
             f"earnings calendar fetch failed for {ticker}: {exc}"

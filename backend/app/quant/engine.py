@@ -13,11 +13,14 @@ structured, broker-shaped ticket the frontend's Order Ticket Drawer copies
 out for manual entry at Trading 212 / IBKR.
 """
 
+import copy
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 from backtesting import Backtest, Strategy
+from backtesting.lib import FractionalBacktest
 
 from backend.app.quant.indicators import wilder_atr
 from backend.app.quant.regime import MacroRegimeDetector
@@ -26,11 +29,11 @@ from backend.app.quant.strategies.base import BaseStrategy
 
 REQUIRED_OHLCV_COLUMNS = ("Open", "High", "Low", "Close", "Volume")
 
-#: Trading 212 charges no per-share commission on its default long-term
-#: investing accounts, but IBKR's US stock tier does, and modelling *some*
+#: IBKR's US stock tier charges a per-share commission, and modelling *some*
 #: per-share friction is the point - $0.005/share (IBKR's own published
 #: tiered-pricing rate) is the default fixed maker/taker fee applied to both
-#: legs of a round trip when `fee_per_share` is set.
+#: legs of a round trip when `fee_per_share` is set. Currency conversion is
+#: modelled separately by `fx_cost_pct`.
 DEFAULT_FEE_PER_SHARE = 0.005
 
 #: A signal on bar `t` fills at bar `t+1`'s open - the realistic default:
@@ -50,6 +53,26 @@ VALID_EXECUTION_MODES = frozenset(
     {EXECUTION_MODE_NEXT_OPEN, EXECUTION_MODE_SAME_CLOSE_SLIPPAGE}
 )
 
+#: Fractional backtests trade in steps of 1/10,000 of a share. Sizing works
+#: in whole steps (an integer count), so flooring has no float error.
+FRACTIONAL_STEPS_PER_SHARE = 10_000
+
+#: `skipped_signals` keys for entries the cash cap shrank or emptied.
+CAPPED_TO_CASH = "size capped to cash"
+INSUFFICIENT_CASH = "insufficient cash"
+CANCELLED_AT_FILL = "insufficient cash at fill"
+
+
+def _skip_reason(reason: str) -> str:
+    """A stable counting key for a `build_risk_managed_order` rejection:
+    the reasons embed the trade's own numbers, which would give every
+    rejected signal its own bucket."""
+    if reason.startswith("Reward:risk"):
+        return "reward:risk below minimum"
+    if reason.startswith("Portfolio risk cap"):
+        return "portfolio risk cap reached"
+    return "size rounds to zero"
+
 
 @dataclass
 class BacktestResult:
@@ -58,6 +81,13 @@ class BacktestResult:
     stats: pd.Series
     trades: pd.DataFrame
     equity_curve: pd.DataFrame
+    #: Entry signals the live risk gate refused, by reason (`use_risk_gate`),
+    #: plus entries shrunk (`CAPPED_TO_CASH`) or emptied (`INSUFFICIENT_CASH`)
+    #: by the cash cap.
+    skipped_signals: dict[str, int] = field(default_factory=dict)
+    #: |position notional| in dollars at each bar's close, on the equity
+    #: curve's index (0 when flat; open positions at the end included).
+    position_value: pd.Series | None = None
 
 
 def estimate_atr_spread_pct(df: pd.DataFrame, atr_multiple: float = 0.1) -> float:
@@ -110,6 +140,9 @@ def run_backtest(
     atr_slippage_multiple: float = 0.0,
     execution_mode: str = EXECUTION_MODE_NEXT_OPEN,
     direction: int | None = None,
+    fx_cost_pct: float = 0.0,
+    fractional: bool = False,
+    use_risk_gate: bool = False,
 ) -> BacktestResult:
     """Simulate `strategy` over historical `df` with realistic costs.
 
@@ -139,6 +172,23 @@ def run_backtest(
             `-1` to also allow short entries (`signal == -1` opens a short
             when flat, `signal == 1` closes an open short). When `None` the
             engine stays long-only exactly as before this parameter was added.
+        fx_cost_pct: Currency-conversion cost as a fraction of notional,
+            charged on each leg on top of `commission`/`fee_per_share`.
+            `0.0` (the default) adds nothing.
+        fractional: Backtest-only fractional shares in steps of
+            `1 / FRACTIONAL_STEPS_PER_SHARE`, via `backtesting.lib.
+            FractionalBacktest`. Trades come back in real shares and prices.
+            Live orders stay whole shares (`Order.shares` is an int).
+        use_risk_gate: Size entries with `RiskManager.build_risk_managed_
+            order` (the live gate) instead of `build_order`; refused entries
+            are counted per reason in `BacktestResult.skipped_signals`.
+
+    Every entry is capped at what current equity can buy at the signal
+    bar's close after spread and costs (`floor(equity / price)` shares, or
+    fractional steps), so an oversized order is shrunk instead of silently
+    cancelled by the broker; caps count as `CAPPED_TO_CASH`, and a cap to
+    zero as `INSUFFICIENT_CASH`. A gap up to the next open can still leave
+    the fill short of cash.
 
     Raises:
         ValueError: if `df` is missing a required OHLCV column, or
@@ -171,15 +221,45 @@ def run_backtest(
 
     bt_df = df[list(REQUIRED_OHLCV_COLUMNS)].copy()
 
+    close = df["Close"].to_numpy(dtype=float)
     _direction = direction
+    skipped: dict[str, int] = {}
+    # Fractional: size in whole steps of 1/FRACTIONAL_STEPS_PER_SHARE by
+    # scaling the account (integer multiply, so flooring is exact).
+    steps = FRACTIONAL_STEPS_PER_SHARE if fractional else 1
+    unit = 1 / steps
+    sizer = risk_manager
+    if fractional:
+        # A copy keeps a subclass's sizing overrides.
+        sizer = copy.copy(risk_manager)
+        sizer.account_equity = risk_manager.account_equity * steps
+
+    # Per-leg costs, also used to cap entries at what cash can buy.
+    spread_param = (
+        estimate_atr_spread_pct(df, atr_slippage_multiple)
+        if atr_slippage_multiple > 0
+        else slippage_pct
+    )
+    cost_rate = fx_cost_pct + (0.0 if fee_per_share > 0 else commission)
+    position_value = np.zeros(len(df))
 
     class _SignalAdapter(Strategy):
         def init(self):
-            pass
+            self._pending: int | None = None
 
         def next(self):
             i = len(self.data) - 1
-            sig = signal[i]
+            if self._pending is not None:
+                # An entry placed last bar that neither opened nor closed a
+                # trade was cancelled by backtesting.py (gap past the cash).
+                if not self.position and len(self.closed_trades) == self._pending:
+                    skipped[CANCELLED_AT_FILL] = skipped.get(CANCELLED_AT_FILL, 0) + 1
+                self._pending = None
+            self._act(i, signal[i])
+            # Scaled price * steps = real dollars under FractionalBacktest.
+            position_value[i] = abs(self.position.size * self.data.Close[-1])
+
+        def _act(self, i, sig):
 
             if self.position:
                 # Close on opposite signal: long closes on -1, short closes on 1.
@@ -206,10 +286,11 @@ def run_backtest(
                 if sig != 1:
                     return
 
-            entry_price = float(self.data.Close[-1])
+            # Prices come from the unscaled df: under FractionalBacktest
+            # `self.data` is scaled by `unit`.
+            entry_price = float(close[i])
             atr_value = float(atr[i]) if atr is not None else None
-
-            order = risk_manager.build_order(
+            order_kwargs = dict(
                 entry_price=entry_price,
                 sl_type=sl_type[i],
                 sl_value=float(sl_value[i]),
@@ -219,42 +300,77 @@ def run_backtest(
                 atr=atr_value,
             )
 
-            if order.shares > 0:
-                if _direction == -1:
-                    self.sell(
-                        size=order.shares, sl=order.stop_loss, tp=order.take_profit
-                    )
-                else:
-                    self.buy(
-                        size=order.shares, sl=order.stop_loss, tp=order.take_profit
-                    )
+            if use_risk_gate:
+                order = sizer.build_risk_managed_order(**order_kwargs)
+                if order.rejected:
+                    reason = _skip_reason(order.rejection_reason or "")
+                    skipped[reason] = skipped.get(reason, 0) + 1
+                    return
+            else:
+                order = sizer.build_order(**order_kwargs)
 
+            if order.shares <= 0:
+                return
+            # `sizer` counts in steps when fractional, shares otherwise.
+            cash_per_share = (
+                entry_price * (1 + spread_param) * (1 + cost_rate) + fee_per_share
+            )
+            size = min(order.shares, math.floor(self.equity * steps / cash_per_share))
+            if size < order.shares:
+                reason = CAPPED_TO_CASH if size > 0 else INSUFFICIENT_CASH
+                skipped[reason] = skipped.get(reason, 0) + 1
+            if size > 0:
+                kwargs = dict(
+                    size=size,
+                    sl=order.stop_loss * unit,
+                    tp=order.take_profit * unit,
+                )
+                self._pending = len(self.closed_trades)
+                if _direction == -1:
+                    self.sell(**kwargs)
+                else:
+                    self.buy(**kwargs)
+
+    # Under FractionalBacktest `size` counts steps, so a per-share fee is
+    # scaled by `unit`; `size * price` is still real notional.
+    fee_per_unit = fee_per_share * unit
     commission_param = (
-        (lambda size, price: abs(size) * fee_per_share)
+        (lambda size, price: abs(size) * fee_per_unit)
         if fee_per_share > 0
         else commission
     )
-    spread_param = (
-        estimate_atr_spread_pct(df, atr_slippage_multiple)
-        if atr_slippage_multiple > 0
-        else slippage_pct
-    )
+    if fx_cost_pct > 0:
+        # backtesting.py calls this once per leg (entry and exit).
+        per_share = fee_per_unit if fee_per_share > 0 else 0.0
+        commission_param = (  # noqa: E731
+            lambda size, price: abs(size) * per_share + abs(size) * price * cost_rate
+        )
 
-    bt = Backtest(
-        bt_df,
-        _SignalAdapter,
+    bt_kwargs = dict(
         cash=risk_manager.account_equity,
         commission=commission_param,
         spread=spread_param,
         exclusive_orders=True,
         trade_on_close=execution_mode == EXECUTION_MODE_SAME_CLOSE_SLIPPAGE,
+        finalize_trades=True,
+    )
+    bt = (
+        FractionalBacktest(bt_df, _SignalAdapter, fractional_unit=unit, **bt_kwargs)
+        if fractional
+        else Backtest(bt_df, _SignalAdapter, **bt_kwargs)
     )
     stats = bt.run()
 
     trades = stats._trades.copy()
     trades["pnl"] = trades["PnL"]
 
-    return BacktestResult(stats=stats, trades=trades, equity_curve=stats._equity_curve)
+    return BacktestResult(
+        stats=stats,
+        trades=trades,
+        equity_curve=stats._equity_curve,
+        skipped_signals=skipped,
+        position_value=pd.Series(position_value, index=stats._equity_curve.index),
+    )
 
 
 #: Standard benchmark account sizes an order ticket is generated for -

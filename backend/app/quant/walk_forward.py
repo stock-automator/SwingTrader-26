@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
+import numpy as np
 import pandas as pd
 
 from .engine import run_backtest
@@ -59,6 +60,23 @@ def _slice_window(
     return df.loc[(df.index >= start) & (df.index < end)]
 
 
+class _TradeFrom(BaseStrategy):
+    """`inner`'s signals with every signal before `start` set to HOLD, so a
+    strategy sees warm-up history but only trades from `start`."""
+
+    def __init__(self, inner: BaseStrategy, start: pd.Timestamp):
+        super().__init__(inner.name)
+        self.inner, self.start = inner, start
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = self.inner.generate_signals(df).copy()
+        held = out.index < self.start
+        out.loc[held, "signal"] = 0
+        out.loc[held, ["sl_value", "tp_value"]] = np.nan
+        out.loc[held, ["sl_type", "tp_type"]] = None
+        return out
+
+
 def _window_return_pct(
     strategy: BaseStrategy,
     df_window: pd.DataFrame,
@@ -66,14 +84,23 @@ def _window_return_pct(
     risk_per_trade_pct: float,
     commission: float,
     slippage_pct: float,
+    engine_kwargs: dict | None = None,
+    measure_from: pd.Timestamp | None = None,
 ) -> float | None:
     """Total return over `df_window`, or `None` if it's too short to
-    backtest at all or the run otherwise fails - both treated as "no
-    usable signal from this window" rather than raised, since a
-    rolling scan is expected to hit unusable windows at its edges."""
+    backtest or the strategy rejects it with a `ValueError` (e.g. not
+    enough bars for its lookback) - "no usable signal from this window",
+    since a rolling scan is expected to hit unusable windows at its edges.
+    Other errors (bugs) propagate.
+
+    With `measure_from`, bars before it are warm-up only: the strategy
+    sees them but trades, and the return is measured, from `measure_from`.
+    """
     if len(df_window) < 2:
         return None
 
+    if measure_from is not None:
+        strategy = _TradeFrom(strategy, measure_from)
     risk_manager = RiskManager(
         account_equity=initial_capital, risk_per_trade_pct=risk_per_trade_pct
     )
@@ -84,12 +111,15 @@ def _window_return_pct(
             risk_manager,
             commission=commission,
             slippage_pct=slippage_pct,
+            **(engine_kwargs or {}),
         )
-    except Exception:
+    except ValueError:
         return None
 
     equity = result.equity_curve["Equity"]
-    if equity.empty:
+    if measure_from is not None:
+        equity = equity[equity.index >= measure_from]
+    if len(equity) < 2:
         return None
 
     start, end = float(equity.iloc[0]), float(equity.iloc[-1])
@@ -540,3 +570,90 @@ def optimize_parameter_per_window(
         windows=stability_windows,
         drift_threshold_pct=drift_threshold_pct,
     )
+
+
+def _buy_and_hold_return_pct(df_window: pd.DataFrame) -> float | None:
+    if len(df_window) < 2:
+        return None
+    first, last = float(df_window["Close"].iloc[0]), float(df_window["Close"].iloc[-1])
+    return (last / first - 1) * 100 if first > 0 else None
+
+
+def _mean(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return sum(present) / len(present) if present else None
+
+
+def oos_summary(
+    strategy: BaseStrategy,
+    frames: dict[str, pd.DataFrame],
+    benchmark_df: pd.DataFrame | None,
+    is_months: int = 12,
+    oos_months: int = 3,
+    initial_capital: float = 1000.0,
+    risk_per_trade_pct: float = 0.02,
+    commission: float = 0.001,
+    slippage_pct: float = 0.0005,
+    **engine_kwargs,
+) -> dict:
+    """Out-of-sample return per walk-forward window next to the benchmark's
+    buy-and-hold return over the same window - the honest headline.
+
+    Each ticker is scored on its own (as `run_comparison`'s equal-weight
+    sleeves are) and the window's `oos_return_pct` is their mean. Windows
+    come from the dates every frame shares. The strategy's signals are
+    computed from `is_start` (in-sample bars are indicator warm-up) but it
+    trades from a fresh account, and is measured, on `[oos_start, oos_end)`
+    only; a position its signals would carry in from in-sample is not
+    opened until its next entry signal. `engine_kwargs` go through to
+    `run_backtest` (e.g. `fractional`, `use_risk_gate`, `fee_per_share`).
+    """
+    common = None
+    for df in frames.values():
+        common = df.index if common is None else common.intersection(df.index)
+    windows = generate_windows(common, is_months, oos_months)
+
+    rows = []
+    for is_start, _, oos_start, oos_end in windows:
+        oos = _mean(
+            [
+                _window_return_pct(
+                    strategy,
+                    _slice_window(df, is_start, oos_end),
+                    initial_capital / len(frames),
+                    risk_per_trade_pct,
+                    commission,
+                    slippage_pct,
+                    engine_kwargs,
+                    measure_from=oos_start,
+                )
+                for df in frames.values()
+            ]
+        )
+        spy = (
+            _buy_and_hold_return_pct(_slice_window(benchmark_df, oos_start, oos_end))
+            if benchmark_df is not None
+            else None
+        )
+        rows.append(
+            {
+                "oos_start": oos_start.strftime("%Y-%m-%d"),
+                "oos_end": oos_end.strftime("%Y-%m-%d"),
+                "oos_return_pct": oos,
+                "spy_oos_return_pct": spy,
+            }
+        )
+
+    beat = [
+        r["oos_return_pct"] > r["spy_oos_return_pct"]
+        for r in rows
+        if r["oos_return_pct"] is not None and r["spy_oos_return_pct"] is not None
+    ]
+    return {
+        "is_window_months": is_months,
+        "oos_window_months": oos_months,
+        "mean_oos_return_pct": _mean([r["oos_return_pct"] for r in rows]),
+        "mean_spy_oos_return_pct": _mean([r["spy_oos_return_pct"] for r in rows]),
+        "windows_beating_spy": sum(beat),
+        "windows": rows,
+    }

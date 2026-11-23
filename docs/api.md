@@ -55,6 +55,10 @@ every number in the response is computed.
 | `risk_free_rate` | float | `0.0` | Annualised risk-free rate used in Sharpe/alpha; `>= 0` |
 | `include_buy_and_hold` | bool | `true` | Emit the buy & hold curve |
 | `benchmark` | string | `"SPY"` | Ticker for the second benchmark curve |
+| `fx_cost_pct` | float \| null | `null` | Currency-conversion cost per leg (fraction of notional), on top of commission; `>= 0`. `null` uses `FX_COST_PCT * FX_CONVERSIONS_PER_ROUND_TRIP / 2` (0 by default: USD balance) |
+| `walk_forward` | bool | `false` | Adds `oos_summary` (first field): out-of-sample return per 12-month-IS / 3-month-OOS window next to SPY's return over the same window |
+| `fractional` | bool | `false` | Backtest-only fractional shares (1/10,000 steps). Live and paper orders stay whole shares; the run is labelled in `warnings` |
+| `use_risk_gate` | bool | `false` | Size entries with the live gate (`build_risk_managed_order`: min 2.5R, 1-2% dynamic risk); refused entries are counted per reason in `skipped_signals` |
 
 Both `tickers` and `strategy` are validated by Pydantic: an empty/blank
 ticker list or an unregistered strategy name is rejected before any data is
@@ -114,7 +118,98 @@ curl -X POST http://localhost:8000/api/v1/backtest \
     { "ticker": "AAPL", "entry_time": "2022-03-01", "exit_time": "2022-04-12",
       "entry_price": 165.2, "exit_price": 172.4, "size": 6, "pnl": 43.2, "return_pct": 4.36 }
   ],
+  "costs": { "commission": 0.001, "slippage_pct": 0.0005, "fee_per_share": 0.0,
+             "atr_slippage_multiple": 0.0, "fx_cost_pct_per_leg": 0.0015 },
   "warnings": []
+}
+```
+
+`costs` echoes the cost inputs the run used. The block above is a real
+response with `FX_CONVERSIONS_PER_ROUND_TRIP=2`; with the default `0`,
+`fx_cost_pct_per_leg` is `0.0`.
+
+Every response also carries `oos_summary` (first; `null` unless
+`walk_forward`, or when it cannot be computed - see `warnings`),
+`exposure_pct` (0-100, % of bars in a trade) and `avg_invested_pct` (0-100,
+mean |position notional| / equity) on each summary, a `spy_exposure_matched`
+curve and summary (SPY held at the strategy's invested fraction of equity
+each bar; omitted without SPY) and `skipped_signals` (risk-gate refusals,
+plus entries shrunk to cash, `size capped to cash`, or emptied,
+`insufficient cash`). Each `oos_summary` window computes signals from its
+in-sample start (warm-up) but trades and is measured only on the OOS bars.
+`warnings` always includes the survivorship label, plus a fractional label,
+a risk-gate label (portfolio risk cap not modelled) and a "too few trades"
+warning below 30 trades. Real excerpt (synthetic data via
+`TestClient`, `walk_forward`, `fractional` and `use_risk_gate` all `true`,
+windows and curves trimmed):
+
+```json
+{
+  "oos_summary": {
+    "is_window_months": 12,
+    "oos_window_months": 3,
+    "mean_oos_return_pct": 0.0,
+    "mean_spy_oos_return_pct": 2.2942583923937043,
+    "windows_beating_spy": 0,
+    "windows": [
+      {
+        "oos_start": "2024-01-02",
+        "oos_end": "2024-04-02",
+        "oos_return_pct": 0.0,
+        "spy_oos_return_pct": 2.843916380759959
+      },
+      {
+        "oos_start": "2024-04-02",
+        "oos_end": "2024-07-02",
+        "oos_return_pct": 0.0,
+        "spy_oos_return_pct": 1.776338340491157
+      }
+    ]
+  },
+  "strategy": "Moving Average Cross",
+  "headline": "$1,000 grown to $1,033 vs $1,217 in SPY vs $2,294 buying & holding AAPL",
+  "summaries": {
+    "strategy": {
+      "label": "Strategy",
+      "initial_value": 1000.0,
+      "final_value": 1032.95,
+      "total_return_pct": 3.295299160095233,
+      "cagr_pct": 1.4248730512108398,
+      "sharpe_ratio": 0.965513364091246,
+      "max_drawdown_pct": -0.9689520909379977,
+      "volatility_pct": 1.4232067477772492,
+      "exposure_pct": 3.166666666666667,
+      "avg_invested_pct": 2.1373509331824603
+    },
+    "spy_exposure_matched": {
+      "label": "SPY at the strategy's exposure",
+      "initial_value": 1000.0,
+      "final_value": 997.06,
+      "total_return_pct": -0.2944795085133567,
+      "cagr_pct": -0.12861175356640997,
+      "sharpe_ratio": -0.16010721932144553,
+      "max_drawdown_pct": -1.0151247146858566,
+      "volatility_pct": 0.7570361939158169,
+      "exposure_pct": 3.166666666666667,
+      "avg_invested_pct": 2.1373509331824603
+    }
+  },
+  "equity_curves": [
+    {
+      "date": "2025-04-18",
+      "strategy": 1032.95,
+      "buy_and_hold": 2294.34,
+      "spy": 1216.75,
+      "spy_exposure_matched": 997.06
+    }
+  ],
+  "skipped_signals": {},
+  "warnings": [
+    "Survivorship bias: if these tickers were picked from today's index members, names that were delisted or dropped since are missing and results are optimistic.",
+    "Fractional sizing: this backtest trades fractional shares; live and paper orders use whole shares, so they will size smaller or skip.",
+    "Risk gate: sleeves run independently, so the live portfolio risk cap (total open risk across positions) is not modelled; dynamic risk is set by the live gate from each sleeve's own equity.",
+    "Too few trades (1) to judge an edge: under 30, the result is mostly noise."
+  ]
 }
 ```
 
@@ -505,6 +600,173 @@ button per channel in the UI. Body: `{"channel": "telegram" | "discord" |
 
 ---
 
+## `/api/v1/reports/daily` — daily Telegram brief
+
+Research and paper trading only. Builds the 08:00 UK brief from the cached
+prices (`DATA_DIR`) and the universe (`config/universe.json`): up to 3 long
+setups, one per ticker, best reward:risk first, sized in whole shares
+($1,000 account, 2% risk). Setups inside the earnings/split lockout
+(`EARNINGS_LOCKOUT_HOURS`) are dropped, and so is any setup whose earnings
+lookup fails. With no setups the text starts `No trades today: <reason>`.
+`stale` is true when the newest cached bar is older than the last completed
+NYSE session (Alpaca's calendar when keys are set, otherwise weekday and
+holiday rules), and the text then carries a "data stale" warning. The text
+is plain (no Markdown) and ends with the "Research only, paper" footer.
+When Alpaca keys are set it also carries `Day trades used: n/3 (last 5
+days)` from the paper account; the line is left out without keys or if
+Alpaca can't be reached.
+
+The backend's scheduler builds the brief Monday to Friday at 08:00 UK
+(after a 07:30 UK data sync), caches it in
+`<DATA_DIR>/reports/daily_brief.json` and sends it to Telegram when
+configured. A job missed while the Mac slept runs once on wake (up to 6
+hours late). `SCHEDULER_ENABLED=false` turns the jobs off.
+
+### `GET /api/v1/reports/daily`
+
+Returns the cached brief; it never runs a scan. `computed_at` (UTC) says
+when it was built. Real output, no setups (the market regime gate):
+
+```json
+{
+  "as_of": "2026-11-20",
+  "last_session": "2026-11-20",
+  "regime": "HIGH_VOLATILITY_CHOP",
+  "stale": false,
+  "setups": [],
+  "text": "No trades today: market regime HIGH_VOLATILITY_CHOP blocks new longs.\nSwingTrader daily brief, Mon 23 Nov 2026\nPrices to the 2026-11-20 close. Market regime HIGH_VOLATILITY_CHOP.\nGBP/USD 1.3105 (daily, 2026-11-23 00:00)\n\nResearch only, paper trading. Not financial advice.",
+  "computed_at": "2026-11-23T12:44:45.757475+00:00"
+}
+```
+
+With a setup (test fixture data, 2026-11-18 08:00 UK). `risk_gbp` is `null`
+and the text shows `£ n/a` when no GBP/USD rate is available (`computed_at`
+left out):
+
+```json
+{
+  "as_of": "2026-11-17",
+  "last_session": "2026-11-17",
+  "regime": "BULL_TRENDING",
+  "stale": false,
+  "setups": [
+    {
+      "ticker": "AAA",
+      "strategy": "donchian_breakout",
+      "entry": 109.8,
+      "stop": 107.8,
+      "target": 115.8,
+      "shares": 10,
+      "risk_usd": 20.0,
+      "risk_gbp": 15.26,
+      "reason": "donchian_breakout long signal, ticker regime BULL_TREND, ADX 30"
+    }
+  ],
+  "text": "SwingTrader daily brief, Wed 18 Nov 2026\nPrices to the 2026-11-17 close. Market regime BULL_TRENDING.\nGBP/USD 1.3105 (live, 2026-11-18 07:59)\n\n1. AAA long (donchian_breakout)\nEntry 109.80, stop 107.80, target 115.80\n10 shares, risk $20.00 / £15.26\nWhy: donchian_breakout long signal, ticker regime BULL_TREND, ADX 30\n\nResearch only, paper trading. Not financial advice."
+}
+```
+
+| Status | Cause |
+|---|---|
+| `404` | No brief cached yet: `{"detail": "No daily brief yet: it is built at 08:00 UK on weekdays, or POST /api/v1/reports/daily/refresh to build one now."}` |
+
+### `POST /api/v1/reports/daily/refresh`
+
+Rebuilds the cached brief in the background and answers `202` at once.
+Nothing is sent to Telegram. Poll `GET /daily` until `computed_at` changes.
+
+```json
+{"status": "started"}
+```
+
+### `POST /api/v1/reports/daily/send`
+
+Builds the brief and sends it to the Telegram chat set by
+`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (or the Alerts tab). Text over
+4096 characters is split on line breaks into `(i/n)` parts.
+
+```json
+{"sent": true, "parts": 1, "error": null}
+```
+
+A Telegram or network failure is not a 500; the bot token is scrubbed from
+the error:
+
+```json
+{"sent": false, "parts": 0, "error": "400 Client Error: Bad Request for url: https://api.telegram.org/bot<token>/sendMessage"}
+```
+
+| Status | Cause |
+|---|---|
+| `503` | Telegram is not configured: `{"detail": "Telegram is not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your local .env."}` |
+
+---
+
+## `/api/v1/reports/weekly` — weekly forward-test report
+
+Research and paper trading only. Alpaca paper fills (account activities,
+type `FILL`) are stored once each in the DuckDB table `broker_fills`, keyed
+by Alpaca's activity id, so re-fetching an overlap adds nothing. Each
+symbol's fills are netted in time order: a trade opens when the position
+leaves flat and closes when it is flat again, so partial fills and bracket
+legs count once. Entry and exit prices are volume-weighted.
+
+The report covers the Monday to Saturday week ending on the latest Saturday
+(UK), so a mid-week build shows the last full week. Net figures are after FX
+costs: `FX_COST_PCT` x `FX_CONVERSIONS_PER_ROUND_TRIP` x entry notional per
+trade, as in the order ticket. The vs-SPY line (average net trade return
+against SPY over the same holding days) appears only from 30 closed trades;
+before that it reads `n too small (n/30)`. Average R is `n/a`: fills carry
+no stop. The universe line comes from `config/universe_status.json`. The
+text is plain, one message under 4096 characters, and ends with the
+"Research only, paper trading" footer.
+
+The scheduler pulls fills Monday to Friday at 21:30 UK, and on Saturday at
+09:00 UK pulls fills again, then builds and sends the report to Telegram. A
+job missed while the Mac slept runs once on wake (up to 6 hours late). If
+the pull fails the report is still sent, with a `journal not updated`
+warning.
+
+Rollback: `DROP TABLE broker_fills` (nothing else reads it).
+
+### `GET /api/v1/reports/weekly`
+
+Builds the report from the stored fills. Alpaca is not called and nothing is
+sent. Real output (test fixture fills, built on Sat 21 Nov 2026 09:00 UK):
+
+```json
+{
+  "week_start": "2026-11-16",
+  "trades_this_week": 2,
+  "trades_total": 3,
+  "open_positions": 1,
+  "net_usd_total": 106.0,
+  "text": "SwingTrader weekly report, week of Mon 16 Nov 2026\nThis week: 2 closed trades, 1 win, net +$86.00 / +£68.80\n  AAA +$96.00 (10 sh, 100.70 to 110.30)\n  CCC -$10.00 (5 sh, 50.00 to 48.00)\nSince start: 3 closed trades, 2 wins (67%), net +$106.00 / +£84.80 after $0.00 costs, avg R n/a (no stops on fills)\nvs SPY: n too small (3/30)\nOpen positions: 1\nUniverse (sync 2026-11-01): +2 −1, 1 skipped\nAdded: NEW1, NEW2\nRemoved: OLD1\nGBP/USD 1.2500 (live, 2026-11-21 09:00)\n\nResearch only, paper trading. Not investment advice."
+}
+```
+
+### `POST /api/v1/reports/weekly/send`
+
+Pulls new fills from Alpaca, builds the report and sends it to the Telegram
+chat set by `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` (or the Alerts tab).
+
+```json
+{"sent": true, "parts": 1, "error": null}
+```
+
+A Telegram or network failure is not a 500; the bot token is scrubbed from
+the error:
+
+```json
+{"sent": false, "parts": 0, "error": "400 Client Error: Bad Request for url: https://api.telegram.org/bot<token>/sendMessage"}
+```
+
+| Status | Cause |
+|---|---|
+| `503` | Telegram is not configured: `{"detail": "Telegram is not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your local .env."}` |
+
+---
+
 ## `/api/v1/execution/*` — Alpaca paper trading
 
 Every route 503s with a clear message if `ALPACA_API_KEY`/
@@ -523,22 +785,37 @@ a live order.
 | `limit_price` | float \| null | `null` | Required for `LIMIT`; optional entry price for a `BRACKET` (omit for a market-entry bracket) |
 | `stop_loss` / `take_profit` | float \| null | `null` | Required for `BRACKET` |
 
-Before dispatching to Alpaca, this route runs `execution/guards.py`'s
-`check_order_guards` (unless `EXECUTION_GUARDS_ENABLED=false`):
+| `intent` | string \| null | `null` | `"ENTRY"` or `"EXIT"`. `"ENTRY"` always guards; otherwise only a sell of a held long is an EXIT (see below) |
 
-- **Session guard** — refuses to dispatch while the US market is closed,
-  and by default refuses pre-market/after-hours too
-  (`EXECUTION_ALLOW_EXTENDED_HOURS=true` opts into dispatching there, still
-  flagged as illiquid).
-- **Earnings/split lockout guard** — refuses a new entry within
-  `EARNINGS_LOCKOUT_HOURS` (default 48) of a scheduled earnings release or
-  stock split, on either side of it. Fails *open* (does not block) if the
-  earnings/split calendar can't be fetched for the ticker — a data-provider
-  gap is not treated as a clean bill of health, but it also must not brick
-  order dispatch.
+Order guards (`execution/guards.py`'s `enforce_order_guards`) run on every
+order, on this route and on `POST /api/v1/orders/submit`. They cannot be
+switched off.
 
-A rejected order never reaches Alpaca: guard failures come back as a `422`
-with every reason that applied, not just the first one hit.
+- **EXIT** always goes through, even when the market is closed or the
+  calendar is down, so you can always get out of a position. An order is an
+  EXIT only if it is a sell and the Alpaca account holds at least `qty` long
+  of that ticker; `intent="EXIT"` alone never makes it one. Every buy, an
+  unheld, oversized or short-side sell, and a sell whose position lookup
+  fails are guarded as ENTRY.
+- **ENTRY** is refused unless all of these pass:
+  - **Session**: Alpaca's trading calendar says the regular session is open
+    now. Holidays, weekends and the time after a half-day's early close are
+    closed. Pre-market/after-hours are refused too, unless
+    `EXECUTION_ALLOW_EXTENDED_HOURS=true`.
+  - **Earnings/split lockout**: no earnings release or stock split within
+    `EARNINGS_LOCKOUT_HOURS` (default 48) on either side.
+  - **Fail closed**: if the calendar, earnings or split lookup fails, or
+    Alpaca keys are missing, the entry is refused.
+
+A refused order never reaches the broker. It comes back as a `422` listing
+every reason that applied. Real response, from a `TestClient` buy at 05:51 ET
+on Monday 2026-11-23 (before the 09:30 open) with earnings due the next day:
+
+```json
+{
+  "detail": "Order blocked (ENTRY): Market is closed (outside regular hours (09:30-16:00 ET)) - entries blocked. Within 48h of a scheduled earnings date (2026-11-24) - new entries suppressed."
+}
+```
 
 ### `POST /api/v1/execution/close-all`
 
@@ -662,8 +939,9 @@ failing the whole response.
 Turns one already-resolved setup (entry/stop/target, as read off the
 screener grid or a backtest) into broker-ready tickets side-by-side across
 account-size tiers ($1k/$5k/$10k by default), each sized and gated by
-`RiskManager.build_risk_managed_order`. Stateless — the caller supplies the
-setup's own numbers, so this never touches price data itself.
+`RiskManager.build_risk_managed_order`. The caller supplies the setup's own
+numbers; the only data read is the cached `GBPUSD=X` close (USD per 1 GBP)
+for the display-only GBP figures.
 
 ### Request body
 
@@ -680,17 +958,33 @@ setup's own numbers, so this never touches price data itself.
 
 ### Response body
 
+Real response for `entry_price: 231.42`, 3%/9% percentage stop/target, one
+$5,000 tier, `FX_COST_PCT=0.0015`, `FX_CONVERSIONS_PER_ROUND_TRIP=2` and the
+cached `GBPUSD=X` close of 2026-11-23 (downloads disabled, so the daily close):
+
 ```json
 {
   "tickets": [
-    { "ticker": "AAPL", "account_equity": 1000.0, "order_type": "MARKET",
-      "entry_price": 231.42, "stop_loss": 225.1, "take_profit": 240.0,
-      "quantity": 3, "notional_value": 694.26, "risk_amount": 20.0,
-      "reward_risk_ratio": 2.9, "tradable": true, "note": null }
+    { "ticker": "AAPL", "account_equity": 5000.0, "order_type": "MARKET",
+      "entry_price": 231.42, "stop_loss": 224.4774, "take_profit": 252.2478,
+      "quantity": 9, "notional_value": 2082.78, "risk_amount": 62.48,
+      "reward_risk_ratio": 3.0, "tradable": true, "note": null,
+      "fx_cost_usd": 6.25, "risk_gbp": 47.68, "notional_gbp": 1589.24,
+      "fx_note": null, "fx_rate_date": "2026-11-23T00:00:00",
+      "fx_rate_source": "daily" }
   ],
   "min_reward_risk_ratio": 2.5
 }
 ```
+
+`fx_cost_usd` is `notional_value * FX_COST_PCT * FX_CONVERSIONS_PER_ROUND_TRIP`
+(`0.0` by default). The rate is the latest
+`GBPUSD=X` quote (`fx_rate_source: "live"`, `fx_rate_date` the quote's ISO
+timestamp, cached 60 s). It falls back to the stored daily close
+(`"daily"`, kept fresh by `POST /data/sync`) when the quote is unavailable or
+downloads are disabled (`ALLOW_DOWNLOADS=false`). With no rate, `risk_gbp`,
+`notional_gbp`, `fx_rate_date` and `fx_rate_source` are `null` and `fx_note` is `"GBP rate unavailable: GBPUSD=X is not cached yet (run a data sync)."`;
+the ticket is still issued.
 
 A tier too small to size even 1 share comes back `tradable: false` with a
 `note`, not omitted from `tickets` — the UI shows every tier it asked for.
@@ -709,11 +1003,18 @@ global), not persisted — it resets on server restart.
 ### `POST /api/v1/data/sync`
 
 Body: `{"tickers": ["AAPL", "MSFT"]}` — omit or `null` to sync the full
-watchlist. `422` if the body is empty and the watchlist is also empty.
+watchlist, which also syncs `GBPUSD=X` and `SPY` (display FX rate and
+benchmark). `422` if the body is empty and the watchlist is also empty.
 
 ```json
-{ "status": "started", "tickers": ["AAPL", "MSFT"] }
+{ "status": "started", "tickers": ["AAPL", "MSFT"], "skipped": [] }
 ```
+
+Explicit tickers are normalized (`brk.b` -> `BRK-B`) and deduped first.
+Delisted/renamed tickers (`data.universe.DENY_ENTRIES`, case-insensitive) are
+dropped from an explicit list and reported in `skipped` (`[]` by default);
+`422` if every requested ticker is denied. `GET /api/v1/data/health` lists the
+same entries in `delisted` (`ticker`, `since`, `kind`, `reason`, `successor`).
 
 ### `GET /api/v1/data/sync/status`
 
@@ -730,6 +1031,36 @@ watchlist. `422` if the body is empty and the watchlist is also empty.
 
 `results` fills in incrementally as each ticker finishes, so polling mid-run
 shows partial progress, not just a final snapshot.
+
+### `GET /api/v1/data/health`
+
+Parquet cache freshness summary. A ticker whose last bar is older than
+`screener_stale_after_days` is counted in `stale_count` and listed in
+`stale_tickers` (capped at 50; `more_stale_tickers` is true past the cap).
+`delisted` lists every `DENY_ENTRIES` row; `since` is the first session after
+the symbol's last trading day. The endpoint is read-only: it never deletes or
+moves cache files. Delisted history is archived in `data/delisted/` (see its
+README).
+
+```json
+{
+  "total_tickers": 505,
+  "newest_ticker": "AAPL",
+  "newest_date": "2026-11-20",
+  "oldest_ticker": "XYZ",
+  "oldest_date": "2026-10-30",
+  "stale_count": 1,
+  "stale_tickers": ["XYZ"],
+  "more_stale_tickers": false,
+  "total_rows_estimate": 1290000,
+  "as_of": "2026-11-22T12:00:00+00:00",
+  "delisted": [
+    { "ticker": "KVUE", "since": "2026-11-02", "kind": "stock_merger",
+      "reason": "Acquired by Kimberly-Clark for cash plus KMB shares.",
+      "successor": "KMB" }
+  ]
+}
+```
 
 ---
 
@@ -786,31 +1117,50 @@ Most recent jobs first, capped at 50 — job summaries only (no `results` or
 
 ---
 
-## `/api/v1/universe/*` — dynamic S&P 500 + Nasdaq-100 universe
+## `/api/v1/universe/*` — S&P 500 + Nasdaq-100 universe
 
-`backend/app/data/universe.py`'s `UniverseManager` fetches, sanitizes,
-dedupes, and DENYLIST-filters the trading universe, persisting to
-`config/universe.json` (gitignored, generated). This router only exposes it
-over HTTP.
+`config/universe.json` is the only ticker list: the screener, scans, brief and
+data sync all read its `symbols`. `backend/app/data/universe.py`'s
+`UniverseManager` refreshes it from Wikipedia at 07:00 UK on the 1st of each
+month (scheduler job `universe_monthly`). A sync:
+
+- keeps the previous file unchanged (`kept_previous: true`, logged as a
+  warning) if a source fails (`source_status` "fallback") or returns too few
+  names (S&P 500 under 450, Nasdaq-100 under 90);
+- reports `changes` against the previous file: `added`, `removed` (flagged
+  only, their price files are kept) and `renamed` (`{"old", "new"}`, matched
+  on company name, e.g. FI to FISV) and `skipped` (`{"symbol", "reason"}`:
+  index members left out because their history fetch failed or their
+  parquet is missing or unreadable; never reported as removed);
+- fetches price history for new and renamed-to names;
+- records each attempt in `config/universe_status.json` (`last_attempt`,
+  `kept_previous`, `reason`, `source_status`, `last_changes`) for the weekly
+  report.
 
 ### `POST /api/v1/universe/sync`
 
-Runs a fresh sync (network/Wikipedia fetch + parquet scan) off the event
-loop via `asyncio.to_thread`.
+Runs a sync now, off the event loop.
 
 ### `GET /api/v1/universe/symbols`
 
-Returns the current `config/universe.json` contents, syncing first if the
-universe has never been synced or is more than 24h stale — no "call sync
-once before this ever works" step to remember on a fresh checkout.
+Returns the stored universe without re-syncing (it syncs only if no universe
+file exists yet); `changes` are those of the last sync.
 
-Both return the same shape:
+Both return the same shape (real response, lists shortened):
 
 ```json
 {
-  "symbols": ["AAPL", "MSFT", "..."],
-  "synced_at": "2026-09-20T14:00:00+00:00",
-  "source_counts": { "sp500": 503, "nasdaq100": 101 }
+  "symbols": ["A", "AAPL", "ABBV", "..."],
+  "synced_at": "2026-11-23T13:04:51.652283+00:00",
+  "source_counts": { "sp500": 503, "nasdaq100": 101 },
+  "source_status": { "sp500": "live", "nasdaq100": "live" },
+  "changes": {
+    "added": ["ALAB", "ALNY", "ARES", "BE", "..."],
+    "removed": ["AZN", "CTVA", "EA", "GFS", "KVUE", "TEAM", "TTD", "WBD", "ZS"],
+    "renamed": [],
+    "skipped": []
+  },
+  "kept_previous": false
 }
 ```
 
@@ -886,6 +1236,7 @@ rather than in-process memory, so order state survives a process restart.
 | `order_type` | string | `"MARKET"` | `"MARKET"` or `"LIMIT"` |
 | `limit_price` | float \| null | `null` | — |
 | `reference_price` | float \| null | `null` | Required for `broker="PAPER"` + `order_type="MARKET"` (the quote it fills against); ignored by `ALPACA`, which prices its own fill |
+| `intent` | string \| null | `null` | `"ENTRY"` or `"EXIT"`. Guarded like `POST /api/v1/execution/orders`; a `PAPER` sell is always guarded as an ENTRY (the paper broker keeps no positions) |
 
 ```json
 {
@@ -898,7 +1249,8 @@ rather than in-process memory, so order state survives a process restart.
 ```
 
 `422` for an unknown `broker`, a `PAPER` `MARKET` order missing
-`reference_price`, or a `ValueError` from the broker.
+`reference_price`, an ENTRY refused by the order guards (same body as
+above; nothing is stored), or a `ValueError` from the broker.
 
 ### `POST /api/v1/orders/cancel/{order_id}`
 

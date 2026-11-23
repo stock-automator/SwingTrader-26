@@ -16,6 +16,7 @@ from ..data.loader import (
 from ..quant.backtest import comparison_to_payload, run_comparison
 from ..quant.gating import EarningsGatedStrategy, RegimeGatedStrategy
 from ..quant.strategies import REQUIRES_BENCHMARK, build_strategy
+from ..quant.walk_forward import oos_summary
 from .deps import load_frames
 from .schemas import BacktestRequest, BacktestResponse
 
@@ -92,6 +93,19 @@ def run_backtest_endpoint(
             strategy, earnings_by_ticker=earnings_by_ticker
         )
 
+    fx_cost_pct = (
+        request.fx_cost_pct
+        if request.fx_cost_pct is not None
+        else settings.fx_cost_pct * settings.fx_conversions_per_round_trip / 2
+    )
+
+    engine_kwargs = dict(
+        fee_per_share=request.fee_per_share,
+        atr_slippage_multiple=request.atr_slippage_multiple,
+        fx_cost_pct=fx_cost_pct,
+        fractional=request.fractional,
+        use_risk_gate=request.use_risk_gate,
+    )
     try:
         comparison = run_comparison(
             strategy,
@@ -103,12 +117,42 @@ def run_backtest_endpoint(
             slippage_pct=request.slippage_pct,
             risk_free_rate=request.risk_free_rate,
             include_buy_and_hold=request.include_buy_and_hold,
-            fee_per_share=request.fee_per_share,
-            atr_slippage_multiple=request.atr_slippage_multiple,
+            **engine_kwargs,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    payload = comparison_to_payload(comparison)
+    oos = None
+    if request.walk_forward:
+        # Secondary output: a failure here must not lose the main result.
+        try:
+            oos = oos_summary(
+                strategy,
+                frames,
+                spy_frame,
+                initial_capital=request.initial_capital,
+                risk_per_trade_pct=request.risk_per_trade_pct,
+                commission=request.commission,
+                slippage_pct=request.slippage_pct,
+                **engine_kwargs,
+            )
+        except ValueError as exc:
+            warnings.append(f"Walk-forward summary unavailable: {exc}")
+        else:
+            if not oos["windows"]:
+                warnings.append(
+                    "Walk-forward: no window fits - the tickers' shared date "
+                    f"range is shorter than {oos['is_window_months']} months "
+                    f"in-sample plus {oos['oos_window_months']} out-of-sample."
+                )
+
+    payload = {"oos_summary": oos, **comparison_to_payload(comparison)}
+    payload["costs"] = {
+        "commission": request.commission,
+        "slippage_pct": request.slippage_pct,
+        "fee_per_share": request.fee_per_share,
+        "atr_slippage_multiple": request.atr_slippage_multiple,
+        "fx_cost_pct_per_leg": fx_cost_pct,
+    }
     payload["warnings"] = [*warnings, *payload["warnings"]]
     return payload

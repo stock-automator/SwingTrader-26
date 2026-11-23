@@ -259,6 +259,33 @@ class TestParquetSyncManagerSyncTicker:
         # Pre-anchor history is untouched.
         assert out["Close"].iloc[0] == pytest.approx(old_close[0])
 
+    def test_in_progress_session_bar_is_never_cached(self, data_dir):
+        """A sync during US market hours must not store today's partial bar
+        (it would never be corrected: the next sync only appends after it)."""
+        old_idx = pd.date_range("2024-01-08", periods=5, freq="B")  # Mon-Fri
+        _raw_frame(old_idx, np.linspace(100, 104, 5)).to_parquet(
+            data_dir / "AAA.parquet"
+        )
+        monday = pd.Timestamp("2024-01-15")
+        fresh = _raw_frame(
+            old_idx[-1:].append(pd.DatetimeIndex([monday])), np.array([104.0, 99.0])
+        )
+        mgr = ParquetSyncManager(data_dir=data_dir, fetch_fn=lambda t, s, e: fresh)
+
+        # 12:43 in New York (17:43 in London): Monday's session is still open.
+        mgr.sync_ticker("AAA", now=pd.Timestamp("2024-01-15 12:43"))
+
+        out = pd.read_parquet(data_dir / "AAA.parquet")
+        assert out.index.max() == pd.Timestamp("2024-01-12")
+
+    def test_aware_now_is_judged_on_new_york_time(self):
+        # 17:43 London on a Monday is 12:43 New York: the close hasn't happened.
+        london = pd.Timestamp("2024-01-15 17:43", tz="Europe/London")
+        assert latest_market_close(london) == pd.Timestamp("2024-01-12")
+        # 21:30 London is 16:30 New York: Monday has closed.
+        after = pd.Timestamp("2024-01-15 21:30", tz="Europe/London")
+        assert latest_market_close(after) == pd.Timestamp("2024-01-15")
+
     def test_detects_and_reconciles_a_split(self, data_dir):
         old_idx = pd.date_range("2024-01-01", periods=5, freq="B")
         old_close = np.linspace(100, 104, 5)

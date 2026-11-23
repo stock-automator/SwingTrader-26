@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -37,6 +37,8 @@ from ..execution.broker import (
     ExecutionBroker,
     PaperBroker,
 )
+from ..execution.market_clock import MarketClock, get_market_clock
+from .execution import raise_if_blocked
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +61,12 @@ class OrderSubmitRequest(BaseModel):
             "for broker='PAPER' with order_type='MARKET'. Ignored by "
             "broker='ALPACA', which prices its own fill."
         ),
+    )
+    intent: Literal["ENTRY", "EXIT"] | None = Field(
+        default=None,
+        description="ENTRY always guards. Otherwise a sell skips the guards "
+        "only if the Alpaca account holds at least qty long of the ticker; "
+        "every other order is guarded as an entry.",
     )
 
 
@@ -85,11 +93,13 @@ class ActiveOrdersResponse(BaseModel):
 _VALID_BROKERS = frozenset({"PAPER", "ALPACA"})
 
 
+def _alpaca_client(settings: Settings) -> AlpacaExecutionClient:
+    return AlpacaExecutionClient(settings.alpaca_api_key, settings.alpaca_api_secret)
+
+
 def _broker_for(name: str, settings: Settings) -> ExecutionBroker:
     if name == "ALPACA":
-        return AlpacaBroker(
-            AlpacaExecutionClient(settings.alpaca_api_key, settings.alpaca_api_secret)
-        )
+        return AlpacaBroker(_alpaca_client(settings))
     return PaperBroker()
 
 
@@ -218,10 +228,14 @@ def _mark_cancelled(order_id: str) -> None:
 
 @router.post("/submit", response_model=RoutedOrderResponse)
 async def submit_order(
-    request: OrderSubmitRequest, settings: Settings = Depends(get_settings)
+    request: OrderSubmitRequest,
+    settings: Settings = Depends(get_settings),
+    clock: MarketClock = Depends(get_market_clock),
 ) -> dict:
     """Routes one order through `PaperBroker` or `AlpacaBroker` and
-    persists the outcome - filled, rejected, or (Alpaca only) pending."""
+    persists the outcome - filled, rejected, or (Alpaca only) pending.
+    A blocked ENTRY (`execution.guards`) is a 422 and never reaches the
+    broker or the order table."""
     broker_name = request.broker.upper()
     if broker_name not in _VALID_BROKERS:
         raise HTTPException(
@@ -237,7 +251,21 @@ async def submit_order(
             detail="reference_price is required for a PAPER MARKET order",
         )
 
-    broker = _broker_for(broker_name, settings)
+    # Only Alpaca holds positions a sell can be proven to exit; a PAPER sell
+    # has no position source and is guarded like an entry.
+    alpaca = _alpaca_client(settings) if broker_name == "ALPACA" else None
+    await run_in_threadpool(
+        raise_if_blocked,
+        request.ticker,
+        request.side,
+        request.qty,
+        request.intent,
+        (lambda: alpaca.get_positions()) if alpaca is not None else None,
+        settings,
+        clock,
+    )
+
+    broker: ExecutionBroker = AlpacaBroker(alpaca) if alpaca else PaperBroker()
     order_id = str(uuid.uuid4())
     submitted_at = _utcnow_iso()
 

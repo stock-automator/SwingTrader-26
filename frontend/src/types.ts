@@ -163,8 +163,12 @@ export interface BacktestRequest {
   benchmark: string;
   fee_per_share: number;
   atr_slippage_multiple: number;
+  fx_cost_pct?: number | null;
   earnings_blackout: boolean;
   regime_gating: boolean;
+  walk_forward?: boolean;
+  fractional?: boolean;
+  use_risk_gate?: boolean;
 }
 
 export interface CurveSummary {
@@ -176,6 +180,8 @@ export interface CurveSummary {
   sharpe_ratio: number | null;
   max_drawdown_pct: number | null;
   volatility_pct: number | null;
+  exposure_pct: number | null;
+  avg_invested_pct: number | null;
 }
 
 export interface RelativeMetrics {
@@ -208,6 +214,7 @@ export interface EquityCurvePoint {
   strategy: number;
   buy_and_hold?: number;
   spy?: number;
+  spy_exposure_matched?: number;
 }
 
 export interface Trade {
@@ -221,7 +228,24 @@ export interface Trade {
   return_pct: number;
 }
 
+export interface OosWindow {
+  oos_start: string;
+  oos_end: string;
+  oos_return_pct: number | null;
+  spy_oos_return_pct: number | null;
+}
+
+export interface OosSummary {
+  is_window_months: number;
+  oos_window_months: number;
+  mean_oos_return_pct: number | null;
+  mean_spy_oos_return_pct: number | null;
+  windows_beating_spy: number;
+  windows: OosWindow[];
+}
+
 export interface BacktestResponse {
+  oos_summary: OosSummary | null;
   strategy: string;
   tickers: string[];
   initial_capital: number;
@@ -232,13 +256,24 @@ export interface BacktestResponse {
     strategy: CurveSummary;
     buy_and_hold?: CurveSummary;
     spy?: CurveSummary;
+    spy_exposure_matched?: CurveSummary;
   };
   vs_spy: RelativeMetrics | null;
   vs_buy_and_hold: RelativeMetrics | null;
   trade_metrics: TradeMetrics;
   equity_curves: EquityCurvePoint[];
   trades: Trade[];
+  costs: BacktestCosts;
   warnings: string[];
+  skipped_signals: Record<string, number>;
+}
+
+export interface BacktestCosts {
+  commission: number;
+  slippage_pct: number;
+  fee_per_share: number;
+  atr_slippage_multiple: number;
+  fx_cost_pct_per_leg: number;
 }
 
 // ---- Order Ticket ----
@@ -269,6 +304,12 @@ export interface OrderTicket {
   reward_risk_ratio: number;
   tradable: boolean;
   note: string | null;
+  fx_cost_usd: number;
+  risk_gbp: number | null;
+  notional_gbp: number | null;
+  fx_note: string | null;
+  fx_rate_date: string | null;
+  fx_rate_source: "live" | "daily" | null;
 }
 
 export interface OrderTicketsResponse {
@@ -302,6 +343,7 @@ export interface DataSyncStatusResponse {
 export interface DataSyncResponse {
   status: string;
   tickers: string[];
+  skipped: string[];
 }
 
 // ---- Signal matrix ----
@@ -401,6 +443,8 @@ export interface ExecutionOrderRequest {
   limit_price?: number | null;
   stop_loss?: number | null;
   take_profit?: number | null;
+  /** ENTRY always guards (422 if blocked). A sell skips the guards only if the account holds >= qty long of the ticker. */
+  intent?: "ENTRY" | "EXIT" | null;
 }
 
 export interface ExecutionOrderResponse {
@@ -701,3 +745,54 @@ export interface JournalTradeResponse {
   created_at: string | null;
   source: string | null;
 }
+
+/** One setup in `GET /api/v1/reports/daily` (whole shares, USD and GBP risk). */
+export interface DailyBriefSetup {
+  ticker: string;
+  strategy: string;
+  entry: number;
+  stop: number;
+  target: number;
+  shares: number;
+  risk_usd: number;
+  risk_gbp: number | null;
+  reason: string;
+}
+
+/** `GET /api/v1/reports/daily`: the cached brief, its plain-text rendering
+ *  and when it was built (`computed_at`, ISO 8601 UTC). 404 before the first. */
+export interface DailyBriefResponse {
+  as_of: string | null;
+  last_session: string;
+  regime: string;
+  stale: boolean;
+  setups: DailyBriefSetup[];
+  text: string;
+  computed_at: string;
+}
+
+/** `POST /api/v1/reports/daily/refresh` (202): rebuild queued. */
+export interface DailyBriefRefreshResponse {
+  status: string;
+}
+
+/** `POST /api/v1/reports/daily/send`. */
+export interface DailyBriefSendResponse {
+  sent: boolean;
+  parts: number;
+  error: string | null;
+}
+
+/** `GET /api/v1/reports/weekly`: the forward-test report built from the
+ *  stored Alpaca fills; `week_start` is the Monday of the reported week. */
+export interface WeeklyReportResponse {
+  week_start: string;
+  trades_this_week: number;
+  trades_total: number;
+  open_positions: number;
+  net_usd_total: number;
+  text: string;
+}
+
+/** `POST /api/v1/reports/weekly/send`: same shape as the daily send. */
+export type WeeklyReportSendResponse = DailyBriefSendResponse;

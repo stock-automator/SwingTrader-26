@@ -1,77 +1,143 @@
 """
-Dynamic trading-universe sync: S&P 500 + Nasdaq-100 constituents, sanitized,
-deduped, and filtered down to symbols this repo can actually trade.
+Trading universe: S&P 500 + Nasdaq-100 constituents in `config/universe.json`,
+the only ticker list the app scans. Refreshed monthly (scheduler job
+`universe_monthly`) or on demand via `POST /api/v1/universe/sync`.
 
-`UniverseManager.sync()` is the entry point. It:
+`UniverseManager.sync()`:
 
-1. Fetches both index membership lists (Wikipedia via `pandas.read_html`,
-   falling back to a bundled static seed list if the network is unavailable
-   or the page shape changes - see `_STATIC_SP500_FALLBACK` /
-   `_STATIC_NASDAQ100_FALLBACK`).
-2. Sanitizes every ticker onto one notation (see `sanitize_ticker`).
-3. Dedupes the merged set.
-4. Drops a small denylist of symbols known to have broken/zero-bar data in
-   this repo's parquet store (`DENYLIST`).
-5. Drops any symbol whose `data/raw/{TICKER}.parquet` is missing or has zero
-   rows from the *active* list - see `purge_broken_symbols`, checked across
-   a bounded thread pool since this step alone is 500+ per-symbol disk
-   reads. This never deletes or edits a parquet file; it only decides what
-   goes in `config/universe.json`.
-6. Writes the result to `config/universe.json`.
-
-Price data itself (the actual OHLCV bars for each active symbol) is not
-fetched here. That pipeline already exists and is reused as-is:
-`backend.app.quant.data.parquet_manager.ParquetSyncManager` (wired up via
-`POST /api/v1/data/sync`) fetches raw OHLCV + `Adj Close` and reconciles
-split/dividend corporate actions retroactively - see that module's
-docstring. `backend.app.data.loader.fetch_yfinance`, the other existing
-fetch path, already downloads with `auto_adjust=True` (split/dividend
-adjusted). `UniverseManager` intentionally does not re-fetch bars for
-five-hundred-plus symbols inline: that would make a single `sync()` call
-trigger hundreds of synchronous network requests against a rate-limited
-provider, duplicating a pipeline that already exists and is already
-reachable independently via `/api/v1/data/sync`. Its job is universe
-*membership*, not price data.
+1. Fetches both index lists (symbol and company name) from Wikipedia.
+2. Keeps the previous file byte-for-byte, logs a warning and records why
+   in the status file, if a source fails or returns too few names
+   (`MIN_LIVE_COUNTS`).
+3. Sanitizes tickers (`BRK.B` -> `BRK-B`), dedupes, and drops the
+   `DENY_ENTRIES` symbols.
+4. Fetches history (`ParquetSyncManager.sync_ticker`) for names that are
+   new versus the previous file, then drops any symbol whose parquet is
+   still missing or empty (`purge_broken_symbols`).
+5. Diffs against the previous file: added, removed (flagged only; their
+   parquet is never touched) and renamed, matched on normalised company
+   name (FI -> FISV). Writes symbols, names and `last_changes`.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import requests
+
+from ..quant.data.parquet_manager import ParquetSyncManager
 
 log = logging.getLogger(__name__)
 
 #: Where `sync()` writes/reads the active universe.
 DEFAULT_CONFIG_PATH = Path("config/universe.json")
 
-#: Parquet cache directory this module reads to detect broken/missing data.
-#: Matches `backend.app.data.loader.DATA_DIR` / `Settings.data_dir`.
+#: Parquet cache directory (matches `Settings.data_dir`).
 DEFAULT_DATA_DIR = Path("data/raw")
 
-#: How old `synced_at` may be before `needs_sync()` reports true.
-SYNC_STALE_AFTER = timedelta(hours=24)
+#: Fewer live names than this means a broken page: keep the previous file.
+MIN_LIVE_COUNTS = {"sp500": 450, "nasdaq100": 90}
 
-#: Symbols known to have broken/zero-bar data in this repo's parquet store.
-#: Excluded from the *active* universe unconditionally - never deleted from
-#: disk, and re-included automatically if a future data provider fixes them
-#: and they're removed from this set.
-DENYLIST: frozenset[str] = frozenset({"BK", "CTRA", "K", "MMC", "WBA"})
+#: How a denied symbol left the tradable universe.
+DenyKind = Literal["rename", "stock_merger", "cash_buyout", "broken_data"]
 
-#: Realistic desktop-browser User-Agent for constituent-page fetches.
-#: Wikipedia (and other index-membership sources) will 403 the default
-#: `python-requests/x.y` UA some hosting providers get flagged under -
-#: this sidesteps that without doing anything more elaborate than what any
-#: real browser sends.
+
+@dataclass(frozen=True)
+class DenyEntry:
+    """Why one symbol is excluded from the active universe.
+
+    `since` is the first session after the symbol's last trading day under
+    this company (None only for `broken_data`, which has no corporate event).
+    `successor` is the symbol holders ended up with (`rename` /
+    `stock_merger`); None for cash buyouts and broken data.
+    """
+
+    kind: DenyKind
+    since: date | None
+    reason: str
+    successor: str | None = None
+
+
+#: Symbols excluded from the *active* universe unconditionally, each with
+#: the corporate event that removed it. Entries are dated because exchanges
+#: reuse tickers: if a symbol comes back for a different company, remove
+#: its entry on purpose. Excluding a symbol never deletes it from disk; the
+#: pre-delisting history of KVUE and WBD is archived in `data/delisted/`.
+DENY_ENTRIES: dict[str, DenyEntry] = {
+    "EA": DenyEntry(
+        kind="cash_buyout",
+        since=date(2026, 8, 4),
+        reason="Taken private for cash by PIF, Silver Lake and Affinity Partners.",
+    ),
+    "KVUE": DenyEntry(
+        kind="stock_merger",
+        since=date(2026, 11, 2),
+        reason="Acquired by Kimberly-Clark for cash plus KMB shares.",
+        successor="KMB",
+    ),
+    "WBD": DenyEntry(
+        kind="cash_buyout",
+        since=date(2026, 10, 6),
+        reason="Acquired by Paramount Skydance for cash.",
+    ),
+    "AVB": DenyEntry(
+        kind="stock_merger",
+        since=date(2026, 8, 18),
+        reason="Merged into EQR, renamed Vivmark Residential (VMRK).",
+        successor="VMRK",
+    ),
+    "EQR": DenyEntry(
+        kind="rename",
+        since=date(2026, 8, 18),
+        reason="Renamed Vivmark Residential (VMRK) after the AVB merger.",
+        successor="VMRK",
+    ),
+    "BK": DenyEntry(
+        kind="rename",
+        since=date(2026, 5, 21),
+        reason="Bank of New York Mellon now trades as BNY.",
+        successor="BNY",
+    ),
+    "MMC": DenyEntry(
+        kind="rename",
+        since=date(2026, 1, 14),
+        reason="Marsh & McLennan now trades as MRSH.",
+        successor="MRSH",
+    ),
+    "CTRA": DenyEntry(
+        kind="stock_merger",
+        since=date(2026, 5, 7),
+        reason="Merged into Devon Energy (DVN) in an all-stock deal.",
+        successor="DVN",
+    ),
+    "K": DenyEntry(
+        kind="cash_buyout",
+        since=date(2025, 12, 11),
+        reason="Acquired by Mars for cash.",
+    ),
+    "WBA": DenyEntry(
+        kind="cash_buyout",
+        since=date(2025, 8, 28),
+        reason="Taken private for cash by Sycamore Partners.",
+    ),
+}
+
+#: Derived set of denied symbols; every existing caller keys off this.
+DENYLIST: frozenset[str] = frozenset(DENY_ENTRIES)
+
+
+#: Realistic desktop-browser User-Agent; Wikipedia may 403 the default
+#: `python-requests/x.y` UA.
 _BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -79,685 +145,133 @@ _BROWSER_HEADERS = {
     )
 }
 
-#: Timeout for constituent-page fetches - short enough that a blocked/absent
-#: network (e.g. this repo's own test sandbox) fails fast into the static
-#: fallback rather than hanging the caller.
+#: Timeout for constituent-page fetches, so a blocked network fails fast.
 _FETCH_TIMEOUT_SECONDS = 10
 
-#: Wikipedia's "List of S&P 500 companies" - the `Symbol` column of the
-#: first table on the page.
+#: Wikipedia's "List of S&P 500 companies": `Symbol` and `Security` columns.
 _SP500_WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
-#: Wikipedia's "Nasdaq-100" - the constituents table has a `Ticker` column.
-_NASDAQ100_WIKI_URL = "https://en.wikipedia.org/wiki/Nasdaq-100"
+#: Wikipedia's "List of NASDAQ-100 companies": `Ticker` and `Company`
+#: columns. The constituents table left the main "Nasdaq-100" article in 2026.
+_NASDAQ100_WIKI_URL = "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
 
-# ---------------------------------------------------------------------------
-# Static fallbacks
-#
-# Used only when the live Wikipedia fetch fails (no network, page reshaped,
-# request blocked, etc.) so `sync()` stays deterministic offline - notably
-# in this project's own test suite, which sets `allow_downloads=False` /
-# runs in CI sandboxes without network access. Reasonably current as of
-# this module's authorship; membership drifts over time (index
-# reconstitutions), which is exactly why the live fetch above is preferred
-# whenever it succeeds.
-# ---------------------------------------------------------------------------
-
-_STATIC_SP500_FALLBACK: tuple[str, ...] = (
-    "AAPL",
-    "ABBV",
-    "ABNB",
-    "ABT",
-    "ACGL",
-    "ACN",
-    "ADBE",
-    "ADI",
-    "ADM",
-    "ADP",
-    "ADSK",
-    "AEE",
-    "AEP",
-    "AES",
-    "AFL",
-    "AIG",
-    "AIZ",
-    "AJG",
-    "AKAM",
-    "ALB",
-    "ALGN",
-    "ALL",
-    "ALLE",
-    "AMAT",
-    "AMCR",
-    "AMD",
-    "AME",
-    "AMGN",
-    "AMP",
-    "AMT",
-    "AMZN",
-    "ANET",
-    "AON",
-    "AOS",
-    "APA",
-    "APD",
-    "APH",
-    "APO",
-    "APTV",
-    "ARE",
-    "ATO",
-    "AVB",
-    "AVGO",
-    "AVY",
-    "AWK",
-    "AXON",
-    "AXP",
-    "AZO",
-    "BA",
-    "BAC",
-    "BALL",
-    "BAX",
-    "BBY",
-    "BDX",
-    "BEN",
-    "BG",
-    "BIIB",
-    "BK",
-    "BKNG",
-    "BKR",
-    "BLDR",
-    "BLK",
-    "BMY",
-    "BR",
-    "BRO",
-    "BSX",
-    "BX",
-    "BXP",
-    "C",
-    "CAG",
-    "CAH",
-    "CARR",
-    "CAT",
-    "CB",
-    "CBOE",
-    "CBRE",
-    "CCI",
-    "CCL",
-    "CDNS",
-    "CDW",
-    "CEG",
-    "CF",
-    "CFG",
-    "CHD",
-    "CHRW",
-    "CHTR",
-    "CI",
-    "CINF",
-    "CL",
-    "CLX",
-    "CMCSA",
-    "CME",
-    "CMG",
-    "CMI",
-    "CMS",
-    "CNC",
-    "CNP",
-    "COF",
-    "COIN",
-    "COO",
-    "COP",
-    "COR",
-    "COST",
-    "CPAY",
-    "CPB",
-    "CPRT",
-    "CPT",
-    "CRL",
-    "CRM",
-    "CRWD",
-    "CSCO",
-    "CSGP",
-    "CSX",
-    "CTAS",
-    "CTRA",
-    "CTSH",
-    "CTVA",
-    "CVS",
-    "CVX",
-    "CZR",
-    "D",
-    "DAL",
-    "DASH",
-    "DAY",
-    "DD",
-    "DE",
-    "DECK",
-    "DELL",
-    "DG",
-    "DGX",
-    "DHI",
-    "DHR",
-    "DIS",
-    "DLR",
-    "DLTR",
-    "DOC",
-    "DOV",
-    "DOW",
-    "DPZ",
-    "DRI",
-    "DTE",
-    "DUK",
-    "DVA",
-    "DVN",
-    "DXCM",
-    "EA",
-    "EBAY",
-    "ECL",
-    "ED",
-    "EFX",
-    "EG",
-    "EIX",
-    "EL",
-    "ELV",
-    "EMN",
-    "EMR",
-    "ENPH",
-    "EOG",
-    "EPAM",
-    "EQIX",
-    "EQR",
-    "EQT",
-    "ERIE",
-    "ES",
-    "ESS",
-    "ETN",
-    "ETR",
-    "EVRG",
-    "EW",
-    "EXC",
-    "EXPD",
-    "EXPE",
-    "EXR",
-    "F",
-    "FANG",
-    "FAST",
-    "FCX",
-    "FDS",
-    "FDX",
-    "FE",
-    "FFIV",
-    "FI",
-    "FICO",
-    "FIS",
-    "FITB",
-    "FOX",
-    "FOXA",
-    "FRT",
-    "FSLR",
-    "FTNT",
-    "FTV",
-    "GD",
-    "GDDY",
-    "GE",
-    "GEHC",
-    "GEN",
-    "GEV",
-    "GILD",
-    "GIS",
-    "GL",
-    "GLW",
-    "GM",
-    "GNRC",
-    "GOOG",
-    "GOOGL",
-    "GPC",
-    "GPN",
-    "GRMN",
-    "GS",
-    "GWW",
-    "HAL",
-    "HAS",
-    "HBAN",
-    "HCA",
-    "HD",
-    "HIG",
-    "HII",
-    "HLT",
-    "HOLX",
-    "HON",
-    "HPE",
-    "HPQ",
-    "HRL",
-    "HSIC",
-    "HST",
-    "HSY",
-    "HUBB",
-    "HUM",
-    "HWM",
-    "IBM",
-    "ICE",
-    "IDXX",
-    "IEX",
-    "IFF",
-    "INCY",
-    "INTC",
-    "INTU",
-    "INVH",
-    "IP",
-    "IPG",
-    "IQV",
-    "IR",
-    "IRM",
-    "ISRG",
-    "IT",
-    "ITW",
-    "IVZ",
-    "J",
-    "JBHT",
-    "JBL",
-    "JCI",
-    "JKHY",
-    "JNJ",
-    "JPM",
-    "K",
-    "KDP",
-    "KEY",
-    "KEYS",
-    "KHC",
-    "KIM",
-    "KKR",
-    "KLAC",
-    "KMB",
-    "KMI",
-    "KMX",
-    "KO",
-    "KR",
-    "KVUE",
-    "L",
-    "LDOS",
-    "LEN",
-    "LH",
-    "LHX",
-    "LII",
-    "LIN",
-    "LKQ",
-    "LLY",
-    "LMT",
-    "LNT",
-    "LOW",
-    "LRCX",
-    "LULU",
-    "LUV",
-    "LVS",
-    "LW",
-    "LYB",
-    "LYV",
-    "MA",
-    "MAA",
-    "MAR",
-    "MAS",
-    "MCD",
-    "MCHP",
-    "MCK",
-    "MCO",
-    "MDLZ",
-    "MDT",
-    "MET",
-    "META",
-    "MGM",
-    "MHK",
-    "MKC",
-    "MKTX",
-    "MLM",
-    "MMC",
-    "MMM",
-    "MNST",
-    "MO",
-    "MOH",
-    "MOS",
-    "MPC",
-    "MPWR",
-    "MRK",
-    "MRNA",
-    "MS",
-    "MSCI",
-    "MSFT",
-    "MSI",
-    "MTB",
-    "MTCH",
-    "MTD",
-    "MU",
-    "NCLH",
-    "NDAQ",
-    "NDSN",
-    "NEE",
-    "NEM",
-    "NFLX",
-    "NI",
-    "NKE",
-    "NOC",
-    "NOW",
-    "NRG",
-    "NSC",
-    "NTAP",
-    "NTRS",
-    "NUE",
-    "NVDA",
-    "NVR",
-    "NWS",
-    "NWSA",
-    "NXPI",
-    "O",
-    "ODFL",
-    "OKE",
-    "OMC",
-    "ON",
-    "ORCL",
-    "ORLY",
-    "OTIS",
-    "OXY",
-    "PANW",
-    "PAYC",
-    "PAYX",
-    "PCAR",
-    "PCG",
-    "PEG",
-    "PEP",
-    "PFE",
-    "PFG",
-    "PG",
-    "PGR",
-    "PH",
-    "PHM",
-    "PKG",
-    "PLD",
-    "PLTR",
-    "PM",
-    "PNC",
-    "PNR",
-    "PNW",
-    "PODD",
-    "POOL",
-    "PPG",
-    "PPL",
-    "PRU",
-    "PSA",
-    "PSX",
-    "PTC",
-    "PWR",
-    "PYPL",
-    "QCOM",
-    "RCL",
-    "REG",
-    "REGN",
-    "RF",
-    "RJF",
-    "RL",
-    "RMD",
-    "ROK",
-    "ROL",
-    "ROP",
-    "ROST",
-    "RSG",
-    "RTX",
-    "RVTY",
-    "SBAC",
-    "SBUX",
-    "SCHW",
-    "SHW",
-    "SJM",
-    "SLB",
-    "SMCI",
-    "SNA",
-    "SNPS",
-    "SO",
-    "SOLV",
-    "SPG",
-    "SPGI",
-    "SRE",
-    "STE",
-    "STLD",
-    "STT",
-    "STX",
-    "STZ",
-    "SW",
-    "SWK",
-    "SWKS",
-    "SYF",
-    "SYK",
-    "SYY",
-    "T",
-    "TAP",
-    "TDG",
-    "TDY",
-    "TECH",
-    "TEL",
-    "TER",
-    "TFC",
-    "TGT",
-    "TJX",
-    "TMO",
-    "TMUS",
-    "TPL",
-    "TPR",
-    "TRGP",
-    "TRMB",
-    "TROW",
-    "TRV",
-    "TSCO",
-    "TSLA",
-    "TSN",
-    "TT",
-    "TTWO",
-    "TXN",
-    "TXT",
-    "TYL",
-    "UAL",
-    "UBER",
-    "UDR",
-    "UHS",
-    "ULTA",
-    "UNH",
-    "UNP",
-    "UPS",
-    "URI",
-    "USB",
-    "V",
-    "VICI",
-    "VLO",
-    "VLTO",
-    "VMC",
-    "VRSK",
-    "VRSN",
-    "VRTX",
-    "VST",
-    "VTR",
-    "VTRS",
-    "VZ",
-    "WAB",
-    "WAT",
-    "WBA",
-    "WBD",
-    "WDC",
-    "WEC",
-    "WELL",
-    "WFC",
-    "WM",
-    "WMB",
-    "WMT",
-    "WRB",
-    "WSM",
-    "WST",
-    "WTW",
-    "WY",
-    "WYNN",
-    "XEL",
-    "XOM",
-    "XYL",
-    "YUM",
-    "ZBH",
-    "ZBRA",
-    "ZTS",
-)
-
-_STATIC_NASDAQ100_FALLBACK: tuple[str, ...] = (
-    "ADBE",
-    "ADI",
-    "ADP",
-    "ADSK",
-    "AEP",
-    "AMAT",
-    "AMD",
-    "AMGN",
-    "AMZN",
-    "ANSS",
-    "APP",
-    "ARM",
-    "ASML",
-    "AVGO",
-    "AXON",
-    "AZN",
-    "BIIB",
-    "BKNG",
-    "BKR",
-    "CCEP",
-    "CDNS",
-    "CDW",
-    "CEG",
-    "CHTR",
-    "CMCSA",
-    "COST",
-    "CPRT",
-    "CRWD",
-    "CSCO",
-    "CSGP",
-    "CSX",
-    "CTAS",
-    "CTSH",
-    "DASH",
-    "DDOG",
-    "DLTR",
-    "DXCM",
-    "EA",
-    "EXC",
-    "FANG",
-    "FAST",
-    "FTNT",
-    "GEHC",
-    "GFS",
-    "GILD",
-    "GOOG",
-    "GOOGL",
-    "HON",
-    "IDXX",
-    "ILMN",
-    "INTC",
-    "INTU",
-    "ISRG",
-    "KDP",
-    "KHC",
-    "KLAC",
-    "LIN",
-    "LRCX",
-    "LULU",
-    "MAR",
-    "MCHP",
-    "MDLZ",
-    "MELI",
-    "META",
-    "MNST",
-    "MRVL",
-    "MSFT",
-    "MSTR",
-    "MU",
-    "NFLX",
-    "NVDA",
-    "NXPI",
-    "ODFL",
-    "ON",
-    "ORLY",
-    "PANW",
-    "PAYX",
-    "PCAR",
-    "PDD",
-    "PEP",
-    "PLTR",
-    "PYPL",
-    "QCOM",
-    "REGN",
-    "ROP",
-    "ROST",
-    "SBUX",
-    "SHOP",
-    "SNPS",
-    "TEAM",
-    "TMUS",
-    "TRI",
-    "TTD",
-    "TTWO",
-    "TXN",
-    "VRSK",
-    "VRTX",
-    "WBD",
-    "WDAY",
-    "XEL",
-    "ZS",
-)
+#: source -> (url, symbol columns, company-name columns), first match wins.
+_SOURCES: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
+    "sp500": (_SP500_WIKI_URL, ("Symbol",), ("Security",)),
+    "nasdaq100": (_NASDAQ100_WIKI_URL, ("Ticker", "Symbol"), ("Company", "Security")),
+}
 
 
 def sanitize_ticker(raw: str) -> str:
-    """Normalize one raw ticker string onto this project's convention.
-
-    Rules:
-        - Uppercase, and strip surrounding whitespace.
-        - Share-class notation is normalized to the *hyphen* form
-          (`BRK.B` -> `BRK-B`), not the dot form. This matches yfinance's
-          own ticker symbols, which is what every price fetch in this repo
-          (`data.loader.fetch_yfinance`, `quant.data.parquet_manager.
-          _default_fetch_raw`) passes straight through to `yfinance` - a
-          dotted ticker like `BRK.B` is rejected by yfinance, so the hyphen
-          form is the only one that round-trips through the rest of the
-          pipeline.
-
-    Wikipedia's S&P 500 table uses dots (`BRK.B`, `BF.B`); Nasdaq-100's
-    table already uses no such tickers, but the same rule is applied
-    uniformly in case a future addition does.
-    """
+    """Uppercase, strip, and use the hyphen share-class form yfinance
+    expects (`BRK.B` -> `BRK-B`)."""
     return raw.strip().upper().replace(".", "-")
+
+
+def sanitize_and_dedupe(symbols: list[str]) -> list[str]:
+    """`sanitize_ticker` each symbol, drop empties, and dedupe keeping
+    first-seen order."""
+    seen: dict[str, None] = {}
+    for raw in symbols:
+        ticker = sanitize_ticker(raw) if raw else ""
+        if ticker:
+            seen[ticker] = None
+    return list(seen)
+
+
+#: Trailing legal-form words ignored when matching company names.
+_NAME_SUFFIXES = frozenset({"inc", "incorporated", "corp", "corporation", "ltd", "plc"})
+
+
+def normalise_company_name(name: str) -> str:
+    """Lowercase, punctuation-free company name without a trailing legal
+    form, so "Fiserv, Inc." and "Fiserv Inc" match."""
+    words = re.sub(r"[^a-z0-9]+", " ", str(name).lower()).split()
+    while words and words[-1] in _NAME_SUFFIXES:
+        words.pop()
+    return " ".join(words)
+
+
+def _no_changes() -> dict[str, list]:
+    return {"added": [], "removed": [], "renamed": []}
+
+
+def diff_universe(
+    previous: list[str],
+    previous_names: dict[str, str],
+    current: list[str],
+    current_names: dict[str, str],
+) -> dict[str, list]:
+    """Added, removed and renamed symbols between two universes. A removed
+    and an added symbol with the same normalised company name count as one
+    rename, not as an add plus a remove."""
+    added = sorted(set(current) - set(previous))
+    removed = sorted(set(previous) - set(current))
+    by_name: dict[str, str] = {}
+    for symbol in added:
+        key = normalise_company_name(current_names.get(symbol, ""))
+        if key:
+            by_name.setdefault(key, symbol)
+    renamed = []
+    for old in removed:
+        key = normalise_company_name(previous_names.get(old, ""))
+        new = by_name.pop(key, None) if key else None
+        if new:
+            renamed.append({"old": old, "new": new})
+    olds = {r["old"] for r in renamed}
+    news = {r["new"] for r in renamed}
+    return {
+        "added": [s for s in added if s not in news],
+        "removed": [s for s in removed if s not in olds],
+        "renamed": renamed,
+    }
 
 
 @dataclass(frozen=True)
 class UniverseSyncResult:
-    """Outcome of one `UniverseManager.sync()` call."""
+    """Outcome of one `UniverseManager.sync()` call (or the stored file).
+
+    `source_status` is "live" or "fallback" per source; `kept_previous`
+    means the previous file was left untouched and `symbols` are its list.
+    """
 
     symbols: list[str]
     synced_at: str
     source_counts: dict[str, int]
+    source_status: dict[str, str] = field(default_factory=dict)
+    changes: dict[str, list] = field(default_factory=_no_changes)
+    kept_previous: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "symbols": self.symbols,
             "synced_at": self.synced_at,
             "source_counts": self.source_counts,
+            "source_status": self.source_status,
+            "changes": self.changes,
+            "kept_previous": self.kept_previous,
         }
 
 
-def _parse_synced_at(raw: str) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(raw)
-    except (TypeError, ValueError):
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write via a per-call-unique temp file, so concurrent writers never
+    clash and a reader never sees a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2) + "\n")
+    tmp_path.replace(path)
 
 
 class UniverseManager:
-    """Syncs the S&P 500 + Nasdaq-100 membership into `config/universe.json`.
+    """Syncs the S&P 500 + Nasdaq-100 membership into `config_path`.
 
     Args:
         config_path: Where the active universe is persisted.
-        data_dir: Parquet cache directory checked by `purge_broken_symbols`.
+        data_dir: Parquet cache directory; history for new names goes here.
         denylist: Symbols excluded from the active universe unconditionally.
+        max_workers: Thread-pool size for `purge_broken_symbols`.
+        status_path: Optional small JSON file recording every sync attempt
+            (including kept-previous failures) for the weekly report.
     """
 
     def __init__(
@@ -766,14 +280,13 @@ class UniverseManager:
         data_dir: Path | str = DEFAULT_DATA_DIR,
         denylist: frozenset[str] = DENYLIST,
         max_workers: int = 16,
+        status_path: Path | str | None = None,
     ) -> None:
         self.config_path = Path(config_path)
         self.data_dir = Path(data_dir)
         self.denylist = denylist
-        #: `purge_broken_symbols` thread-pool size - matches the default of
-        #: `Settings.screener_max_workers` (`api.deps.load_frames`'s own
-        #: bound) so this module doesn't invent a second concurrency knob.
         self.max_workers = max_workers
+        self.status_path = Path(status_path) if status_path is not None else None
 
     # ------------------------------------------------------------------
     # Constituent fetching
@@ -781,85 +294,43 @@ class UniverseManager:
 
     @staticmethod
     def _fetch_tables(url: str) -> list[pd.DataFrame]:
-        """`pd.read_html` against `url`, fetched with a browser-like
-        User-Agent first rather than handed straight to `read_html`.
-
-        Wikipedia (and similar constituent-list sources) will 403 the bare
-        `python-requests/x.y` UA `read_html`'s default urllib backend sends
-        from some hosting providers/IP ranges - fetching the page ourselves
-        with `_BROWSER_HEADERS` and parsing the resulting HTML text sidesteps
-        that.
-        """
+        """`pd.read_html` of `url`, fetched with a browser User-Agent."""
         response = requests.get(
             url, headers=_BROWSER_HEADERS, timeout=_FETCH_TIMEOUT_SECONDS
         )
         response.raise_for_status()
         return pd.read_html(StringIO(response.text))
 
-    def fetch_sp500_constituents(self) -> list[str]:
-        """Current S&P 500 tickers, scraped from Wikipedia.
-
-        Falls back to `_STATIC_SP500_FALLBACK` (with a logged warning) on
-        any failure - no network, a reshaped page, an unexpected column
-        name, etc.
-        """
+    def fetch_constituents(self, source: str) -> list[tuple[str, str]] | None:
+        """`(symbol, company)` rows for `source` ("sp500" / "nasdaq100"),
+        or `None` (logged) if the page can't be fetched or has no table with
+        the expected columns."""
+        url, symbol_cols, name_cols = _SOURCES[source]
         try:
-            tables = self._fetch_tables(_SP500_WIKI_URL)
-            symbols_col = tables[0]["Symbol"]
-            symbols = [sanitize_ticker(str(s)) for s in symbols_col.tolist()]
-            symbols = [s for s in symbols if s]
-            if not symbols:
-                raise ValueError("Wikipedia S&P 500 table returned no symbols")
-            return symbols
-        except Exception as exc:  # network, parse, schema-change - all fall back
-            log.warning(
-                "fetch_sp500_constituents: live fetch failed (%s); "
-                "falling back to static seed list of %d symbols",
-                exc,
-                len(_STATIC_SP500_FALLBACK),
-            )
-            return list(_STATIC_SP500_FALLBACK)
-
-    def fetch_nasdaq100_constituents(self) -> list[str]:
-        """Current Nasdaq-100 tickers, scraped from Wikipedia.
-
-        Falls back to `_STATIC_NASDAQ100_FALLBACK` (with a logged warning)
-        on any failure. Wikipedia's Nasdaq-100 page has carried the
-        constituents table under either a `Ticker` or `Symbol` header at
-        different times, so both are tried before giving up.
-        """
-        try:
-            tables = self._fetch_tables(_NASDAQ100_WIKI_URL)
-            symbols: list[str] | None = None
-            for table in tables:
-                for column in ("Ticker", "Symbol"):
-                    if column in table.columns:
-                        symbols = [
-                            sanitize_ticker(str(s)) for s in table[column].tolist()
-                        ]
-                        break
-                if symbols:
-                    break
-            if not symbols:
-                raise ValueError("Wikipedia Nasdaq-100 table returned no symbols")
-            return [s for s in symbols if s]
-        except Exception as exc:  # network, parse, schema-change - all fall back
-            log.warning(
-                "fetch_nasdaq100_constituents: live fetch failed (%s); "
-                "falling back to static seed list of %d symbols",
-                exc,
-                len(_STATIC_NASDAQ100_FALLBACK),
-            )
-            return list(_STATIC_NASDAQ100_FALLBACK)
+            for table in self._fetch_tables(url):
+                sym = next((c for c in symbol_cols if c in table.columns), None)
+                name = next((c for c in name_cols if c in table.columns), None)
+                if sym is None or name is None:
+                    continue
+                rows = [
+                    (sanitize_ticker(str(s)), str(n).strip())
+                    for s, n in zip(table[sym], table[name])
+                ]
+                rows = [(s, n) for s, n in rows if s]
+                if rows:
+                    return rows
+            raise ValueError(f"no table with {symbol_cols} and {name_cols}")
+        except Exception as exc:  # network, parse, schema change
+            log.warning("universe sync: %s live fetch failed (%s)", source, exc)
+            return None
 
     # ------------------------------------------------------------------
     # Filtering
     # ------------------------------------------------------------------
 
     def _has_usable_data(self, ticker: str) -> bool:
-        """Whether `data_dir/{ticker}.parquet` exists and has at least one
-        row. Never raises - a corrupt/unreadable file counts as unusable,
-        same as a missing one."""
+        """Whether `data_dir/{ticker}.parquet` exists and has a row. A
+        corrupt file counts as unusable; never raises."""
         path = self.data_dir / f"{ticker}.parquet"
         if not path.exists():
             return False
@@ -873,17 +344,8 @@ class UniverseManager:
                 return False
 
     def purge_broken_symbols(self, symbols: list[str]) -> list[str]:
-        """`symbols` minus anything with a missing or zero-row parquet
-        cache file. Purely a filter over `data_dir` - never writes or
-        deletes any parquet file.
-
-        Checked across a bounded `ThreadPoolExecutor` (matching
-        `quant.regime.MarketRegimeEngine.compute_breadth`'s concurrency
-        model) rather than a serial loop - each per-symbol check is a cheap
-        parquet-metadata read, but a full S&P 500 + Nasdaq-100 union still
-        adds up to 500+ synchronous disk reads serially. Order is preserved
-        regardless of completion order.
-        """
+        """`symbols` minus anything with a missing or zero-row parquet,
+        checked on a bounded thread pool. Never writes or deletes a file."""
         if not symbols:
             return []
         workers = max(1, min(self.max_workers, len(symbols)))
@@ -891,173 +353,171 @@ class UniverseManager:
             usable = list(pool.map(self._has_usable_data, symbols))
         return [s for s, ok in zip(symbols, usable) if ok]
 
-    def _sanitize_and_dedupe(self, symbols: list[str]) -> list[str]:
-        seen: dict[str, None] = {}
-        for raw in symbols:
-            ticker = sanitize_ticker(raw)
-            if ticker:
-                seen[ticker] = None
-        return list(seen)
-
     # ------------------------------------------------------------------
     # Sync
     # ------------------------------------------------------------------
 
     def sync(self) -> UniverseSyncResult:
-        """Fetch, sanitize, dedupe, and filter the S&P 500 + Nasdaq-100
-        union into the active universe, then persist it to `config_path`.
+        """Refresh the universe; see the module docstring for the steps."""
+        now = datetime.now(timezone.utc).isoformat()
+        previous = self._read_payload() or {}
+        fetched = {source: self.fetch_constituents(source) for source in _SOURCES}
+        status = {
+            s: "live" if rows is not None else "fallback" for s, rows in fetched.items()
+        }
+        counts = {s: len(rows or ()) for s, rows in fetched.items()}
 
-        `source_counts` reports the raw (pre-merge, pre-filter) count from
-        each source, so a caller can tell "Wikipedia returned 503 S&P
-        names" from "3 got dropped for broken data" independently.
-        """
-        sp500 = self.fetch_sp500_constituents()
-        nasdaq100 = self.fetch_nasdaq100_constituents()
+        reason = self._keep_reason(status, counts)
+        if reason:
+            log.warning("universe sync: %s; kept the previous universe file", reason)
+            result = UniverseSyncResult(
+                symbols=list(previous.get("symbols", [])),
+                synced_at=str(previous.get("synced_at", "")),
+                source_counts=counts,
+                source_status=status,
+                kept_previous=True,
+            )
+            self._record_status(now, result, reason)
+            return result
 
-        merged = self._sanitize_and_dedupe(sp500 + nasdaq100)
-        merged = [s for s in merged if s not in self.denylist]
-        active = sorted(self.purge_broken_symbols(merged))
+        names: dict[str, str] = {}
+        for rows in fetched.values():
+            for symbol, company in rows or ():
+                names.setdefault(symbol, company)
+        denied = sorted(set(names) & self.denylist)
+        if denied:
+            log.warning(
+                "universe sync: live lists include denied symbols %s; excluding "
+                "them. A reused ticker needs its DENY_ENTRIES row reviewed.",
+                ", ".join(denied),
+            )
+        wanted = sorted(s for s in names if s not in self.denylist)
 
+        previous_symbols = list(previous.get("symbols", []))
+        new = sorted(set(wanted) - set(previous_symbols))
+        fetch_errors: dict[str, str] = {}
+        if new:
+            history = ParquetSyncManager(data_dir=self.data_dir)
+            for ticker in new:
+                try:
+                    outcome = history.sync_ticker(ticker)
+                except Exception as exc:
+                    fetch_errors[ticker] = f"history fetch failed: {exc}"
+                    continue
+                if getattr(outcome, "status", None) == "error":
+                    detail = getattr(outcome, "error", None) or "no data"
+                    fetch_errors[ticker] = f"history fetch failed: {detail}"
+        active = sorted(self.purge_broken_symbols(wanted))
+        active_set = set(active)
+        skipped = [
+            {
+                "symbol": s,
+                "reason": fetch_errors.get(s, "missing or unreadable price history"),
+            }
+            for s in wanted
+            if s not in active_set
+        ]
+        skipped_set = {e["symbol"] for e in skipped}
+
+        # Skipped symbols are still index members: never "removed", and a
+        # skipped new member is not "added" either.
+        changes = diff_universe(
+            previous_symbols,
+            dict(previous.get("names") or {}),
+            sorted(active_set | skipped_set),
+            names,
+        )
+        changes["added"] = [s for s in changes["added"] if s not in skipped_set]
+        changes["renamed"] = [
+            r for r in changes["renamed"] if r["new"] not in skipped_set
+        ]
+        changes["skipped"] = skipped
         result = UniverseSyncResult(
             symbols=active,
-            synced_at=datetime.now(timezone.utc).isoformat(),
-            source_counts={"sp500": len(sp500), "nasdaq100": len(nasdaq100)},
+            synced_at=now,
+            source_counts=counts,
+            source_status=status,
+            changes=changes,
         )
-        self._write(result)
+        self._write(result, {s: names[s] for s in active})
+        self._record_status(now, result, None)
         return result
 
-    def needs_sync(self) -> bool:
-        """True if `config_path` doesn't exist, is unreadable, or its
-        `synced_at` is more than `SYNC_STALE_AFTER` old."""
-        if not self.config_path.exists():
-            return True
+    @staticmethod
+    def _keep_reason(status: dict[str, str], counts: dict[str, int]) -> str | None:
+        fell_back = [s for s, v in status.items() if v != "live"]
+        if fell_back:
+            return f"source fell back: {', '.join(fell_back)}"
+        short = [
+            f"{s} {counts[s]} < {minimum}"
+            for s, minimum in MIN_LIVE_COUNTS.items()
+            if counts[s] < minimum
+        ]
+        return f"too few live names: {', '.join(short)}" if short else None
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def _read_payload(self) -> dict[str, Any] | None:
         try:
             payload = json.loads(self.config_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return True
-
-        synced_at = _parse_synced_at(payload.get("synced_at", ""))
-        if synced_at is None:
-            return True
-
-        return datetime.now(timezone.utc) - synced_at > SYNC_STALE_AFTER
+        except (OSError, ValueError):
+            return None
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("symbols"), list
+        ):
+            return None
+        return payload
 
     def read(self) -> UniverseSyncResult | None:
-        """The currently persisted universe, or `None` if `sync()` has
-        never run (or the file is unreadable/malformed)."""
-        if not self.config_path.exists():
+        """The persisted universe, or `None` if the file is missing or has
+        no `symbols` list."""
+        payload = self._read_payload()
+        if payload is None:
             return None
-        try:
-            payload = json.loads(self.config_path.read_text())
-            return UniverseSyncResult(
-                symbols=list(payload["symbols"]),
-                synced_at=payload["synced_at"],
-                source_counts=dict(payload["source_counts"]),
-            )
-        except (OSError, json.JSONDecodeError, KeyError, TypeError):
-            return None
-
-    def _write(self, result: UniverseSyncResult) -> None:
-        """Atomic write, with a per-call-unique temp filename.
-
-        The startup hook can kick off a background sync at the same moment
-        a client hits `POST /sync` - two `UniverseManager` instances then
-        race to write the same `config_path`. A shared fixed temp filename
-        (e.g. `.with_suffix(".tmp")`) would let one writer's `replace()` be
-        beaten to the rename by the other, raising `FileNotFoundError` on
-        whichever tmp file already got moved. A unique name per call means
-        both writes succeed independently; the later `replace()` just wins,
-        which is fine - either result is a valid, freshly-synced universe.
-        """
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.config_path.with_name(
-            f"{self.config_path.name}.{uuid.uuid4().hex}.tmp"
+        return UniverseSyncResult(
+            symbols=[str(s) for s in payload["symbols"]],
+            synced_at=str(payload.get("synced_at", "")),
+            source_counts=dict(payload.get("source_counts") or {}),
+            source_status=dict(payload.get("source_status") or {}),
+            changes=dict(payload.get("last_changes") or _no_changes()),
         )
-        tmp_path.write_text(json.dumps(result.as_dict(), indent=2))
-        tmp_path.replace(self.config_path)
+
+    def _write(self, result: UniverseSyncResult, names: dict[str, str]) -> None:
+        _atomic_write_json(
+            self.config_path,
+            {
+                "symbols": result.symbols,
+                "synced_at": result.synced_at,
+                "source_counts": result.source_counts,
+                "source_status": result.source_status,
+                "names": names,
+                "last_changes": result.changes,
+            },
+        )
+
+    def _record_status(
+        self, attempted_at: str, result: UniverseSyncResult, reason: str | None
+    ) -> None:
+        """Record this attempt in `status_path` (if set) for the weekly
+        report. A failure here is logged, never raised."""
+        if self.status_path is None:
+            return
+        try:
+            _atomic_write_json(
+                self.status_path,
+                {
+                    "last_attempt": attempted_at,
+                    "kept_previous": result.kept_previous,
+                    "reason": reason,
+                    "source_status": result.source_status,
+                    "last_changes": result.changes,
+                },
+            )
+        except OSError as exc:
+            log.warning("universe sync: could not write status file (%s)", exc)
 
 
-# ---------------------------------------------------------------------------
-# Startup wiring
-#
-# `backend.app.main` cannot be edited by this change directly (another agent
-# owns central router/startup wiring there); `register_universe_startup` is
-# the single integration point it needs to call instead. See the module
-# docstring of `backend/app/api/universe.py` for the exact snippet.
-# ---------------------------------------------------------------------------
-
-#: Module-level singleton so a repeated call (e.g. multiple app instances in
-#: tests) doesn't stack duplicate cron jobs on the same process.
+#: The process-wide APScheduler (`backend.app.scheduler` creates it).
 _scheduler: Any = None
-
-
-def _run_sync_soon(manager: UniverseManager) -> None:
-    """Kick off `manager.sync()` without blocking the caller.
-
-    Inside a running event loop (the normal FastAPI-startup case), this
-    schedules the blocking sync onto a worker thread via `asyncio.to_thread`
-    so it never stalls the loop. Outside one (e.g. a plain script or a
-    synchronous test calling this directly), it just runs inline.
-    """
-    import asyncio
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        manager.sync()
-        return
-
-    loop.create_task(asyncio.to_thread(manager.sync))
-
-
-def check_and_schedule_startup_sync(
-    manager: UniverseManager | None = None,
-) -> Any:
-    """(a) Sync immediately if the universe is missing/stale, and
-    (b) (re)schedule the recurring daily sync job.
-
-    Returns the process-wide `AsyncIOScheduler`, started and holding one
-    `"universe_daily_sync"` job that fires at 08:30 America/New_York -
-    idempotent across repeated calls (`replace_existing=True`, and the
-    scheduler itself is a module-level singleton).
-    """
-    global _scheduler
-
-    manager = manager or UniverseManager()
-
-    if manager.needs_sync():
-        _run_sync_soon(manager)
-
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from apscheduler.triggers.cron import CronTrigger
-
-    if _scheduler is None:
-        _scheduler = AsyncIOScheduler()
-        _scheduler.start()
-
-    _scheduler.add_job(
-        manager.sync,
-        trigger=CronTrigger(hour=8, minute=30, timezone="America/New_York"),
-        id="universe_daily_sync",
-        replace_existing=True,
-    )
-
-    return _scheduler
-
-
-def register_universe_startup(app: Any) -> None:
-    """The only integration point `main.py` needs: registers a FastAPI
-    startup handler that runs `check_and_schedule_startup_sync()`.
-
-    Usage (in `main.py`, after constructing `app`):
-
-        from .data.universe import register_universe_startup
-        register_universe_startup(app)
-    """
-
-    @app.on_event("startup")
-    async def _universe_startup() -> (
-        None
-    ):  # pragma: no cover - exercised via TestClient
-        check_and_schedule_startup_sync()

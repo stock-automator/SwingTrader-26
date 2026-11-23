@@ -1,1 +1,1 @@
-"""Reporting helpers: console tables and LLM-written trade commentary."""
+"""Trade analytics: the historical win-probability engine (`expectancy.py`)."""

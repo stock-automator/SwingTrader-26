@@ -532,7 +532,7 @@ class TestDataSyncEndpoint:
 
         response = client.post("/api/v1/data/sync", json={})
         assert response.status_code == 202
-        assert response.json()["tickers"] == ["AAPL", "MSFT"]
+        assert response.json()["tickers"] == ["AAPL", "MSFT", "GBPUSD=X", "SPY"]
 
     def test_empty_watchlist_and_no_tickers_is_422(self, client, monkeypatch):
         import backend.app.api.data_sync as data_sync_module
@@ -776,7 +776,7 @@ class TestScreenerWebSocket:
 
         fast_settings = Settings(
             allow_downloads=True,
-            watchlist_path=get_settings().watchlist_path,
+            universe_path=get_settings().universe_path,
             ws_poll_seconds=0.05,
         )
         import backend.app.api.screener as screener_module

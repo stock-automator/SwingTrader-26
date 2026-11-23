@@ -95,7 +95,9 @@ class Settings:
             can reach the API without hardcoding its current IP into
             `cors_origins`. `None` disables this (exact-match `cors_origins`
             only).
-        watchlist_path: Newline-delimited ticker list the screener scans.
+        universe_path: The ticker universe (`symbols` in a JSON file) the
+            screener, scans and data sync use; refreshed monthly by
+            `data.universe.UniverseManager`.
         screener_max_tickers: Hard cap on tickers scanned per screener call -
             a safety valve against an accidentally enormous watchlist, not a
             throttle. Loading is parallelized across `screener_max_workers`
@@ -137,25 +139,33 @@ class Settings:
         alpaca_api_key: Alpaca paper-trading API key. Unset means the
             execution endpoints return 503 rather than silently no-opping.
         alpaca_api_secret: Alpaca paper-trading API secret.
-        execution_guards_enabled: Whether `POST /api/v1/execution/orders`
-            runs `execution.guards.check_order_guards` before dispatching.
-            Off only for local/paper testing outside market hours - leave
-            on in any deployment a real decision is made from.
-        execution_allow_extended_hours: Whether the session guard treats
-            pre-market/after-hours as dispatchable (still noisy/illiquid) or
-            blocks them like a closed market. See `execution.guards.
-            MarketSessionGuard`.
+        execution_allow_extended_hours: Whether a new entry may go out in
+            Alpaca's pre-market/after-hours session (still noisy/illiquid)
+            or is blocked like a closed market. See `execution.guards.
+            enforce_order_guards`.
         earnings_lockout_hours: Hours before/after a scheduled earnings
             release or stock split during which new entries are blocked.
             See `execution.guards.EarningsLockoutGuard`.
+        fx_cost_pct: Broker currency-conversion fee per conversion, as a
+            fraction of notional (0.15% at Trading 212).
+        fx_conversions_per_round_trip: How many GBP<->USD conversions a
+            round trip incurs. `0` (the default) means a USD balance, so no
+            FX cost; `2` converts in and out on every trade.
+        scheduler_enabled: Whether app startup runs the in-process
+            APScheduler jobs (universe refresh, 07:30 UK data sync, 08:00 UK
+            daily brief). Off under tests and for a one-off `uvicorn` run.
+
+    Secret fields (API keys, tokens, webhook URLs) are `repr=False`, so
+    logging or printing a `Settings` never shows them; reading the attribute
+    still returns the real value.
     """
 
-    finnhub_api_key: str | None = None
+    finnhub_api_key: str | None = field(default=None, repr=False)
     data_dir: Path = Path("data/raw")
     allow_downloads: bool = True
     cors_origins: tuple[str, ...] = field(default=DEFAULT_CORS_ORIGINS)
     cors_origin_regex: str | None = DEFAULT_CORS_ORIGIN_REGEX
-    watchlist_path: Path = Path("config/watchlist.txt")
+    universe_path: Path = Path("config/universe.json")
     screener_max_tickers: int = 750
     screener_max_workers: int = 16
     screener_min_avg_volume: float = 100_000.0
@@ -164,16 +174,18 @@ class Settings:
     ws_poll_seconds: float = 15.0
     max_backtest_tickers: int = 10
     journal_path: Path = Path("data/trades_live.csv")
-    telegram_bot_token: str | None = None
-    telegram_chat_id: str | None = None
-    discord_webhook_url: str | None = None
-    generic_webhook_url: str | None = None
+    telegram_bot_token: str | None = field(default=None, repr=False)
+    telegram_chat_id: str | None = field(default=None, repr=False)
+    discord_webhook_url: str | None = field(default=None, repr=False)
+    generic_webhook_url: str | None = field(default=None, repr=False)
     alert_config_path: Path = Path("config/alerts_channels.json")
-    alpaca_api_key: str | None = None
-    alpaca_api_secret: str | None = None
-    execution_guards_enabled: bool = True
+    alpaca_api_key: str | None = field(default=None, repr=False)
+    alpaca_api_secret: str | None = field(default=None, repr=False)
     execution_allow_extended_hours: bool = False
     earnings_lockout_hours: int = 48
+    fx_cost_pct: float = 0.0015
+    fx_conversions_per_round_trip: int = 0
+    scheduler_enabled: bool = True
 
     @property
     def has_finnhub(self) -> bool:
@@ -182,6 +194,11 @@ class Settings:
     @property
     def has_alpaca(self) -> bool:
         return bool(self.alpaca_api_key and self.alpaca_api_secret)
+
+    @property
+    def universe_status_path(self) -> Path:
+        """Outcome of the last universe sync attempt, for the weekly report."""
+        return self.universe_path.with_name("universe_status.json")
 
 
 @lru_cache(maxsize=1)
@@ -201,7 +218,6 @@ def get_settings() -> Settings:
         ),
         cors_origin_regex=os.environ.get("CORS_ORIGIN_REGEX", DEFAULT_CORS_ORIGIN_REGEX)
         or None,
-        watchlist_path=Path(os.environ.get("WATCHLIST_PATH", "config/watchlist.txt")),
         screener_max_tickers=_env_int("SCREENER_MAX_TICKERS", 750),
         screener_max_workers=_env_int("SCREENER_MAX_WORKERS", 16),
         screener_min_avg_volume=_env_float("SCREENER_MIN_AVG_VOLUME", 100_000.0),
@@ -218,10 +234,15 @@ def get_settings() -> Settings:
             os.environ.get("ALERT_CONFIG_PATH", "config/alerts_channels.json")
         ),
         alpaca_api_key=os.environ.get("ALPACA_API_KEY") or None,
-        alpaca_api_secret=os.environ.get("ALPACA_API_SECRET") or None,
-        execution_guards_enabled=_env_bool("EXECUTION_GUARDS_ENABLED", True),
+        # ALPACA_SECRET_KEY is Alpaca's own name for it (and the Hermes bot's).
+        alpaca_api_secret=os.environ.get("ALPACA_API_SECRET")
+        or os.environ.get("ALPACA_SECRET_KEY")
+        or None,
         execution_allow_extended_hours=_env_bool(
             "EXECUTION_ALLOW_EXTENDED_HOURS", False
         ),
         earnings_lockout_hours=_env_int("EARNINGS_LOCKOUT_HOURS", 48),
+        fx_cost_pct=_env_float("FX_COST_PCT", 0.0015),
+        fx_conversions_per_round_trip=_env_int("FX_CONVERSIONS_PER_ROUND_TRIP", 0),
+        scheduler_enabled=_env_bool("SCHEDULER_ENABLED", True),
     )

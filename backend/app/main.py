@@ -29,6 +29,7 @@ from .api.market import router as market_router
 from .api.order_ticket import router as order_ticket_router
 from .api.orders import router as orders_router
 from .api.replay import router as replay_router
+from .api.reports import router as reports_router
 from .api.risk import router as risk_router
 from .api.scans import router as scans_router
 from .api.schemas import HealthResponse
@@ -37,7 +38,7 @@ from .api.signals import router as signals_router
 from .api.universe import router as universe_router
 from .api.ws import router as live_feed_router
 from .config import get_settings
-from .data.universe import register_universe_startup
+from .scheduler import start_scheduler
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ app.include_router(alerts_router)
 app.include_router(execution_router)
 app.include_router(signals_router)
 app.include_router(replay_router)
+app.include_router(reports_router)
 app.include_router(journal_router)
 app.include_router(scans_router)
 app.include_router(universe_router)
@@ -83,7 +85,16 @@ app.include_router(risk_router)
 app.include_router(orders_router)
 app.include_router(live_feed_router)
 
-register_universe_startup(app)
+
+@app.on_event("startup")
+async def _start_scheduled_jobs() -> None:
+    """Monthly universe refresh, 07:30 UK data sync and 08:00 UK daily
+    brief, all on one APScheduler - skipped entirely when `SCHEDULER_ENABLED=false`."""
+    settings = get_settings()
+    if not settings.scheduler_enabled:
+        log.info("scheduler disabled (SCHEDULER_ENABLED=false)")
+        return
+    start_scheduler(app, settings)
 
 
 @app.exception_handler(Exception)

@@ -20,16 +20,6 @@ from .screener import CatalystFilter
 from .strategies.base import BaseStrategy
 
 
-def _reindex_ffill(series: pd.Series, target_index: pd.Index) -> pd.Series:
-    """`series` forward-filled onto `target_index`, without ever reading a
-    value from a date later than the one being filled in - the same
-    look-ahead-safe reindex pattern used by `quant/backtest.py`'s
-    `align_curves`."""
-    return (
-        series.reindex(series.index.union(target_index)).ffill().reindex(target_index)
-    )
-
-
 class RegimeGatedStrategy(BaseStrategy):
     """Suppresses an inner strategy's long entries while the macro (SPY)
     regime is in `blocked_regimes`.
@@ -60,9 +50,12 @@ class RegimeGatedStrategy(BaseStrategy):
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         signals = self.inner.generate_signals(df)
 
+        # Bar t is gated by the latest benchmark regime strictly before t:
+        # its own close isn't known when the entry decision is made.
         regime = self.detector.detect_regime(self.benchmark_df)
-        regime_on_df = _reindex_ffill(regime, df.index)
-        blocked = regime_on_df.isin(self.blocked_regimes)
+        union = regime.index.union(df.index)
+        prior = regime.reindex(union).ffill().shift(1).reindex(df.index)
+        blocked = prior.isin(self.blocked_regimes)
 
         out = signals.copy()
         out.loc[blocked & (out["signal"] == 1), "signal"] = 0

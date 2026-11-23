@@ -7,6 +7,7 @@ be capped at 60 tickers and loaded one at a time, which is what made a full
 scan look like it was silently skipping symbols.
 """
 
+import json
 import threading
 import time
 
@@ -33,9 +34,15 @@ def _bars(n: int = 10) -> pd.DataFrame:
     )
 
 
+def _write_universe(settings: Settings, symbols: list[str]) -> None:
+    settings.universe_path.write_text(
+        json.dumps({"symbols": symbols, "names": {}, "synced_at": "x"})
+    )
+
+
 @pytest.fixture
 def settings(tmp_path) -> Settings:
-    return Settings(data_dir=tmp_path, watchlist_path=tmp_path / "watchlist.txt")
+    return Settings(data_dir=tmp_path, universe_path=tmp_path / "universe.json")
 
 
 class TestLoadFrames:
@@ -127,7 +134,7 @@ class TestLoadFrames:
     def test_does_not_retry_when_downloads_disabled(self, monkeypatch, settings):
         settings = Settings(
             data_dir=settings.data_dir,
-            watchlist_path=settings.watchlist_path,
+            universe_path=settings.universe_path,
             allow_downloads=False,
         )
         attempts: dict[str, int] = {}
@@ -153,7 +160,7 @@ class TestLoadFrames:
         `screener_max_workers`."""
         settings = Settings(
             data_dir=settings.data_dir,
-            watchlist_path=settings.watchlist_path,
+            universe_path=settings.universe_path,
             screener_max_workers=8,
         )
         tickers = [f"T{i:04d}" for i in range(200)]
@@ -188,16 +195,15 @@ class TestLoadWatchlist:
         assert deps_module.load_watchlist(settings) == []
         assert deps_module.watchlist_overflow(settings) == 0
 
-    def test_reads_tickers_ignoring_blank_lines_and_comments(self, settings):
-        settings.watchlist_path.write_text("AAPL\n\n# a comment\nmsft\n")
+    def test_reads_symbols_from_universe_json_and_uppercases(self, settings):
+        _write_universe(settings, ["AAPL", "msft"])
         assert deps_module.load_watchlist(settings) == ["AAPL", "MSFT"]
 
     def test_caps_at_screener_max_tickers_and_reports_overflow(self, settings):
-        lines = "\n".join(f"T{i:04d}" for i in range(50))
-        settings.watchlist_path.write_text(lines)
+        _write_universe(settings, [f"T{i:04d}" for i in range(50)])
         capped_settings = Settings(
             data_dir=settings.data_dir,
-            watchlist_path=settings.watchlist_path,
+            universe_path=settings.universe_path,
             screener_max_tickers=10,
         )
 
@@ -208,7 +214,7 @@ class TestLoadWatchlist:
         assert overflow == 40
 
     def test_no_overflow_when_watchlist_fits_under_cap(self, settings):
-        settings.watchlist_path.write_text("AAPL\nMSFT\n")
+        _write_universe(settings, ["AAPL", "MSFT"])
         assert deps_module.watchlist_overflow(settings) == 0
 
     def test_denylisted_tickers_are_filtered_out(self, settings):
@@ -217,7 +223,7 @@ class TestLoadWatchlist:
         lists them must not surface them to `load_frames` - that's what was
         spamming failed full-history yfinance downloads every screener/sync
         poll for tickers that can never succeed."""
-        settings.watchlist_path.write_text("AAPL\nMMC\nWBA\nMSFT\nK\nBK\nCTRA\n")
+        _write_universe(settings, "AAPL MMC WBA MSFT K BK CTRA".split())
 
         tickers = deps_module.load_watchlist(settings)
 
@@ -225,5 +231,14 @@ class TestLoadWatchlist:
         assert deps_module.watchlist_overflow(settings) == 0
 
     def test_denylisted_only_watchlist_returns_empty(self, settings):
-        settings.watchlist_path.write_text("MMC\nWBA\n")
+        _write_universe(settings, ["MMC", "WBA"])
         assert deps_module.load_watchlist(settings) == []
+
+    def test_c2_c4_delisted_tickers_are_filtered_out(self, settings):
+        """Cycle 01: delisted/renamed names never reach `load_frames`, and
+        their successors do."""
+        _write_universe(settings, "AAPL EA KVUE WBD AVB EQR VMRK BNY MRSH KMB".split())
+
+        tickers = deps_module.load_watchlist(settings)
+
+        assert tickers == ["AAPL", "VMRK", "BNY", "MRSH", "KMB"]
