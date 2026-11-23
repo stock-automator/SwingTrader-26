@@ -119,8 +119,14 @@ def run_backtest_endpoint(
             include_buy_and_hold=request.include_buy_and_hold,
             **engine_kwargs,
         )
-        oos = (
-            oos_summary(
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    oos = None
+    if request.walk_forward:
+        # Secondary output: a failure here must not lose the main result.
+        try:
+            oos = oos_summary(
                 strategy,
                 frames,
                 spy_frame,
@@ -130,11 +136,15 @@ def run_backtest_endpoint(
                 slippage_pct=request.slippage_pct,
                 **engine_kwargs,
             )
-            if request.walk_forward
-            else None
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except ValueError as exc:
+            warnings.append(f"Walk-forward summary unavailable: {exc}")
+        else:
+            if not oos["windows"]:
+                warnings.append(
+                    "Walk-forward: no window fits - the tickers' shared date "
+                    f"range is shorter than {oos['is_window_months']} months "
+                    f"in-sample plus {oos['oos_window_months']} out-of-sample."
+                )
 
     payload = {"oos_summary": oos, **comparison_to_payload(comparison)}
     payload["costs"] = {
