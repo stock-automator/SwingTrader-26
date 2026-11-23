@@ -19,6 +19,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # F3 B-1: the app's APScheduler must never start under tests.
 os.environ["SCHEDULER_ENABLED"] = "false"
 
+# The app calls load_dotenv() at import, and A's real .env now exists. Set
+# every credential to "" first (load_dotenv never overrides an existing
+# variable), so no test can pick up a real key, token or chat id.
+for _secret in (
+    "ALPACA_API_KEY",
+    "ALPACA_API_SECRET",
+    "ALPACA_SECRET_KEY",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "DISCORD_WEBHOOK_URL",
+    "GENERIC_WEBHOOK_URL",
+    "FINNHUB_API_KEY",
+):
+    os.environ[_secret] = ""
+
 
 @pytest.fixture
 def ohlcv() -> pd.DataFrame:

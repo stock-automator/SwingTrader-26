@@ -234,7 +234,10 @@ def get_settings() -> Settings:
             os.environ.get("ALERT_CONFIG_PATH", "config/alerts_channels.json")
         ),
         alpaca_api_key=os.environ.get("ALPACA_API_KEY") or None,
-        alpaca_api_secret=os.environ.get("ALPACA_API_SECRET") or None,
+        # ALPACA_SECRET_KEY is Alpaca's own name for it (and the Hermes bot's).
+        alpaca_api_secret=os.environ.get("ALPACA_API_SECRET")
+        or os.environ.get("ALPACA_SECRET_KEY")
+        or None,
         execution_allow_extended_hours=_env_bool(
             "EXECUTION_ALLOW_EXTENDED_HOURS", False
         ),
