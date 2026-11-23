@@ -266,6 +266,8 @@ cp .env.example .env
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | *(unset)* | Alpaca **paper-trading** credentials for `/api/v1/execution/*`. The SDK always points at Alpaca's paper endpoint regardless of these values — there is no setting that makes this platform place live orders. |
 | `EXECUTION_ALLOW_EXTENDED_HOURS` | `false` | Whether new entries may go out pre-market/after-hours (still illiquid) instead of being blocked like a closed market. Order guards always run on both order routes; entries fail closed if Alpaca's calendar or the earnings/split lookup is unavailable, and exits always go through (see `execution/guards.py`). |
 | `EARNINGS_LOCKOUT_HOURS` | `48` | Hours before/after a scheduled earnings release or stock split during which both order routes refuse a new entry. |
+| `FX_COST_PCT` | `0.0015` | Broker currency-conversion fee per conversion (fraction of notional). |
+| `FX_CONVERSIONS_PER_ROUND_TRIP` | `0` | GBP<->USD conversions per round trip. `0` = USD balance, no FX cost; `2` = convert in and out every trade. |
 
 > **Never commit a real `.env` file.** It's already excluded via
 > `.gitignore` — only `.env.example` (with no real keys in it) is tracked.

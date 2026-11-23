@@ -144,6 +144,11 @@ class Settings:
         earnings_lockout_hours: Hours before/after a scheduled earnings
             release or stock split during which new entries are blocked.
             See `execution.guards.EarningsLockoutGuard`.
+        fx_cost_pct: Broker currency-conversion fee per conversion, as a
+            fraction of notional (0.15% at Trading 212).
+        fx_conversions_per_round_trip: How many GBP<->USD conversions a
+            round trip incurs. `0` (the default) means a USD balance, so no
+            FX cost; `2` converts in and out on every trade.
 
     Secret fields (API keys, tokens, webhook URLs) are `repr=False`, so
     logging or printing a `Settings` never shows them; reading the attribute
@@ -173,6 +178,8 @@ class Settings:
     alpaca_api_secret: str | None = field(default=None, repr=False)
     execution_allow_extended_hours: bool = False
     earnings_lockout_hours: int = 48
+    fx_cost_pct: float = 0.0015
+    fx_conversions_per_round_trip: int = 0
 
     @property
     def has_finnhub(self) -> bool:
@@ -222,4 +229,6 @@ def get_settings() -> Settings:
             "EXECUTION_ALLOW_EXTENDED_HOURS", False
         ),
         earnings_lockout_hours=_env_int("EARNINGS_LOCKOUT_HOURS", 48),
+        fx_cost_pct=_env_float("FX_COST_PCT", 0.0015),
+        fx_conversions_per_round_trip=_env_int("FX_CONVERSIONS_PER_ROUND_TRIP", 0),
     )
