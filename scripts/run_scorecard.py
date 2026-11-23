@@ -70,6 +70,15 @@ def load_universe(
     return frames, spy, missing
 
 
+def suspect_line(suspect: list[str]) -> str:
+    """The doc header's suspect-data bullet, each ticker named once."""
+    return (
+        "- Suspect data (a spliced bar: a >40% one-day close move that snaps "
+        "back in one bar to within 5% of the pre-jump close within 5 bars), "
+        "excluded from every run: " + (", ".join(suspect) or "none") + "."
+    )
+
+
 def _init(data_dir: str, symbols: list[str], options: dict) -> None:
     frames, spy, missing = load_universe(Path(data_dir), symbols)
     _CTX.update(frames=frames, spy=spy, missing=missing, **options)
@@ -193,10 +202,7 @@ def main(argv: list[str] | None = None) -> dict:
         f"`{args.universe.name}`"
         + (f"; {len(missing)} not cached: {', '.join(missing)}" if missing else "")
         + ".",
-        "- Suspect data (a >40% one-day close move that retraces at least half "
-        "within 5 bars), excluded from every run: "
-        + (", ".join(f"suspect data: {t}" for t in suspect) if suspect else "none")
-        + ".",
+        suspect_line(suspect),
         f"- Build {args.start} to {args.split_date} (exclusive); held-out test "
         f"{args.split_date} to {spy.index[-1]:%Y-%m-%d}. Signals use full "
         "history, so the test period starts warmed up.",

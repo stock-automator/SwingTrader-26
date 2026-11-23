@@ -28,9 +28,8 @@ Gate 1 defaults in `PortfolioConfig`):
 Signals are generated once per ticker over its full history (vectorised;
 the strategies are causal), so the daily loop only does fills and exits,
 and a window starting in 2023 still has its indicators warmed up. A ticker
-whose close moves more than `SPIKE_MOVE` in a day and retraces at least
-half of it within `SPIKE_BARS` bars (a spliced bar, see learnings
-2026-11-23) is excluded and reported as "suspect data: TICKER".
+with a spliced bar (`suspect_spike`, see learnings 2026-11-23) is excluded
+and reported as "suspect data: TICKER".
 """
 
 from __future__ import annotations
@@ -65,6 +64,7 @@ CASH_BELOW_ZERO = "cash below zero"
 #: `suspect_spike` thresholds.
 SPIKE_MOVE = 0.40
 SPIKE_BARS = 5
+SPIKE_RETURN = 0.05
 
 _EPS = 1e-9
 
@@ -142,18 +142,23 @@ def _offsets(kind: np.ndarray, value: np.ndarray, close, atr) -> np.ndarray:
 
 
 def suspect_spike(close: pd.Series) -> bool:
-    """True if a one-day close move beyond `SPIKE_MOVE` retraces at least
-    half of itself within the next `SPIKE_BARS` closes."""
+    """True if the closes show a spliced bar: a one-day move beyond
+    `SPIKE_MOVE` that, within `SPIKE_BARS` bars, snaps back in a single bar
+    from beyond `SPIKE_MOVE` to within `SPIKE_RETURN` of the pre-jump close
+    (HCA 425 -> 16.77 -> 429).
+
+    Real events retrace gradually or only partly: HOOD's +50% day gave back
+    to +8.9%, BIIB fell back to -4.4% over three bars, so neither is flagged.
+    A plain 10% return band would flag both, and CVNA (+9.9%)."""
     c = close.astype(float)
     prev = c.shift(1)
-    move = c / prev - 1
-    mid = (c + prev) / 2
-    ahead = c[::-1].rolling(SPIKE_BARS, min_periods=1)
-    fut_max = ahead.max()[::-1].shift(-1)
-    fut_min = ahead.min()[::-1].shift(-1)
-    down = (move < -SPIKE_MOVE) & (fut_max >= mid)
-    up = (move > SPIKE_MOVE) & (fut_min <= mid)
-    return bool((down | up).any())
+    jump = (c / prev - 1).abs() > SPIKE_MOVE
+    snap_back = pd.Series(False, index=c.index)
+    for d in range(1, SPIKE_BARS + 1):
+        back = (c.shift(-d) / prev - 1).abs() <= SPIKE_RETURN
+        still_out = (c.shift(1 - d) / prev - 1).abs() > SPIKE_MOVE
+        snap_back |= back & still_out
+    return bool((jump & snap_back).any())
 
 
 def prepare_signals(
