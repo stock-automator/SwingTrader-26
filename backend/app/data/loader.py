@@ -196,18 +196,25 @@ def fetch_earnings_dates(ticker: str, limit: int = 8) -> list[pd.Timestamp]:
         limit: Max rows to request from the provider's earnings calendar.
 
     Returns:
-        Empty list if the provider has no earnings calendar for this
-        ticker (e.g. an ETF, or a symbol yfinance doesn't cover) - that is a
-        "nothing to filter on" result, not an error.
+        Empty list for an ETF with no earnings calendar, or an empty
+        calendar - a "nothing to filter on" result, not an error.
 
     Raises:
         DataUnavailableError: on a provider failure (network, rate limit,
-            schema change). A missing calendar is not this - see above.
+            schema change), or when yfinance returns no calendar at all
+            (`None`) for a non-ETF.
     """
     import yfinance as yf
 
     try:
-        raw = yf.Ticker(ticker.upper()).get_earnings_dates(limit=limit)
+        yf_ticker = yf.Ticker(ticker.upper())
+        raw = yf_ticker.get_earnings_dates(limit=limit)
+        # yfinance swallows scrape failures and returns None. That is only
+        # "no calendar" for an ETF; for anything else it is a failed lookup.
+        if raw is None and (yf_ticker.info or {}).get("quoteType") != "ETF":
+            raise DataUnavailableError(f"no earnings calendar returned for {ticker}")
+    except DataUnavailableError:
+        raise
     except Exception as exc:  # network, rate limit, schema change
         raise DataUnavailableError(
             f"earnings calendar fetch failed for {ticker}: {exc}"

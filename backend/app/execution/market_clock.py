@@ -61,8 +61,12 @@ def session_for(moment: datetime, calendar_day: Calendar | None) -> SessionInfo:
     if open_ <= now < close:
         return SessionInfo("REGULAR", open_, close, "regular session")
 
-    session_open = _hhmm(calendar_day.date, calendar_day.session_open)
-    session_close = _hhmm(calendar_day.date, calendar_day.session_close)
+    # Older alpaca-py `Calendar` models carry only date/open/close; without
+    # session bounds there is no EXTENDED state, only REGULAR or CLOSED.
+    session_open = _hhmm(calendar_day.date, getattr(calendar_day, "session_open", None))
+    session_close = _hhmm(
+        calendar_day.date, getattr(calendar_day, "session_close", None)
+    )
     if session_open and session_close and session_open <= now < session_close:
         return SessionInfo("EXTENDED", open_, close, "extended-hours session")
     return SessionInfo(

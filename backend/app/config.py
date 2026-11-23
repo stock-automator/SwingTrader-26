@@ -165,7 +165,7 @@ class Settings:
     max_backtest_tickers: int = 10
     journal_path: Path = Path("data/trades_live.csv")
     telegram_bot_token: str | None = field(default=None, repr=False)
-    telegram_chat_id: str | None = None
+    telegram_chat_id: str | None = field(default=None, repr=False)
     discord_webhook_url: str | None = field(default=None, repr=False)
     generic_webhook_url: str | None = field(default=None, repr=False)
     alert_config_path: Path = Path("config/alerts_channels.json")
