@@ -60,6 +60,7 @@ FRACTIONAL_STEPS_PER_SHARE = 10_000
 #: `skipped_signals` keys for entries the cash cap shrank or emptied.
 CAPPED_TO_CASH = "size capped to cash"
 INSUFFICIENT_CASH = "insufficient cash"
+CANCELLED_AT_FILL = "insufficient cash at fill"
 
 
 def _skip_reason(reason: str) -> str:
@@ -244,10 +245,16 @@ def run_backtest(
 
     class _SignalAdapter(Strategy):
         def init(self):
-            pass
+            self._pending: int | None = None
 
         def next(self):
             i = len(self.data) - 1
+            if self._pending is not None:
+                # An entry placed last bar that neither opened nor closed a
+                # trade was cancelled by backtesting.py (gap past the cash).
+                if not self.position and len(self.closed_trades) == self._pending:
+                    skipped[CANCELLED_AT_FILL] = skipped.get(CANCELLED_AT_FILL, 0) + 1
+                self._pending = None
             self._act(i, signal[i])
             # Scaled price * steps = real dollars under FractionalBacktest.
             position_value[i] = abs(self.position.size * self.data.Close[-1])
@@ -318,6 +325,7 @@ def run_backtest(
                     sl=order.stop_loss * unit,
                     tp=order.take_profit * unit,
                 )
+                self._pending = len(self.closed_trades)
                 if _direction == -1:
                     self.sell(**kwargs)
                 else:

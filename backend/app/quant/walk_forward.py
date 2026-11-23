@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
+import numpy as np
 import pandas as pd
 
 from .engine import run_backtest
@@ -69,7 +70,10 @@ class _TradeFrom(BaseStrategy):
 
     def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
         out = self.inner.generate_signals(df).copy()
-        out.loc[out.index < self.start, "signal"] = 0
+        held = out.index < self.start
+        out.loc[held, "signal"] = 0
+        out.loc[held, ["sl_value", "tp_value"]] = np.nan
+        out.loc[held, ["sl_type", "tp_type"]] = None
         return out
 
 

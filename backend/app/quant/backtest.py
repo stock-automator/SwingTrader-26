@@ -82,7 +82,8 @@ FRACTIONAL_WARNING = (
 RISK_GATE_WARNING = (
     "Risk gate: sleeves run independently, so the live portfolio risk cap "
     "(total open risk across positions) is not modelled; dynamic risk is set "
-    "by the live gate from each sleeve's own equity."
+    "by the live gate from each sleeve's own equity. Sizing uses each "
+    "sleeve's starting equity."
 )
 
 

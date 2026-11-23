@@ -23,6 +23,8 @@ from .schemas import DataSyncRequest, DataSyncResponse, DataSyncStatusResponse
 
 # Cached for the order ticket's display-only GBP figures (see data/fx.py).
 FX_TICKER = "GBPUSD=X"
+# Cached so the baseline can compare against SPY.
+BENCHMARK_TICKER = "SPY"
 
 router = APIRouter(prefix="/api/v1/data", tags=["data-sync"])
 
@@ -96,6 +98,8 @@ def start_data_sync(
         tickers = load_watchlist(settings)
         if tickers and FX_TICKER not in tickers:
             tickers = [*tickers, FX_TICKER]
+        if tickers and BENCHMARK_TICKER not in tickers:
+            tickers = [*tickers, BENCHMARK_TICKER]
     if not tickers:
         reason = (
             f"every requested ticker is delisted or renamed: {', '.join(skipped)}."

@@ -836,7 +836,8 @@ global), not persisted — it resets on server restart.
 ### `POST /api/v1/data/sync`
 
 Body: `{"tickers": ["AAPL", "MSFT"]}` — omit or `null` to sync the full
-watchlist. `422` if the body is empty and the watchlist is also empty.
+watchlist, which also syncs `GBPUSD=X` and `SPY` (display FX rate and
+benchmark). `422` if the body is empty and the watchlist is also empty.
 
 ```json
 { "status": "started", "tickers": ["AAPL", "MSFT"], "skipped": [] }
