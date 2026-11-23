@@ -31,4 +31,5 @@ Status: `todo` | `in-progress` | `blocked` | `done`. Priority P1–P3.
 | A-3 | After batch 02: a roadmap for next week's feature development. | P2 | todo | A, 2026-11-23. Queued. |
 | R-4 | As A, I want backtests to use more of the account (portfolio engine with several positions, a total-risk cap, tuned R:R) so that capital isn't 96% idle. | P1 | todo | F2 baseline: 3.4% avg invested; 114 signals rejected for R:R < 2.5. The portfolio risk cap is not modelled across sleeves yet. |
 | U-5 | As A, I want backtest results to explain "exposure-matched", "reward:risk" and average invested in plain words, show the cost line, and split results by period. | P3 | todo | F2 customer notes. |
+| U-6 | As A, I want the daily brief to explain regime names in plain English and show how many stocks were screened and why they were rejected. | P3 | todo | F3a customer notes. |
 | Q-1 | Decide whether `data/raw/*.parquet` (~74MB) should stay tracked in git. | P3 | todo | It's tracked while the docs say it's a gitignored cache. Open question from the Sprint 6 audit. |
