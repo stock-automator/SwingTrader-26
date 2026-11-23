@@ -37,3 +37,5 @@ Status: `todo` | `in-progress` | `blocked` | `done`. Priority P1–P3.
 | P-2 | As A, I want /api/v1/data/health to load in under a few seconds. | P2 | todo | It took ~100 s in the 2026-11-23 demo recording (scans every parquet). Cache the result or read footers only. |
 | D-3 | As A, I want the data sync to reject impossible bars (e.g. a >40% move that reverts within days) and alert, so that bad provider data never reaches backtests. | P1 | todo | 2026-11-23: ~130 tickers had another price level spliced in around 2026-09-15 (HCA 425 -> 16.77 -> 429). Repaired by a full re-download (c66eba3). |
 | Q-1 | Decide whether `data/raw/*.parquet` (~74MB) should stay tracked in git. | P3 | todo | It's tracked while the docs say it's a gitignored cache. Open question from the Sprint 6 audit. |
+- **X-1 (P2) Executor notes from cycle 03 review:** count open (unfilled) orders toward the limits; cap brief `setups` by positions/heat as well; reject `client_order_id` on non-BRACKET orders (422); test the duplicate-tag path.
+- **G-1 (decision for A):** the live 2.5R gate rejects every zscore (2.0R) and supertrend (2.33R) signal, so only bk_squeeze can produce shortlist picks.
