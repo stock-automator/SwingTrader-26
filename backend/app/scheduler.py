@@ -1,5 +1,6 @@
 """In-process scheduled jobs on Europe/London time (APScheduler follows UK
-clock changes): the 07:30 data sync and 08:00 brief, Monday to Friday, and
+clock changes): the 07:30 data sync and 08:00 brief, Monday to Friday, the
+21:30 Alpaca fills ingest on weekdays, the Saturday 09:00 weekly report, and
 the universe refresh at 07:00 on the 1st of each month.
 
 `coalesce=True` with a 6-hour `misfire_grace_time` means a Mac that slept
@@ -26,7 +27,9 @@ from .api.data_sync import run_watchlist_sync
 from .api.universe import universe_manager
 from .config import Settings
 from .data import universe
-from .reports import daily
+from .execution.alpaca_client import AlpacaExecutionClient
+from .journal.fills import ingest_fills
+from .reports import daily, weekly
 
 log = logging.getLogger(__name__)
 
@@ -123,6 +126,27 @@ def send_daily_brief_job(settings: Settings) -> None:
     log.info("daily brief sent in %d part(s)", parts)
 
 
+def ingest_fills_job(settings: Settings) -> None:
+    if not settings.has_alpaca:
+        log.info("fills ingest skipped: Alpaca keys not set")
+        return
+    client = AlpacaExecutionClient(settings.alpaca_api_key, settings.alpaca_api_secret)
+    log.info("fills ingest added %d fill(s)", ingest_fills(settings, client))
+
+
+def send_weekly_report_job(settings: Settings) -> None:
+    """Ingest fills, build the weekly report and send it to Telegram when
+    configured. A failed send is logged with the token scrubbed."""
+    config = effective_channel_config(settings)
+    token, chat_id = config["telegram_bot_token"], config["telegram_chat_id"]
+    if not (token and chat_id):
+        weekly.ingest_then_build(settings)
+        log.info("weekly report built; Telegram not configured, not sent")
+        return
+    result = weekly.send_weekly_report(settings, token, chat_id)
+    log.info("weekly report sent=%s in %d part(s)", result["sent"], result["parts"])
+
+
 def build_jobs(settings: Settings) -> list[JobSpec]:
     return [
         JobSpec(
@@ -141,6 +165,16 @@ def build_jobs(settings: Settings) -> list[JobSpec]:
             id="daily_brief",
             func=_guarded("daily_brief", lambda: _brief_after_sync(settings)),
             trigger=_weekdays_at(8, 0),
+        ),
+        JobSpec(
+            id="fills_ingest",
+            func=_guarded("fills_ingest", lambda: ingest_fills_job(settings)),
+            trigger=_weekdays_at(21, 30),
+        ),
+        JobSpec(
+            id="weekly_report",
+            func=_guarded("weekly_report", lambda: send_weekly_report_job(settings)),
+            trigger=CronTrigger(day_of_week="sat", hour=9, minute=0, timezone=TIMEZONE),
         ),
     ]
 

@@ -1,4 +1,6 @@
 """The Saturday 09:00 UK weekly forward-test report, built from `broker_fills`.
+"This week" is the Monday-Saturday week ending on the latest Saturday, so a
+mid-week build reports the last full week.
 
 Plain text, one Telegram message: this week's closed trades, the record since
 the start after FX costs (`fx_cost_pct` x `fx_conversions_per_round_trip` x
@@ -12,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -30,6 +32,7 @@ log = logging.getLogger(__name__)
 
 UK = ZoneInfo("Europe/London")
 MIN_TRADES_FOR_SPY = 30
+SATURDAY = 5
 MAX_TRADE_LINES = 15
 MAX_NAMES = 10
 FOOTER = "Research only, paper trading. Not investment advice."
@@ -166,9 +169,9 @@ def build_weekly_report(
     """Build (not send) the report from the stored fills; Alpaca is not
     called. `journal_error` adds a "journal not updated" warning."""
     now = (now or datetime.now(UK)).astimezone(UK)
-    week_start = datetime.combine(
-        now.date() - timedelta(days=now.weekday()), datetime.min.time(), UK
-    )
+    # The Mon-Sat week ending on the latest Saturday on or before `now`.
+    saturday = now.date() - timedelta(days=(now.weekday() - SATURDAY) % 7)
+    week_start = datetime.combine(saturday - timedelta(days=5), time(), UK)
     fills = load_fills()
     trades = round_trips(fills)
     if not trades.empty:
@@ -178,7 +181,10 @@ def build_weekly_report(
     trades["cost"] = notional * fx_round_trip
     trades["pnl"] = trades["pnl"] - trades["cost"]
     trades["pnl_pct"] = trades["pnl"] / notional
-    week = trades[trades["exit_date"] >= week_start] if len(trades) else trades
+    week = trades
+    if len(trades):
+        exits = trades["exit_date"]
+        week = trades[(exits >= week_start) & (exits < week_start + timedelta(7))]
     with fx_context(settings.data_dir, offline=not settings.allow_downloads):
         rate = latest_gbp_rate()
     n_open = open_positions(fills)
