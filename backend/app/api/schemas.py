@@ -71,6 +71,15 @@ class BacktestRequest(BaseModel):
             "traded ticker's own mean ATR/Close ratio."
         ),
     )
+    fx_cost_pct: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Currency-conversion cost per leg, as a fraction of notional. "
+            "None (the default) uses FX_COST_PCT * "
+            "FX_CONVERSIONS_PER_ROUND_TRIP / 2 from settings."
+        ),
+    )
     earnings_blackout: bool = Field(
         default=False,
         description="Suppress long entries within 5 trading days of a known earnings date.",
@@ -121,6 +130,16 @@ class RelativeMetricsResponse(BaseModel):
     r_squared: float | None
 
 
+class BacktestCostsResponse(BaseModel):
+    """The cost inputs a backtest actually ran with."""
+
+    commission: float
+    slippage_pct: float
+    fee_per_share: float
+    atr_slippage_multiple: float
+    fx_cost_pct_per_leg: float
+
+
 class BacktestResponse(BaseModel):
     strategy: str
     tickers: list[str]
@@ -134,6 +153,7 @@ class BacktestResponse(BaseModel):
     trade_metrics: dict
     equity_curves: list[dict]
     trades: list[dict]
+    costs: BacktestCostsResponse
     warnings: list[str]
 
 

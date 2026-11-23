@@ -92,6 +92,12 @@ def run_backtest_endpoint(
             strategy, earnings_by_ticker=earnings_by_ticker
         )
 
+    fx_cost_pct = (
+        request.fx_cost_pct
+        if request.fx_cost_pct is not None
+        else settings.fx_cost_pct * settings.fx_conversions_per_round_trip / 2
+    )
+
     try:
         comparison = run_comparison(
             strategy,
@@ -105,10 +111,18 @@ def run_backtest_endpoint(
             include_buy_and_hold=request.include_buy_and_hold,
             fee_per_share=request.fee_per_share,
             atr_slippage_multiple=request.atr_slippage_multiple,
+            fx_cost_pct=fx_cost_pct,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     payload = comparison_to_payload(comparison)
+    payload["costs"] = {
+        "commission": request.commission,
+        "slippage_pct": request.slippage_pct,
+        "fee_per_share": request.fee_per_share,
+        "atr_slippage_multiple": request.atr_slippage_multiple,
+        "fx_cost_pct_per_leg": fx_cost_pct,
+    }
     payload["warnings"] = [*warnings, *payload["warnings"]]
     return payload

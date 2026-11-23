@@ -454,6 +454,7 @@ def run_comparison(
     include_buy_and_hold: bool = True,
     fee_per_share: float = 0.0,
     atr_slippage_multiple: float = 0.0,
+    fx_cost_pct: float = 0.0,
 ) -> BenchmarkComparison:
     """Run `strategy` over `frames` and compare it to buy & hold and SPY.
 
@@ -479,6 +480,8 @@ def run_comparison(
             `commission` model.
         atr_slippage_multiple: See `engine.run_backtest`. `0.0` keeps the
             flat-rate `slippage_pct` model.
+        fx_cost_pct: Per-leg currency-conversion cost, see
+            `engine.run_backtest`. `0.0` adds nothing.
 
     Raises:
         ValueError: if `frames` is empty, or a frame is too short to produce
@@ -506,6 +509,7 @@ def run_comparison(
             slippage_pct=slippage_pct,
             fee_per_share=fee_per_share,
             atr_slippage_multiple=atr_slippage_multiple,
+            fx_cost_pct=fx_cost_pct,
         )
 
         sleeve_curves.append(extract_strategy_equity(result, sleeve_capital))
