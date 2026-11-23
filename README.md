@@ -231,11 +231,40 @@ today" with the reason. It is research only, for paper trading.
    TELEGRAM_CHAT_ID=<your chat id>
    ```
 
-4. Restart the backend, preview the brief with
-   `curl http://localhost:8000/api/v1/reports/daily`, then send it with
+4. Restart the backend, build the brief now with
+   `curl -X POST http://localhost:8000/api/v1/reports/daily/refresh`, view it
+   with `curl http://localhost:8000/api/v1/reports/daily`, then send it with
    `curl -X POST http://localhost:8000/api/v1/reports/daily/send`. A reply of
    `{"sent": true, ...}` means it arrived; `{"sent": false, "error": ...}`
    says why not. See [docs/api.md](docs/api.md).
+
+### Daily brief schedule
+
+While the backend runs, it does two jobs Monday to Friday, on UK time
+(clock changes handled):
+
+- **07:30** syncs the watchlist, GBP/USD and SPY prices into `DATA_DIR`.
+- **08:00** builds the brief, caches it (`GET /api/v1/reports/daily` serves
+  that copy) and sends it to Telegram if configured. With Alpaca keys it
+  also shows `Day trades used: n/3 (last 5 days)`.
+
+If the Mac was asleep at that time, each missed job runs once when it wakes
+(up to 6 hours late). Set `SCHEDULER_ENABLED=false` to turn the jobs off.
+
+### Run it always-on (macOS launchd)
+
+To keep the backend running in the background and restart it after a
+crash or login, install it as a launchd agent (localhost only, port 8000):
+
+```bash
+scripts/install_launchd.sh
+```
+
+It uses `./venv/bin/python` if you made the venv in Step 2, else
+`/usr/local/bin/python3` (override with `PYTHON=/path/to/python3`). Secrets
+stay in `.env`; logs go to `logs/`. To remove it:
+`launchctl bootout gui/$(id -u)/com.swingtrader.backend`, then delete
+`~/Library/LaunchAgents/com.swingtrader.backend.plist`.
 
 ### Running the tests (optional, for the curious)
 
@@ -293,6 +322,7 @@ cp .env.example .env
 | `EARNINGS_LOCKOUT_HOURS` | `48` | Hours before/after a scheduled earnings release or stock split during which both order routes refuse a new entry. |
 | `FX_COST_PCT` | `0.0015` | Broker currency-conversion fee per conversion (fraction of notional). |
 | `FX_CONVERSIONS_PER_ROUND_TRIP` | `0` | GBP<->USD conversions per round trip. `0` = USD balance, no FX cost; `2` = convert in and out every trade. |
+| `SCHEDULER_ENABLED` | `true` | Runs the scheduled jobs (07:30 UK data sync, 08:00 UK daily brief, universe refresh). Set `false` to turn them off. |
 
 > **Never commit a real `.env` file.** It's already excluded via
 > `.gitignore` — only `.env.example` (with no real keys in it) is tracked.
@@ -512,8 +542,8 @@ docs/
   media/                    Demo video recordings
 scripts/
   generate_demo_videos.py  Playwright walkthrough recorder
-  swing_setup_scan.py      Hermes swing-setup scan
-  day_setup_scan.py        Hermes day-setup scan
+  install_launchd.sh       Installs the always-on backend (launchd)
+deploy/launchd/            launchd plist for the backend
 tests/                     pytest suite, one file per backend/app module
 config/
   watchlist.txt             Ticker universe the screener scans

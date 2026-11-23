@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Always-on SwingTrader backend (API + 07:30/08:00 UK scheduled jobs).
+  Install with scripts/install_launchd.sh, which swaps the interpreter below
+  for the repo venv's python when ./venv exists. Secrets stay in the repo's
+  .env (read from WorkingDirectory), never in this file.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.swingtrader.backend</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/python3</string>
+        <string>-m</string>
+        <string>uvicorn</string>
+        <string>backend.app.main:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>8000</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/ai-bot/SwingTrader-26</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/ai-bot/SwingTrader-26/logs/backend.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ai-bot/SwingTrader-26/logs/backend.err.log</string>
+</dict>
+</plist>

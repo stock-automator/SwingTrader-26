@@ -17,3 +17,6 @@ htmlcov/
 *.egg-info/
 .worktrees/
 .claude/settings.local.json
+
+# launchd service logs (deploy/launchd)
+logs/
