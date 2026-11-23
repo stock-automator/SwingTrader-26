@@ -573,3 +573,236 @@ def test_build_scorecard_serial_long_short_rows(tmp_path):
     assert (shorts > 0) == ("short-side unmodelled borrow" in ls["flags"])
     assert card["strategies"][0]["robustness"]["runs"]
     assert "### moving_average_cross" in card["markdown"]
+
+
+# --------------------------------------------------------------------------
+# Rework loop 1 (reviewer BLOCK on 5a9d8f7..78f3b79)
+# --------------------------------------------------------------------------
+
+
+def set_bar(df, day, **prices):
+    for col, value in prices.items():
+        df.iloc[day, df.columns.get_loc(col)] = value
+    return df
+
+
+def test_long_stop_gapped_through_exits_at_open():
+    df = signal_on(frame(), 5)  # stop 95, target 110
+    set_bar(df, 10, Open=90.0, High=91.0, Low=89.0, Close=90.0)
+    t = run({"AAA": df}).trades.iloc[0]
+    assert t["exit_reason"] == "stop"
+    assert t["exit_date"] == df.index[10]
+    assert t["exit_price"] == pytest.approx(90.0)
+    assert t["pnl"] == pytest.approx(20 * -10.0)
+
+
+def test_long_target_gapped_past_exits_at_open():
+    df = signal_on(frame(), 5)
+    set_bar(df, 10, Open=115.0, High=116.0, Low=114.0, Close=115.0)
+    t = run({"AAA": df}).trades.iloc[0]
+    assert t["exit_reason"] == "target"
+    assert t["exit_price"] == pytest.approx(115.0)
+    assert t["pnl"] == pytest.approx(20 * 15.0)
+
+
+def test_short_stop_and_target_gapped_exit_at_open():
+    cfg = free(allow_shorts=True)
+    up = signal_on(frame(), 5, sig=-1)  # stop 105, target 90
+    set_bar(up, 10, Open=108.0, High=109.0, Low=107.0, Close=108.0)
+    t = run({"AAA": up}, cfg, regime=neutral(up.index)).trades.iloc[0]
+    assert (t["exit_reason"], t["exit_price"]) == ("stop", pytest.approx(108.0))
+    down = signal_on(frame(), 5, sig=-1)
+    set_bar(down, 10, Open=85.0, High=86.0, Low=84.0, Close=85.0)
+    t = run({"AAA": down}, cfg, regime=neutral(down.index)).trades.iloc[0]
+    assert (t["exit_reason"], t["exit_price"]) == ("target", pytest.approx(85.0))
+
+
+def test_entry_skipped_when_open_gaps_through_stop_or_target():
+    below = set_bar(signal_on(frame(), 5), 6, Open=94.0)  # under the 95 stop
+    above = set_bar(signal_on(frame(), 5), 6, Open=111.0)  # over the 110 target
+    res = run({"AAA": below, "BBB": above})
+    assert res.trades.empty
+    assert res.skipped["gap through stop/target"] == 2
+
+
+def test_opposite_signal_exits_at_next_open():
+    df = signal_on(frame(), 5)
+    signal_on(df, 12, sig=-1)
+    set_bar(df, 13, Open=102.0)
+    res = run({"AAA": df})  # shorts off: the -1 only closes the long
+    assert len(res.trades) == 1
+    t = res.trades.iloc[0]
+    assert t["exit_reason"] == "signal"
+    assert t["exit_date"] == df.index[13]
+    assert t["exit_price"] == pytest.approx(102.0)
+
+
+class ATRScripted(Scripted):
+    """ATR-typed levels with no `atr` column, so the offsets are NaN."""
+
+    def generate_signals(self, df):
+        out = super().generate_signals(df)
+        out["sl_type"] = np.where(out["signal"] != 0, "ATR", None)
+        return out
+
+
+class Exploding(Scripted):
+    def generate_signals(self, df):
+        if "boom" in df.columns:
+            raise RuntimeError("bad frame")
+        return super().generate_signals(df)
+
+
+def test_invalid_levels_skipped_and_counted():
+    df = signal_on(frame(), 5)
+    res = run_portfolio_backtest(ATRScripted(), {"AAA": df}, frame(), free())
+    assert res.trades.empty
+    assert res.skipped["invalid stop/target"] == 1
+
+
+def test_no_bar_on_fill_day_skipped_and_counted():
+    df = signal_on(frame(), 5).drop(index=frame().index[6])
+    res = run({"AAA": df}, spy=frame())
+    assert res.trades.empty
+    assert res.skipped["no bar on fill day"] == 1
+
+
+def test_signal_error_ticker_dropped_and_counted():
+    good = signal_on(frame(), 5)
+    bad = signal_on(frame(), 5).assign(boom=1)
+    res = run_portfolio_backtest(Exploding(), {"AAA": good, "BAD": bad}, frame(), free())
+    assert list(res.trades["ticker"]) == ["AAA"]
+    assert res.skipped["signal errors (tickers)"] == 1
+
+
+def test_short_loss_beyond_collateral_flags_and_halts_entries():
+    cfg = free(
+        allow_shorts=True, max_position_pct=1.0, risk_per_trade_pct=0.5, max_heat_pct=1
+    )
+    short = signal_on(frame(), 5, sig=-1, sl=0.5, tp=0.5)  # 100 sh, stop 150
+    for col in ("Open", "High", "Low", "Close"):
+        short.iloc[10:, short.columns.get_loc(col)] = 300.0  # gap, never reverts
+    later = signal_on(frame(), 30)
+    res = run({"AAA": short, "BBB": later}, cfg, regime=neutral(short.index))
+    assert list(res.trades["ticker"]) == ["AAA"]
+    assert res.trades.iloc[0]["exit_price"] == pytest.approx(300.0)
+    assert res.equity.iloc[-1] < 0
+    assert "equity below zero" in res.flags
+    assert res.skipped["equity below zero"] >= 1
+
+
+def test_no_flags_on_a_clean_run():
+    assert run({"AAA": signal_on(frame(), 5)}).flags == []
+
+
+def spliced(df, day, factor=0.04, bars=1):
+    for col in ("Open", "High", "Low", "Close"):
+        df.iloc[day : day + bars, df.columns.get_loc(col)] *= factor
+    return df
+
+
+def test_reverting_spike_ticker_excluded_and_flagged():
+    bad = spliced(signal_on(frame(), 5), 60, bars=2)  # 100 -> 4 -> 100
+    good = signal_on(frame(), 5)
+    res = run({"AAA": good, "HCA": bad})
+    assert list(res.trades["ticker"]) == ["AAA"]
+    assert "suspect data: HCA" in res.flags
+
+
+def test_lasting_big_move_is_not_suspect():
+    df = frame()
+    for col in ("Open", "High", "Low", "Close"):
+        df.iloc[60:, df.columns.get_loc(col)] *= 0.5  # -50% and stays there
+    signal_on(df, 70)
+    res = run({"AAA": df})
+    assert len(res.trades) == 1 and res.flags == []
+
+
+def test_spike_reverting_after_more_than_five_bars_is_not_suspect():
+    df = spliced(signal_on(frame(), 5), 60, factor=0.5, bars=6)
+    assert run({"AAA": df}).flags == []
+
+
+def test_time_stop_fires_at_next_open_when_due_day_has_no_bar():
+    df = signal_on(frame(), 5, sl=0.10, tp=0.20)  # fill day 6, due day 46
+    spy = frame()
+    df = df.drop(index=spy.index[46:48])
+    set_bar(df, df.index.get_loc(spy.index[48]), Open=101.0)
+    t = run({"AAA": df}, spy=spy).trades.iloc[0]
+    assert t["exit_reason"] == "time"
+    assert t["exit_date"] == spy.index[48]
+    assert t["exit_price"] == pytest.approx(101.0)
+
+
+def test_composite_weights_cover_all_agreed_criteria():
+    from backend.app.quant.scorecard import COMPOSITE_WEIGHTS
+
+    assert sum(COMPOSITE_WEIGHTS.values()) == pytest.approx(1.0)
+    assert set(COMPOSITE_WEIGHTS) == {
+        "vs_spy_pct",
+        "profit_factor",
+        "win_rate_pct",
+        "payoff",
+        "max_drawdown_pct",
+        "trades",
+        "positive_years_pct",
+        "positive_regimes_pct",
+        "robustness",
+    }
+    assert all(w > 0 for w in COMPOSITE_WEIGHTS.values())
+
+
+@pytest.mark.parametrize(
+    "key", ["win_rate_pct", "payoff", "trades", "positive_regimes_pct"]
+)
+def test_composite_rank_uses_each_criterion(key):
+    a, b = row("a", 5.0, 1.3, -15.0, 60.0, 2.0), row("b", 5.0, 1.3, -15.0, 60.0, 2.0)
+    for period in ("test", "build"):
+        a[period][key], b[period][key] = 40.0, 60.0
+    ranked = composite_rank([a, b])
+    assert ranked[0]["strategy"] == "b" and ranked[0]["score"] > ranked[1]["score"]
+
+
+def test_curve_stats_positive_regimes_pct():
+    idx = pd.bdate_range("2021-01-01", periods=4)
+    equity = pd.Series([100.0, 110.0, 99.0, 99.0], index=idx)
+    regime = pd.Series(["BULL_TRENDING", "NEUTRAL", "BEAR", "BEAR"], idx)
+    s = curve_stats(equity, equity, pd.Series(1.0, index=idx), regime=regime)
+    # BULL +10% (positive), NEUTRAL -10%, BEAR 0%: 1 of 3 known regimes.
+    assert s["positive_regimes_pct"] == pytest.approx(100 / 3)
+
+
+def test_robustness_base_is_build_period_only():
+    frames, spy = scripted_universe()
+    for df in frames.values():  # the test period loses: no test data may leak
+        set_bar(df, df.index.get_loc(pd.Timestamp("2023-06-01")), Low=1.0)
+    score = score_strategy(
+        "scripted", frames, spy, free(), split_date="2023-01-01", strategy=Scripted()
+    )
+    assert "full_cagr_pct" not in score
+    build = score["variants"]["long"]["build"]["cagr_pct"]
+    assert score["build_cagr_pct"] == pytest.approx(build)
+
+
+def test_perturbation_run_window_ends_before_split():
+    from backend.app.quant.scorecard import robustness_window
+
+    start, end = robustness_window("2016-01-01", "2023-01-01")
+    assert pd.Timestamp(start) == pd.Timestamp("2016-01-01")
+    assert pd.Timestamp(end) < pd.Timestamp("2023-01-01")
+
+
+class ZeroDefault(BaseStrategy):
+    def __init__(self, offset: int = 0, period: int = 2, scale: float = 1.0):
+        super().__init__(name="ZeroDefault")
+
+    def generate_signals(self, df):
+        return Scripted().generate_signals(df)
+
+
+def test_param_variants_small_ints_step_by_one():
+    variants = param_variants("zero", ZeroDefault)
+    pairs = sorted((v["param"], v["value"]) for v in variants)
+    assert ("offset", -1) in pairs and ("offset", 1) in pairs
+    assert ("period", 1) in pairs and ("period", 3) in pairs
+    assert len(pairs) == len(set(pairs)) == 6
