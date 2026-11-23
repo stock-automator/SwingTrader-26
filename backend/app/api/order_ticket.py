@@ -37,18 +37,20 @@ def build_order_ticket_endpoint(
         order_type=request.order_type,
     )
     fx_round_trip = settings.fx_cost_pct * settings.fx_conversions_per_round_trip
-    converted = usd_to_gbp(
-        1.0, data_dir=settings.data_dir, allow_download=settings.allow_downloads
-    )
+    converted = usd_to_gbp(1.0, data_dir=settings.data_dir, allow_download=False)
     usd_per_gbp = None if converted is None else converted[1]
+    rate_date = None if converted is None else converted[2].isoformat()
 
     payload = []
     for ticket in tickets:
         row = ticket.as_dict()
+        row["fx_rate_date"] = rate_date
         row["fx_cost_usd"] = round(ticket.notional_value * fx_round_trip, 2)
         if usd_per_gbp is None:
             row["risk_gbp"] = row["notional_gbp"] = None
-            row["fx_note"] = "GBP figures unavailable: no cached GBPUSD=X rate."
+            row["fx_note"] = (
+                "GBP rate unavailable: GBPUSD=X is not cached yet (run a data sync)."
+            )
         else:
             row["risk_gbp"] = round(ticket.risk_amount / usd_per_gbp, 2)
             row["notional_gbp"] = round(ticket.notional_value / usd_per_gbp, 2)

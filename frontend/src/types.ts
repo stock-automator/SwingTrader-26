@@ -283,6 +283,7 @@ export interface OrderTicket {
   risk_gbp: number | null;
   notional_gbp: number | null;
   fx_note: string | null;
+  fx_rate_date: string | null;
 }
 
 export interface OrderTicketsResponse {

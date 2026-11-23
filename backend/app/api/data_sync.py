@@ -21,6 +21,9 @@ from ..quant.data.parquet_manager import ParquetSyncManager, SyncResult
 from .deps import load_watchlist
 from .schemas import DataSyncRequest, DataSyncResponse, DataSyncStatusResponse
 
+# Cached for the order ticket's display-only GBP figures (see data/fx.py).
+FX_TICKER = "GBPUSD=X"
+
 router = APIRouter(prefix="/api/v1/data", tags=["data-sync"])
 
 
@@ -91,6 +94,8 @@ def start_data_sync(
         skipped = [t for t in request.tickers if t in DENYLIST]
     else:
         tickers = load_watchlist(settings)
+        if tickers and FX_TICKER not in tickers:
+            tickers = [*tickers, FX_TICKER]
     if not tickers:
         reason = (
             f"every requested ticker is delisted or renamed: {', '.join(skipped)}."
