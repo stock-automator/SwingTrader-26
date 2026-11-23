@@ -1113,3 +1113,38 @@ class PositionSizerRequest(BaseModel):
 class PositionSizerResponse(BaseModel):
     shares: int
     risk_amount: float
+
+
+# ---- Daily brief ----
+
+
+class DailyBriefSetup(BaseModel):
+    ticker: str
+    strategy: str
+    entry: float
+    stop: float
+    target: float
+    shares: int
+    risk_usd: float
+    risk_gbp: float | None
+    reason: str
+
+
+class DailyBriefResponse(BaseModel):
+    """`GET /api/v1/reports/daily`: the brief and its plain-text rendering."""
+
+    as_of: str | None
+    last_session: str
+    regime: str
+    stale: bool
+    setups: list[DailyBriefSetup]
+    text: str
+
+
+class DailyBriefSendResponse(BaseModel):
+    """`POST /api/v1/reports/daily/send`: `sent=false` with `error` when
+    Telegram refused the message or could not be reached."""
+
+    sent: bool
+    parts: int
+    error: str | None = None

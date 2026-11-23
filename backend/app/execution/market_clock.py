@@ -94,6 +94,12 @@ class MarketClock:
             self._cache[day] = next((d for d in days if d.date == day), None)
         return self._cache[day]
 
+    def close_on(self, day: date) -> datetime | None:
+        """Regular-session close (New York, tz-aware) on `day`, or `None`
+        if the market does not trade that day."""
+        calendar_day = self._calendar_day(day)
+        return None if calendar_day is None else calendar_day.close.replace(tzinfo=NY)
+
     def session(self, now: datetime | None = None) -> SessionInfo:
         moment = (now or datetime.now(NY)).astimezone(NY)
         return session_for(moment, self._calendar_day(moment.date()))

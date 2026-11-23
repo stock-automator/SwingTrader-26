@@ -29,6 +29,7 @@ from .api.market import router as market_router
 from .api.order_ticket import router as order_ticket_router
 from .api.orders import router as orders_router
 from .api.replay import router as replay_router
+from .api.reports import router as reports_router
 from .api.risk import router as risk_router
 from .api.scans import router as scans_router
 from .api.schemas import HealthResponse
@@ -75,6 +76,7 @@ app.include_router(alerts_router)
 app.include_router(execution_router)
 app.include_router(signals_router)
 app.include_router(replay_router)
+app.include_router(reports_router)
 app.include_router(journal_router)
 app.include_router(scans_router)
 app.include_router(universe_router)
