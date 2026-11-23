@@ -24,6 +24,10 @@ Gate 1 defaults in `PortfolioConfig`):
   With `shorts_require_non_bull` a short is taken only if the SPY macro
   regime at the signal bar's close (the fill day's t-1) is known and not
   `BULL_TRENDING`.
+- optional long entry filters (off by default): `long_blocked_regimes`
+  skips a long when the SPY macro regime at the signal bar's close is in
+  the set (as for shorts); `long_trend_sma` skips a long unless the signal
+  bar's close is above its own N-day SMA, computed over full history.
 
 Signals are generated once per ticker over its full history (vectorised;
 the strategies are causal), so the daily loop only does fills and exits,
@@ -54,6 +58,8 @@ INSUFFICIENT_CASH = "insufficient cash"
 CAPPED_TO_CASH = "size capped to cash"
 SIZE_ZERO = "size rounds to zero"
 SHORT_BLOCKED = "short blocked by bull regime"
+LONG_REGIME_BLOCKED = "long blocked by regime"
+LONG_BELOW_TREND = "long below trend SMA"
 GAP_THROUGH_LEVEL = "gap through stop/target"
 NO_BAR = "no bar on fill day"
 INVALID_LEVELS = "invalid stop/target"
@@ -84,6 +90,9 @@ class PortfolioConfig:
     allow_shorts: bool = False
     shorts_require_non_bull: bool = True
     exit_on_opposite_signal: bool = True
+    #: Long entry filters, off by default (cycle 03 step 3 experiments).
+    long_blocked_regimes: frozenset[str] = frozenset()
+    long_trend_sma: int | None = None
     commission: float = 0.001
     slippage_pct: float = 0.0005
     fee_per_share: float = 0.0
@@ -308,6 +317,13 @@ def run_portfolio_backtest(
     short_ok = (regime.notna() & (regime != MACRO_BULL_TRENDING)).to_numpy()
     if not config.shorts_require_non_bull:
         short_ok[:] = True
+    long_ok = ~regime.isin(config.long_blocked_regimes).to_numpy()
+    if config.long_trend_sma:
+        n = config.long_trend_sma
+        sma = pd.DataFrame(prepared.mark).rolling(n, min_periods=n).mean()
+        above = (prepared.mark > sma.to_numpy())[lo:hi]
+    else:
+        above = np.ones_like(S, dtype=bool)
 
     slip = config.slippage_pct
     fee = config.fee_per_share
@@ -391,6 +407,13 @@ def run_portfolio_backtest(
                     blocked = sig[cand] == -1
                     bump(SHORT_BLOCKED, int(blocked.sum()))
                     cand = cand[~blocked]
+                longs = sig[cand] == 1
+                if not long_ok[k - 1]:
+                    bump(LONG_REGIME_BLOCKED, int(longs.sum()))
+                    cand, longs = cand[~longs], longs[~longs]
+                below = longs & ~above[k - 1, cand]
+                bump(LONG_BELOW_TREND, int(below.sum()))
+                cand = cand[~below]
                 sl_off, tp_off = SL[k - 1, cand], TP[k - 1, cand]
                 valid = (sl_off > 0) & np.isfinite(sl_off) & np.isfinite(tp_off)
                 valid &= tp_off > 0
