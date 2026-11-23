@@ -9,6 +9,7 @@ the API layer (and its tests) never need to import `alpaca` types directly.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,6 +24,10 @@ from alpaca.trading.requests import (
 )
 
 VALID_SIDES = frozenset({"buy", "sell"})
+#: Alpaca's largest account-activities page.
+ACTIVITIES_PAGE_SIZE = 100
+#: alpaca-py has no request timeout, so the whole paged fetch gets one.
+ACTIVITIES_TIMEOUT_SECONDS = 10
 
 
 class AlpacaNotConfiguredError(RuntimeError):
@@ -252,3 +257,32 @@ class AlpacaExecutionClient:
             ),
             "timeframe": history.timeframe,
         }
+
+    def get_fill_activities(self, after: datetime | None = None) -> list[dict]:
+        """Every FILL account activity (oldest first, after `after` when
+        given) as Alpaca's raw dicts, following `page_token` pages. Raises
+        `AlpacaNotConfiguredError` without keys, `TimeoutError` after
+        `ACTIVITIES_TIMEOUT_SECONDS`, and whatever the SDK raises on an
+        HTTP error."""
+        client = self._require_client()
+
+        def fetch() -> list[dict]:
+            found: list[dict] = []
+            params: dict[str, Any] = {
+                "direction": "asc",
+                "page_size": ACTIVITIES_PAGE_SIZE,
+            }
+            if after is not None:
+                params["after"] = after.isoformat()
+            while True:
+                page = client.get("/account/activities/FILL", params) or []
+                found.extend(page)
+                if len(page) < ACTIVITIES_PAGE_SIZE:
+                    return found
+                params["page_token"] = page[-1]["id"]
+
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            return pool.submit(fetch).result(timeout=ACTIVITIES_TIMEOUT_SECONDS)
+        finally:
+            pool.shutdown(wait=False)
