@@ -77,6 +77,24 @@ def _run_sync(tickers: list[str], data_dir: Path) -> None:
         _job_state.finish()
 
 
+def watchlist_sync_tickers(settings: Settings) -> list[str]:
+    """The watchlist plus the FX and benchmark series, or `[]` if the
+    watchlist is empty."""
+    tickers = load_watchlist(settings)
+    if tickers and FX_TICKER not in tickers:
+        tickers = [*tickers, FX_TICKER]
+    if tickers and BENCHMARK_TICKER not in tickers:
+        tickers = [*tickers, BENCHMARK_TICKER]
+    return tickers
+
+
+def run_watchlist_sync(settings: Settings) -> None:
+    """Synchronous full-watchlist sync (the scheduler's 07:30 UK job)."""
+    tickers = watchlist_sync_tickers(settings)
+    if tickers:
+        ParquetSyncManager(data_dir=settings.data_dir).sync_universe(tickers)
+
+
 @router.post("/sync", response_model=DataSyncResponse, status_code=202)
 def start_data_sync(
     request: DataSyncRequest,
@@ -95,11 +113,7 @@ def start_data_sync(
         tickers = [t for t in request.tickers if t not in DENYLIST]
         skipped = [t for t in request.tickers if t in DENYLIST]
     else:
-        tickers = load_watchlist(settings)
-        if tickers and FX_TICKER not in tickers:
-            tickers = [*tickers, FX_TICKER]
-        if tickers and BENCHMARK_TICKER not in tickers:
-            tickers = [*tickers, BENCHMARK_TICKER]
+        tickers = watchlist_sync_tickers(settings)
     if not tickers:
         reason = (
             f"every requested ticker is delisted or renamed: {', '.join(skipped)}."

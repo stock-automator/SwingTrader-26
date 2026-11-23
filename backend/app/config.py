@@ -149,6 +149,9 @@ class Settings:
         fx_conversions_per_round_trip: How many GBP<->USD conversions a
             round trip incurs. `0` (the default) means a USD balance, so no
             FX cost; `2` converts in and out on every trade.
+        scheduler_enabled: Whether app startup runs the in-process
+            APScheduler jobs (universe refresh, 07:30 UK data sync, 08:00 UK
+            daily brief). Off under tests and for a one-off `uvicorn` run.
 
     Secret fields (API keys, tokens, webhook URLs) are `repr=False`, so
     logging or printing a `Settings` never shows them; reading the attribute
@@ -180,6 +183,7 @@ class Settings:
     earnings_lockout_hours: int = 48
     fx_cost_pct: float = 0.0015
     fx_conversions_per_round_trip: int = 0
+    scheduler_enabled: bool = True
 
     @property
     def has_finnhub(self) -> bool:
@@ -231,4 +235,5 @@ def get_settings() -> Settings:
         earnings_lockout_hours=_env_int("EARNINGS_LOCKOUT_HOURS", 48),
         fx_cost_pct=_env_float("FX_COST_PCT", 0.0015),
         fx_conversions_per_round_trip=_env_int("FX_CONVERSIONS_PER_ROUND_TRIP", 0),
+        scheduler_enabled=_env_bool("SCHEDULER_ENABLED", True),
     )
