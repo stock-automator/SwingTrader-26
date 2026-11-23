@@ -1169,3 +1169,19 @@ class DailyBriefSendResponse(BaseModel):
     sent: bool
     parts: int
     error: str | None = None
+
+
+class WeeklyReportResponse(BaseModel):
+    """`GET /api/v1/reports/weekly`: the forward-test report built from the
+    stored Alpaca fills. `week_start` is the Monday of the reported week."""
+
+    week_start: str
+    trades_this_week: int
+    trades_total: int
+    open_positions: int
+    net_usd_total: float
+    text: str
+
+
+class WeeklyReportSendResponse(DailyBriefSendResponse):
+    """`POST /api/v1/reports/weekly/send`: same shape as the daily send."""

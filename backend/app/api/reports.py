@@ -1,5 +1,5 @@
-"""`/api/v1/reports/daily`: the cached daily brief, a background refresh,
-and an on-demand Telegram send.
+"""`/api/v1/reports`: the cached daily brief, a background refresh and an
+on-demand Telegram send; and the weekly forward-test report and its send.
 
 `GET /daily` only reads the cache the scheduler's 08:00 UK job (or
 `POST /daily/refresh`) writes, so it never runs a universe scan inline.
@@ -20,11 +20,13 @@ from starlette.concurrency import run_in_threadpool
 from ..alerts.config_store import effective_channel_config
 from ..alerts.dispatcher import TelegramAlertChannel
 from ..config import Settings, get_settings
-from ..reports import daily
+from ..reports import daily, weekly
 from .schemas import (
     DailyBriefRefreshResponse,
     DailyBriefResponse,
     DailyBriefSendResponse,
+    WeeklyReportResponse,
+    WeeklyReportSendResponse,
 )
 
 log = logging.getLogger(__name__)
@@ -59,9 +61,8 @@ def refresh_daily_brief(
     return {"status": "started"}
 
 
-@router.post("/daily/send", response_model=DailyBriefSendResponse)
-async def send_daily_brief(settings: Settings = Depends(get_settings)) -> dict:
-    """Build today's brief and send it to the configured Telegram chat."""
+def _telegram(settings: Settings) -> tuple[str, str]:
+    """The configured bot token and chat id, or a 503."""
     config = effective_channel_config(settings)
     token, chat_id = config["telegram_bot_token"], config["telegram_chat_id"]
     if not (token and chat_id):
@@ -70,6 +71,13 @@ async def send_daily_brief(settings: Settings = Depends(get_settings)) -> dict:
             detail="Telegram is not configured: set TELEGRAM_BOT_TOKEN and "
             "TELEGRAM_CHAT_ID in your local .env.",
         )
+    return token, chat_id
+
+
+@router.post("/daily/send", response_model=DailyBriefSendResponse)
+async def send_daily_brief(settings: Settings = Depends(get_settings)) -> dict:
+    """Build today's brief and send it to the configured Telegram chat."""
+    token, chat_id = _telegram(settings)
     brief = await run_in_threadpool(daily.build_daily_brief, settings)
     channel = TelegramAlertChannel(token, chat_id)
     try:
@@ -80,3 +88,18 @@ async def send_daily_brief(settings: Settings = Depends(get_settings)) -> dict:
         parts_sent = getattr(exc, "parts_sent", 0)
         return {"sent": False, "parts": parts_sent, "error": error}
     return {"sent": True, "parts": parts, "error": None}
+
+
+@router.get("/weekly", response_model=WeeklyReportResponse)
+def get_weekly_report(settings: Settings = Depends(get_settings)) -> dict:
+    """Build the weekly report from the stored fills. Alpaca is not called
+    and nothing is sent."""
+    return weekly.report_to_dict(weekly.build_weekly_report(settings))
+
+
+@router.post("/weekly/send", response_model=WeeklyReportSendResponse)
+def send_weekly_report(settings: Settings = Depends(get_settings)) -> dict:
+    """Pull new Alpaca fills, build the weekly report and send it to the
+    configured Telegram chat. A failed pull still sends, with a warning."""
+    token, chat_id = _telegram(settings)
+    return weekly.send_weekly_report(settings, token, chat_id)
