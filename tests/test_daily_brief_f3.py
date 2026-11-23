@@ -144,8 +144,12 @@ class TestF3Setups:
         daily.scan_universe = scan
         brief = daily.build_daily_brief(_settings(tmp_path), now=WED_0800)
         (setup,) = brief.setups
-        expected = scan.risk_managers[-1].position_size(setup.entry, setup.stop)
-        assert isinstance(setup.shares, int) and setup.shares == expected > 0
+        # Sizing now comes from the live gate (build_risk_managed_order, which
+        # uses dynamic risk <= the flat risk_per_trade_pct), so whole shares
+        # are positive and never more than the flat-2% size. Exact equality
+        # with the live order is pinned in TestF3LiveOrderGate.
+        flat_max = scan.risk_managers[-1].position_size(setup.entry, setup.stop)
+        assert isinstance(setup.shares, int) and 0 < setup.shares <= flat_max
         assert setup.risk_usd == pytest.approx(
             setup.shares * (setup.entry - setup.stop), abs=0.01
         )
