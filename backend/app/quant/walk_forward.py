@@ -59,6 +59,20 @@ def _slice_window(
     return df.loc[(df.index >= start) & (df.index < end)]
 
 
+class _TradeFrom(BaseStrategy):
+    """`inner`'s signals with every signal before `start` set to HOLD, so a
+    strategy sees warm-up history but only trades from `start`."""
+
+    def __init__(self, inner: BaseStrategy, start: pd.Timestamp):
+        super().__init__(inner.name)
+        self.inner, self.start = inner, start
+
+    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+        out = self.inner.generate_signals(df).copy()
+        out.loc[out.index < self.start, "signal"] = 0
+        return out
+
+
 def _window_return_pct(
     strategy: BaseStrategy,
     df_window: pd.DataFrame,
@@ -67,14 +81,22 @@ def _window_return_pct(
     commission: float,
     slippage_pct: float,
     engine_kwargs: dict | None = None,
+    measure_from: pd.Timestamp | None = None,
 ) -> float | None:
     """Total return over `df_window`, or `None` if it's too short to
-    backtest at all or the run otherwise fails - both treated as "no
-    usable signal from this window" rather than raised, since a
-    rolling scan is expected to hit unusable windows at its edges."""
+    backtest or the strategy rejects it with a `ValueError` (e.g. not
+    enough bars for its lookback) - "no usable signal from this window",
+    since a rolling scan is expected to hit unusable windows at its edges.
+    Other errors (bugs) propagate.
+
+    With `measure_from`, bars before it are warm-up only: the strategy
+    sees them but trades, and the return is measured, from `measure_from`.
+    """
     if len(df_window) < 2:
         return None
 
+    if measure_from is not None:
+        strategy = _TradeFrom(strategy, measure_from)
     risk_manager = RiskManager(
         account_equity=initial_capital, risk_per_trade_pct=risk_per_trade_pct
     )
@@ -87,11 +109,13 @@ def _window_return_pct(
             slippage_pct=slippage_pct,
             **(engine_kwargs or {}),
         )
-    except Exception:
+    except ValueError:
         return None
 
     equity = result.equity_curve["Equity"]
-    if equity.empty:
+    if measure_from is not None:
+        equity = equity[equity.index >= measure_from]
+    if len(equity) < 2:
         return None
 
     start, end = float(equity.iloc[0]), float(equity.iloc[-1])
@@ -573,7 +597,11 @@ def oos_summary(
 
     Each ticker is scored on its own (as `run_comparison`'s equal-weight
     sleeves are) and the window's `oos_return_pct` is their mean. Windows
-    come from the dates every frame shares. `engine_kwargs` go through to
+    come from the dates every frame shares. The strategy's signals are
+    computed from `is_start` (in-sample bars are indicator warm-up) but it
+    trades from a fresh account, and is measured, on `[oos_start, oos_end)`
+    only; a position its signals would carry in from in-sample is not
+    opened until its next entry signal. `engine_kwargs` go through to
     `run_backtest` (e.g. `fractional`, `use_risk_gate`, `fee_per_share`).
     """
     common = None
@@ -582,17 +610,18 @@ def oos_summary(
     windows = generate_windows(common, is_months, oos_months)
 
     rows = []
-    for _, _, oos_start, oos_end in windows:
+    for is_start, _, oos_start, oos_end in windows:
         oos = _mean(
             [
                 _window_return_pct(
                     strategy,
-                    _slice_window(df, oos_start, oos_end),
+                    _slice_window(df, is_start, oos_end),
                     initial_capital / len(frames),
                     risk_per_trade_pct,
                     commission,
                     slippage_pct,
                     engine_kwargs,
+                    measure_from=oos_start,
                 )
                 for df in frames.values()
             ]
