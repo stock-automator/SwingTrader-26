@@ -994,15 +994,43 @@ class UniverseManager:
 
         previous_symbols = list(previous.get("symbols", []))
         new = sorted(set(wanted) - set(previous_symbols))
+        fetch_errors: dict[str, str] = {}
         if new:
             history = ParquetSyncManager(data_dir=self.data_dir)
             for ticker in new:
-                history.sync_ticker(ticker)
+                try:
+                    outcome = history.sync_ticker(ticker)
+                except Exception as exc:
+                    fetch_errors[ticker] = f"history fetch failed: {exc}"
+                    continue
+                if getattr(outcome, "status", None) == "error":
+                    detail = getattr(outcome, "error", None) or "no data"
+                    fetch_errors[ticker] = f"history fetch failed: {detail}"
         active = sorted(self.purge_broken_symbols(wanted))
+        active_set = set(active)
+        skipped = [
+            {
+                "symbol": s,
+                "reason": fetch_errors.get(s, "missing or unreadable price history"),
+            }
+            for s in wanted
+            if s not in active_set
+        ]
+        skipped_set = {e["symbol"] for e in skipped}
 
+        # Skipped symbols are still index members: never "removed", and a
+        # skipped new member is not "added" either.
         changes = diff_universe(
-            previous_symbols, dict(previous.get("names") or {}), active, names
+            previous_symbols,
+            dict(previous.get("names") or {}),
+            sorted(active_set | skipped_set),
+            names,
         )
+        changes["added"] = [s for s in changes["added"] if s not in skipped_set]
+        changes["renamed"] = [
+            r for r in changes["renamed"] if r["new"] not in skipped_set
+        ]
+        changes["skipped"] = skipped
         result = UniverseSyncResult(
             symbols=active,
             synced_at=now,

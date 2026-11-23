@@ -1064,7 +1064,9 @@ month (scheduler job `universe_monthly`). A sync:
   names (S&P 500 under 450, Nasdaq-100 under 90);
 - reports `changes` against the previous file: `added`, `removed` (flagged
   only, their price files are kept) and `renamed` (`{"old", "new"}`, matched
-  on company name, e.g. FI to FISV);
+  on company name, e.g. FI to FISV) and `skipped` (`{"symbol", "reason"}`:
+  index members left out because their history fetch failed or their
+  parquet is missing or unreadable; never reported as removed);
 - fetches price history for new and renamed-to names;
 - records each attempt in `config/universe_status.json` (`last_attempt`,
   `kept_previous`, `reason`, `source_status`, `last_changes`) for the weekly
@@ -1090,7 +1092,8 @@ Both return the same shape (real response, lists shortened):
   "changes": {
     "added": ["ALAB", "ALNY", "ARES", "BE", "..."],
     "removed": ["AZN", "CTVA", "EA", "GFS", "KVUE", "TEAM", "TTD", "WBD", "ZS"],
-    "renamed": []
+    "renamed": [],
+    "skipped": []
   },
   "kept_previous": false
 }
