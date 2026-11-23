@@ -473,9 +473,8 @@ def test_composite_rank_handles_missing_metrics():
 # --------------------------------------------------------------------------
 
 
-def test_run_scorecard_script_writes_outputs(tmp_path, capsys):
-    from scripts.run_scorecard import main
-
+def random_walk_universe(tmp_path):
+    """AAA, BBB and SPY as noisy random walks, written to a tmp cache."""
     frames, spy = scripted_universe()
     raw = tmp_path / "raw"
     raw.mkdir()
@@ -489,6 +488,13 @@ def test_run_scorecard_script_writes_outputs(tmp_path, capsys):
         df["Low"] = walk * 0.99
         df.index.name = "Date"
         df.to_parquet(raw / f"{name}.parquet")
+    return raw
+
+
+def test_run_scorecard_script_writes_outputs(tmp_path, capsys):
+    from scripts.run_scorecard import main
+
+    raw = random_walk_universe(tmp_path)
     universe = tmp_path / "universe.json"
     universe.write_text(json.dumps({"symbols": ["AAA", "BBB", "MISSING"]}))
     md, js = tmp_path / "scorecard.md", tmp_path / "scorecard.json"
@@ -520,3 +526,49 @@ def test_run_scorecard_script_writes_outputs(tmp_path, capsys):
     assert payload["missing_symbols"] == ["MISSING"]
     out = capsys.readouterr()
     assert "MISSING" in out.out + out.err
+
+
+def test_run_scorecard_script_parallel_with_robustness(tmp_path):
+    from scripts.run_scorecard import main
+
+    raw = random_walk_universe(tmp_path)
+    universe = tmp_path / "universe.json"
+    universe.write_text(json.dumps({"symbols": ["AAA", "BBB"]}))
+    js = tmp_path / "scorecard.json"
+    payload = main(
+        [
+            "--data-dir",
+            str(raw),
+            "--universe",
+            str(universe),
+            "--markdown",
+            str(tmp_path / "scorecard.md"),
+            "--json",
+            str(js),
+            "--strategies",
+            "moving_average_cross",
+            "--processes",
+            "2",
+        ]
+    )
+    rob = payload["strategies"][0]["robustness"]
+    assert len(rob["runs"]) == len(param_variants("moving_average_cross"))
+    assert rob["worst_cagr_pct"] <= rob["best_cagr_pct"]
+    assert json.loads(js.read_text())["strategies"][0]["robustness"] is not None
+
+
+def test_build_scorecard_serial_long_short_rows(tmp_path):
+    from backend.app.quant.scorecard import build_scorecard
+    from scripts.run_scorecard import load_universe
+
+    raw = random_walk_universe(tmp_path)
+    frames, spy, missing = load_universe(raw, ["AAA", "BBB"])
+    assert missing == []
+    card = build_scorecard(frames, spy, strategies=["moving_average_cross"])
+    variants = {r["variant"] for r in card["rows"]}
+    assert variants == {"long", "long_short"}
+    ls = next(r for r in card["rows"] if r["variant"] == "long_short")
+    shorts = ls["build"]["short_trades"] + ls["test"]["short_trades"]
+    assert (shorts > 0) == ("short-side unmodelled borrow" in ls["flags"])
+    assert card["strategies"][0]["robustness"]["runs"]
+    assert "### moving_average_cross" in card["markdown"]
