@@ -27,8 +27,9 @@ tester, reviewer, retrospective-learner and skill-upgrader.
   spec-driven-development, planning-and-task-breakdown, incremental-implementation and
   test-driven-development. Plus built-in `/code-review` and `/simplify`, and
   skill-creator at user level. Project skill: `ticker-lifecycle-check`.
-- **git-guardrails** (`.claude/hooks/`) blocks push, history rewrites and commits on
-  `main`. Work on a feature branch; A pushes.
+- **git-guardrails** (`.claude/hooks/`) blocks force pushes, any push/commit/merge on
+  `main`, `gh pr merge` and history rewrites. Agents may push feature branches and open
+  PRs; A merges to `main`.
 - Agents never edit their own prompts. Only skill-upgrader proposes changes, and only A
   approves them. A lesson seen 3 or more times becomes a rule.
 - Keep it lean: no speculative code or docs. Prefer deleting or reusing. Agent prompts

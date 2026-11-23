@@ -32,8 +32,16 @@ block() {
 START='(^|[;&|(]|&&|\|\||then|do)[[:space:]]*'
 GIT="${START}git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+"
 
+PUSH="${GIT}push([[:space:]]|$)"
+
 DANGEROUS_PATTERNS=(
-  "${GIT}push"
+  # Pushing feature branches is allowed (A, 2026-11-23). Still blocked:
+  # force pushes, deleting/mirroring remote refs, and any push to main/master.
+  "${PUSH}(.*[[:space:]])?(-f|--force|--force-with-lease|--force-if-includes|--mirror|--all|--delete|-d)([[:space:]=]|$)"
+  "${PUSH}(.*[[:space:]])?\+[^[:space:]]+"
+  "${PUSH}(.*[[:space:]])?([^[:space:]]*:)?(refs/heads/)?(main|master)([[:space:]]|$)"
+  # Merging a PR lands it on main: A merges.
+  "${START}gh[[:space:]]+pr[[:space:]]+merge"
   "${GIT}reset[[:space:]]+(.*[[:space:]])?--hard"
   "${GIT}clean[[:space:]]+(.*[[:space:]])?-[a-zA-Z]*f"
   "${GIT}branch[[:space:]]+(.*[[:space:]])?(-D|--delete[[:space:]]+--force)"
@@ -49,8 +57,8 @@ for pattern in "${DANGEROUS_PATTERNS[@]}"; do
   fi
 done
 
-# No commits or merges while on main.
-if printf '%s' "$STRIPPED" | grep -qE "${GIT}(commit|merge|cherry-pick)"; then
+# No commits, merges or pushes while on main (a bare `git push` there pushes main).
+if printf '%s' "$STRIPPED" | grep -qE "${GIT}(commit|merge|cherry-pick|push)"; then
   BRANCH=$(git -C "${CLAUDE_PROJECT_DIR:-.}" symbolic-ref --short HEAD 2>/dev/null)
   if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
     block "commits to $BRANCH need A's approval; use a feature branch"
