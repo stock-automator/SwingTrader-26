@@ -52,6 +52,9 @@ log = logging.getLogger(__name__)
 
 UK = ZoneInfo("Europe/London")
 MAX_SETUPS = 3
+#: Bars of each ticker handed to the signal scan (~3 years); the last-bar
+#: signal of every registry strategy is unchanged by older history.
+SIGNAL_LOOKBACK_BARS = 750
 RISK_PER_TRADE_PCT = 0.02
 REGULAR_CLOSE = time(16, 0)
 #: Longest run of closed days to step back over (a holiday weekend is 4).
@@ -174,6 +177,10 @@ def _reason(strategy: str, setup: Setup) -> str:
     return ", ".join(parts).replace("\n", " ")
 
 
+def _rr(setup: Setup) -> float:
+    return setup.reward_risk_ratio or 0.0
+
+
 def _candidates(
     frames: dict[str, pd.DataFrame], settings: Settings
 ) -> tuple[list[tuple[str, Setup]], int]:
@@ -182,11 +189,12 @@ def _candidates(
     risk_manager = RiskManager(
         account_equity=DEFAULT_SCREENER_EQUITY, risk_per_trade_pct=RISK_PER_TRADE_PCT
     )
+    recent = {t: df.tail(SIGNAL_LOOKBACK_BARS) for t, df in frames.items()}
     found: dict[str, tuple[str, Setup]] = {}
     too_wide: set[str] = set()
     for name in REGISTRY:
         report = scan_universe(
-            frames,
+            recent,
             build_strategy(name),
             risk_manager,
             min_avg_volume=settings.screener_min_avg_volume,
@@ -198,11 +206,11 @@ def _candidates(
                 continue
             if not setup.shares:
                 too_wide.add(setup.ticker)
-            elif setup.tradable and setup.ticker not in found:
-                found[setup.ticker] = (name, setup)
-    ranked = sorted(
-        found.values(), key=lambda item: -(item[1].reward_risk_ratio or 0.0)
-    )
+            elif setup.tradable:
+                best = found.get(setup.ticker)
+                if best is None or _rr(setup) > _rr(best[1]):
+                    found[setup.ticker] = (name, setup)
+    ranked = sorted(found.values(), key=lambda item: -_rr(item[1]))
     return ranked, len(too_wide - found.keys())
 
 

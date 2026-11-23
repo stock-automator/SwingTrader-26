@@ -47,6 +47,17 @@ class AlertMessage:
     url: str | None = None
 
 
+class TelegramSendError(requests.RequestException):
+    """A Telegram failure with the bot token scrubbed from its message.
+    `parts_sent` counts the `send_text` parts delivered before it."""
+
+    parts_sent: int = 0
+
+
+class TelegramHTTPError(TelegramSendError, requests.HTTPError):
+    """`TelegramSendError` for a non-2xx response."""
+
+
 class TelegramAlertChannel:
     """Posts plain text (no `parse_mode`) to the Telegram Bot API's
     `sendMessage` endpoint, so a ticker like `BRK_B` or a `*` in a note can
@@ -59,12 +70,21 @@ class TelegramAlertChannel:
         self.chat_id = chat_id
 
     def _post(self, text: str) -> None:
-        response = requests.post(
-            f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
-            json={"chat_id": self.chat_id, "text": text},
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
+        try:
+            response = requests.post(
+                f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
+                json={"chat_id": self.chat_id, "text": text},
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            kind = (
+                TelegramHTTPError
+                if isinstance(exc, requests.HTTPError)
+                else TelegramSendError
+            )
+            # `from None`: the original's text and chain carry the token.
+            raise kind(str(exc).replace(self.bot_token, "<token>")) from None
 
     def send(self, message: AlertMessage) -> None:
         """Raises `requests.RequestException` on a network failure, or
@@ -81,10 +101,14 @@ class TelegramAlertChannel:
     def send_text(self, text: str) -> int:
         """Send `text`, split on newlines into "(i/n)" parts that each fit
         Telegram's limit. Returns the number of parts sent; raises like
-        `send` as soon as any part fails."""
+        `send` as soon as any part fails, with `parts_sent` set on it."""
         parts = split_message(text)
-        for part in parts:
-            self._post(part)
+        for sent, part in enumerate(parts):
+            try:
+                self._post(part)
+            except TelegramSendError as exc:
+                exc.parts_sent = sent
+                raise
         return len(parts)
 
 

@@ -56,5 +56,6 @@ async def send_daily_brief(settings: Settings = Depends(get_settings)) -> dict:
     except requests.RequestException as exc:
         error = str(exc).replace(token, "<token>")
         log.warning("daily brief send failed: %s", error)
-        return {"sent": False, "parts": 0, "error": error}
+        parts_sent = getattr(exc, "parts_sent", 0)
+        return {"sent": False, "parts": parts_sent, "error": error}
     return {"sent": True, "parts": parts, "error": None}
