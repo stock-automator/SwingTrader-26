@@ -248,7 +248,12 @@ class TestF4SyncChanges:
         sp = [(s, n) for s, n in prev.items() if not s.startswith("N")]
         _fake_wiki(monkeypatch, sp_rows=sp)
         changes = _as_dict(manager.sync())["changes"]
-        assert changes == {"added": [], "removed": [], "renamed": []}
+        assert {k: changes[k] for k in ("added", "removed", "renamed")} == {
+            "added": [],
+            "removed": [],
+            "renamed": [],
+        }
+        assert changes.get("skipped", []) == []
         assert history_calls == []
 
 
@@ -310,6 +315,121 @@ class TestF4KeepPrevious:
         result = _as_dict(manager.sync())
         assert result["kept_previous"] is True
         assert not manager.config_path.exists()
+
+
+# ------------------------------------------------- status file + skipped
+
+
+def _with_status(tmp_path: Path) -> tuple[UniverseManager, Path]:
+    manager = _previous(tmp_path)
+    status = tmp_path / "status" / "universe_status.json"
+    status.parent.mkdir()
+    manager.status_path = status
+    return manager, status
+
+
+class TestF4StatusFile:
+    def test_f4_live_sync_records_status(self, tmp_path, monkeypatch, history_calls):
+        manager, status = _with_status(tmp_path)
+        _fake_wiki(monkeypatch)
+        result = _as_dict(manager.sync())
+        data = json.loads(status.read_text())
+        assert datetime.fromisoformat(data["last_attempt"])
+        assert data["kept_previous"] is False
+        assert data["source_status"] == {"sp500": "live", "nasdaq100": "live"}
+        assert data["last_changes"] == result["changes"]
+
+    def test_f4_fallback_records_kept_previous_and_reason(
+        self, tmp_path, monkeypatch, history_calls
+    ):
+        manager, status = _with_status(tmp_path)
+        _fake_wiki(monkeypatch, fail=("sp500",))
+        manager.sync()
+        data = json.loads(status.read_text())
+        assert data["kept_previous"] is True
+        assert isinstance(data["reason"], str) and data["reason"].strip()
+        assert data["source_status"]["sp500"] == "fallback"
+        assert "last_attempt" in data
+
+    def test_f4_unwritable_status_path_warns_and_still_returns(
+        self, tmp_path, monkeypatch, history_calls, caplog
+    ):
+        manager, _ = _with_status(tmp_path)
+        blocker = tmp_path / "blocker"
+        blocker.write_text("a file, so it cannot be a directory")
+        manager.status_path = blocker / "status.json"
+        _fake_wiki(monkeypatch)
+        with caplog.at_level(logging.WARNING):
+            result = _as_dict(manager.sync())
+        assert result["kept_previous"] is False
+        assert "NEWCO" in result["symbols"]
+        assert any(
+            r.levelno == logging.WARNING and "status" in r.getMessage().lower()
+            for r in caplog.records
+        )
+
+    def test_f4_settings_status_path_is_a_path(self, tmp_path):
+        assert isinstance(_settings(tmp_path).universe_status_path, Path)
+
+
+def _break_history(monkeypatch, tmp_path, bad: str, mode: str):
+    blob = _template_bytes(tmp_path)
+
+    def fake(self, ticker, now=None):
+        if ticker == bad:
+            if mode == "raise":
+                raise RuntimeError("yfinance 500")
+            return SyncResult(ticker=ticker, status="error", error="no data")
+        Path(self.data_dir).mkdir(parents=True, exist_ok=True)
+        (Path(self.data_dir) / f"{ticker}.parquet").write_bytes(blob)
+        return SyncResult(ticker=ticker, status="updated", rows_added=5)
+
+    monkeypatch.setattr(ParquetSyncManager, "sync_ticker", fake)
+
+
+def _skipped(changes) -> dict[str, str]:
+    return {e["symbol"]: e["reason"] for e in changes["skipped"]}
+
+
+class TestF4SkippedSymbols:
+    @pytest.mark.parametrize("mode", ["raise", "error_result"])
+    def test_f4_new_member_with_failed_history_is_skipped_not_silent(
+        self, tmp_path, monkeypatch, mode
+    ):
+        manager, status = _with_status(tmp_path)
+        _break_history(monkeypatch, tmp_path, "NEWCO", mode)
+        _fake_wiki(monkeypatch)
+        result = _as_dict(manager.sync())
+        skipped = _skipped(result["changes"])
+        assert "NEWCO" in skipped and skipped["NEWCO"].strip()
+        assert "NEWCO" not in result["symbols"]
+        assert "NEWCO" not in result["changes"]["removed"]
+        assert "BRK-B" in result["symbols"], "one failure must not stop the rest"
+        assert _skipped(json.loads(status.read_text())["last_changes"]) == skipped
+        assert "NEWCO" not in json.loads(manager.config_path.read_text())["symbols"]
+
+    def test_f4_existing_member_with_broken_parquet_is_skipped_not_removed(
+        self, tmp_path, monkeypatch, history_calls
+    ):
+        manager, status = _with_status(tmp_path)
+        (manager.data_dir / "Z001.parquet").write_bytes(b"not a parquet")
+        _fake_wiki(monkeypatch)
+        result = _as_dict(manager.sync())
+        skipped = _skipped(result["changes"])
+        assert "Z001" in skipped and skipped["Z001"].strip()
+        assert "Z001" not in result["changes"]["removed"]
+        assert "Z001" not in result["symbols"]
+        assert _skipped(json.loads(status.read_text())["last_changes"]) == skipped
+        assert _skipped(json.loads(manager.config_path.read_text())["last_changes"])
+
+    def test_f4_genuinely_removed_symbol_is_removed_not_skipped(
+        self, tmp_path, monkeypatch, history_calls
+    ):
+        manager, _ = _with_status(tmp_path)
+        _fake_wiki(monkeypatch)
+        changes = _as_dict(manager.sync())["changes"]
+        assert changes["removed"] == ["OLDCO"]
+        assert changes["skipped"] == []
 
 
 # -------------------------------------------------------- load_watchlist
