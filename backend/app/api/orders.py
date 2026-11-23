@@ -64,8 +64,9 @@ class OrderSubmitRequest(BaseModel):
     )
     intent: Literal["ENTRY", "EXIT"] | None = Field(
         default=None,
-        description="ENTRY is guarded, EXIT always goes through. "
-        "Unset: buy = ENTRY, sell = EXIT.",
+        description="ENTRY always guards. Otherwise a sell skips the guards "
+        "only if the Alpaca account holds at least qty long of the ticker; "
+        "every other order is guarded as an entry.",
     )
 
 
@@ -92,11 +93,13 @@ class ActiveOrdersResponse(BaseModel):
 _VALID_BROKERS = frozenset({"PAPER", "ALPACA"})
 
 
+def _alpaca_client(settings: Settings) -> AlpacaExecutionClient:
+    return AlpacaExecutionClient(settings.alpaca_api_key, settings.alpaca_api_secret)
+
+
 def _broker_for(name: str, settings: Settings) -> ExecutionBroker:
     if name == "ALPACA":
-        return AlpacaBroker(
-            AlpacaExecutionClient(settings.alpaca_api_key, settings.alpaca_api_secret)
-        )
+        return AlpacaBroker(_alpaca_client(settings))
     return PaperBroker()
 
 
@@ -248,16 +251,21 @@ async def submit_order(
             detail="reference_price is required for a PAPER MARKET order",
         )
 
+    # Only Alpaca holds positions a sell can be proven to exit; a PAPER sell
+    # has no position source and is guarded like an entry.
+    alpaca = _alpaca_client(settings) if broker_name == "ALPACA" else None
     await run_in_threadpool(
         raise_if_blocked,
         request.ticker,
         request.side,
+        request.qty,
         request.intent,
+        (lambda: alpaca.get_positions()) if alpaca is not None else None,
         settings,
         clock,
     )
 
-    broker = _broker_for(broker_name, settings)
+    broker: ExecutionBroker = AlpacaBroker(alpaca) if alpaca else PaperBroker()
     order_id = str(uuid.uuid4())
     submitted_at = _utcnow_iso()
 

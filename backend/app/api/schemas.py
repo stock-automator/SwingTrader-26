@@ -557,8 +557,9 @@ class ExecutionOrderRequest(BaseModel):
     take_profit: float | None = Field(default=None, gt=0)
     intent: Literal["ENTRY", "EXIT"] | None = Field(
         default=None,
-        description="ENTRY is guarded, EXIT always goes through. "
-        "Unset: buy = ENTRY, sell = EXIT.",
+        description="ENTRY always guards. Otherwise a sell skips the guards "
+        "only if the Alpaca account holds at least qty long of the ticker; "
+        "every other order is guarded as an entry.",
     )
 
     @field_validator("ticker")

@@ -15,6 +15,8 @@ earnings/split lockout, or whose calendar lookup failed is rejected with a
 
 from __future__ import annotations
 
+from typing import Callable
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..config import Settings, get_settings
@@ -50,13 +52,19 @@ def _require_configured(client: AlpacaExecutionClient) -> None:
 def raise_if_blocked(
     ticker: str,
     side: str,
+    qty: float,
     intent: str | None,
+    held_positions: Callable[[], list[dict]] | None,
     settings: Settings,
     clock: MarketClock,
 ) -> None:
     """422 with every reason if `enforce_order_guards` blocks this order.
-    Shared by both order routes (`/execution/orders`, `/orders/submit`)."""
-    resolved = intent_for(side, intent)
+    Shared by both order routes (`/execution/orders`, `/orders/submit`).
+    An explicit `intent="ENTRY"` always guards; `"EXIT"` is only honoured
+    when `intent_for` proves it from `held_positions`."""
+    resolved = (
+        "ENTRY" if intent == "ENTRY" else intent_for(ticker, side, qty, held_positions)
+    )
     result = enforce_order_guards(ticker, resolved, settings, clock)
     if not result.allowed:
         raise HTTPException(
@@ -74,7 +82,15 @@ def submit_order(
 ) -> dict:
     """Places a MARKET, LIMIT, or BRACKET paper order."""
     _require_configured(client)
-    raise_if_blocked(request.ticker, request.side, request.intent, settings, clock)
+    raise_if_blocked(
+        request.ticker,
+        request.side,
+        request.qty,
+        request.intent,
+        client.get_positions,
+        settings,
+        clock,
+    )
 
     try:
         if request.order_type == "MARKET":

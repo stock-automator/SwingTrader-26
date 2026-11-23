@@ -3,8 +3,10 @@ Order-dispatch safety guards, run by every order route immediately before
 an order reaches a broker (`api/execution.py`, `api/orders.py`).
 
 `enforce_order_guards` is the single entry point. An EXIT always passes and
-makes no lookups - a guard must never stop risk coming *off*. An ENTRY must
-pass both gates, and fails closed if either cannot be checked:
+makes no lookups - a guard must never stop risk coming *off*. `intent_for`
+decides which an order is: only a sell of a long the account holds is an
+EXIT, never on the caller's say-so. An ENTRY must pass both gates, and fails
+closed if either cannot be checked:
 
 - Session: the Alpaca trading calendar (`execution.market_clock`) must
   report a REGULAR session - holidays, weekends and the time after a
@@ -19,7 +21,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 import pandas as pd
 
@@ -105,9 +107,31 @@ class GuardResult:
         return {"allowed": self.allowed, "reasons": self.reasons}
 
 
-def intent_for(side: str, intent: OrderIntent | None) -> OrderIntent:
-    """Explicit `intent`, else buy = ENTRY and sell = EXIT."""
-    return intent or ("ENTRY" if side.lower() == "buy" else "EXIT")
+def intent_for(
+    ticker: str,
+    side: str,
+    qty: float,
+    held_positions: Callable[[], list[dict]] | None,
+) -> OrderIntent:
+    """EXIT only for a sell the account can prove reduces a long: it holds
+    at least `qty` long of `ticker` per `held_positions()` (Alpaca's
+    `get_positions` shape). Everything else is an ENTRY - every buy, a sell
+    with no position source (PAPER keeps none), an unheld, oversized or
+    short-side sell, and a sell whose position lookup fails."""
+    if side.lower() != "sell" or held_positions is None:
+        return "ENTRY"
+    try:
+        positions = held_positions()
+    except Exception as exc:  # fail closed: an unproven exit is an entry
+        log.warning("order guard: position lookup failed for %s: %s", ticker, exc)
+        return "ENTRY"
+    symbol = ticker.upper()
+    held = sum(
+        float(p.get("qty") or 0)
+        for p in positions
+        if str(p.get("symbol", "")).upper() == symbol and p.get("side") == "long"
+    )
+    return "EXIT" if held >= qty > 0 else "ENTRY"
 
 
 def _session_reasons(
