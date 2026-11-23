@@ -148,6 +148,20 @@ class FakeSdk:
         return FakeSdk.activities[start : start + size]  # noqa: E203
 
 
+@pytest.fixture(autouse=True)
+def _frozen_clock(monkeypatch):
+    """Jobs and endpoints build the report for "now"; pin it to SAT_0900 so
+    the expected week doesn't depend on the day the suite runs."""
+    from backend.app.reports import weekly
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return SAT_0900.astimezone(tz) if tz else SAT_0900.replace(tzinfo=None)
+
+    monkeypatch.setattr(weekly, "datetime", _Frozen)
+
+
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     monkeypatch.setenv("SCANS_DB_PATH", str(tmp_path / "f5.duckdb"))
@@ -227,7 +241,7 @@ def _fills_df(rows) -> pd.DataFrame:
     cols = ["activity_id", "order_id", "parent_order_id", "leg", "symbol"]
     cols += ["side", "qty", "price", "filled_at"]
     df = pd.DataFrame(rows, columns=cols)
-    df["filled_at"] = pd.to_datetime(df["filled_at"], utc=True)
+    df["filled_at"] = pd.to_datetime(df["filled_at"], utc=True, format="ISO8601")
     df["ingested_at"] = pd.Timestamp("2026-11-21T09:00:00Z")
     return df
 
