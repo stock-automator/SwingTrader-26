@@ -145,3 +145,103 @@ def test_trend_sma_warms_up_before_the_window():
         start=df.index[25],
     )
     assert len(res.trades) == 1
+
+
+# --------------------------------------------------------------------------
+# scripts/run_improvements.py: build-only choice, keep rule, smoke run
+# --------------------------------------------------------------------------
+
+
+def stats(vs=0.0, pf=1.0, dd=-20.0, **extra):
+    base = {
+        "vs_spy_pct": vs,
+        "profit_factor": pf,
+        "win_rate_pct": 40.0,
+        "payoff": 1.5,
+        "max_drawdown_pct": dd,
+        "trades": 100,
+        "positive_years_pct": 50.0,
+        "positive_regimes_pct": 50.0,
+    }
+    return {**base, **extra}
+
+
+def cand(label, build, test):
+    return {"label": label, "build": build, "test": test}
+
+
+def test_build_composite_ignores_test_period():
+    from scripts.run_improvements import build_composite
+
+    a = cand("a", stats(vs=10.0, pf=1.3), stats(vs=-50.0))
+    b = cand("b", stats(vs=0.0, pf=1.1), stats(vs=50.0))
+    scores = build_composite([a, b])
+    assert scores[0] > scores[1]
+    a["test"], b["test"] = b["test"], a["test"]
+    assert build_composite([a, b]) == scores
+
+
+def test_decide_keeps_build_winner_only_if_test_holds():
+    from scripts.run_improvements import decide
+
+    base = cand("baseline", stats(vs=0.0), stats(vs=-30.0, dd=-20.0))
+    better = cand("x", stats(vs=10.0, pf=1.3), stats(vs=-25.0, dd=-18.0))
+    worse = cand("y", stats(vs=-5.0, pf=0.9), stats(vs=99.0, dd=-1.0))
+    out = decide([base, better, worse])
+    assert out["chosen"] == "x" and out["kept"] is True
+    # The build winner is chosen even when another candidate tests better.
+    better["test"] = stats(vs=-31.0, dd=-18.0)
+    out = decide([base, better, worse])
+    assert out["chosen"] == "x" and out["kept"] is False
+    better["test"] = stats(vs=-25.0, dd=-21.0)  # deeper test drawdown
+    assert decide([base, better, worse])["kept"] is False
+
+
+def test_decide_keeps_nothing_when_baseline_wins_build():
+    from scripts.run_improvements import decide
+
+    base = cand("baseline", stats(vs=10.0, pf=1.3), stats())
+    other = cand("x", stats(vs=0.0, pf=1.0), stats(vs=50.0))
+    out = decide([base, other])
+    assert out["chosen"] is None and out["kept"] is False
+
+
+def test_candidates_are_long_only_and_at_most_four_each():
+    from scripts.run_improvements import CANDIDATES
+
+    assert set(CANDIDATES) >= {"zscore_mean_reversion", "supertrend_psar"}
+    for name, cands in CANDIDATES.items():
+        assert 1 <= len(cands) <= 4
+        for c in cands:
+            assert not c.get("config", {}).get("allow_shorts", False)
+
+
+def test_run_improvements_script_smoke(tmp_path):
+    from scripts.run_improvements import main
+    from tests.test_portfolio_scorecard_c3 import random_walk_universe
+
+    raw = random_walk_universe(tmp_path)
+    universe = tmp_path / "universe.json"
+    universe.write_text('{"symbols": ["AAA", "BBB"]}')
+    md, js = tmp_path / "imp.md", tmp_path / "imp.json"
+    payload = main(
+        [
+            "--data-dir",
+            str(raw),
+            "--universe",
+            str(universe),
+            "--markdown",
+            str(md),
+            "--json",
+            str(js),
+            "--strategies",
+            "supertrend_psar",
+            "--processes",
+            "1",
+        ]
+    )
+    rows = payload["strategies"]["supertrend_psar"]["rows"]
+    assert rows[0]["label"] == "baseline" and len(rows) >= 2
+    assert all("build_composite" in r for r in rows)
+    text = md.read_text()
+    assert "### supertrend_psar" in text and "\n\n| Candidate |" in text
