@@ -15,16 +15,22 @@ Gate 1 defaults in `PortfolioConfig`):
 - stop and target are checked on each bar's high/low, stop first when
   both are touched; a gap through a level fills at the open;
 - an opposite signal exits at the next open; `time_stop_days` trading days
-  after the fill the position exits at that close;
-- shorts (`allow_shorts`) reserve their notional as collateral, so cash is
-  never negative and nothing is leveraged; borrow cost is not modelled.
+  after the fill the position exits at that close, or at the ticker's next
+  open if it has no bar that day;
+- shorts (`allow_shorts`) reserve their notional as collateral and nothing
+  is leveraged; borrow cost is not modelled. A short that gaps past twice
+  its entry can still lose more than its collateral: if equity or cash
+  ever closes below zero the run is flagged and opens nothing new.
   With `shorts_require_non_bull` a short is taken only if the SPY macro
   regime at the signal bar's close (the fill day's t-1) is known and not
   `BULL_TRENDING`.
 
 Signals are generated once per ticker over its full history (vectorised;
 the strategies are causal), so the daily loop only does fills and exits,
-and a window starting in 2023 still has its indicators warmed up.
+and a window starting in 2023 still has its indicators warmed up. A ticker
+whose close moves more than `SPIKE_MOVE` in a day and retraces at least
+half of it within `SPIKE_BARS` bars (a spliced bar, see learnings
+2026-11-23) is excluded and reported as "suspect data: TICKER".
 """
 
 from __future__ import annotations
@@ -53,6 +59,12 @@ GAP_THROUGH_LEVEL = "gap through stop/target"
 NO_BAR = "no bar on fill day"
 INVALID_LEVELS = "invalid stop/target"
 SIGNAL_ERROR = "signal errors (tickers)"
+EQUITY_BELOW_ZERO = "equity below zero"
+CASH_BELOW_ZERO = "cash below zero"
+
+#: `suspect_spike` thresholds.
+SPIKE_MOVE = 0.40
+SPIKE_BARS = 5
 
 _EPS = 1e-9
 
@@ -102,6 +114,7 @@ class SignalMatrix:
     sl_off: np.ndarray
     tp_off: np.ndarray
     errors: dict[str, str] = field(default_factory=dict)
+    suspect: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -115,6 +128,8 @@ class PortfolioResult:
     avg_invested_pct: float
     skipped: dict[str, int]
     strategy_name: str
+    #: Data and solvency warnings: "suspect data: T", "equity below zero".
+    flags: list[str] = field(default_factory=list)
 
 
 def _offsets(kind: np.ndarray, value: np.ndarray, close, atr) -> np.ndarray:
@@ -126,20 +141,41 @@ def _offsets(kind: np.ndarray, value: np.ndarray, close, atr) -> np.ndarray:
     )
 
 
+def suspect_spike(close: pd.Series) -> bool:
+    """True if a one-day close move beyond `SPIKE_MOVE` retraces at least
+    half of itself within the next `SPIKE_BARS` closes."""
+    c = close.astype(float)
+    prev = c.shift(1)
+    move = c / prev - 1
+    mid = (c + prev) / 2
+    ahead = c[::-1].rolling(SPIKE_BARS, min_periods=1)
+    fut_max = ahead.max()[::-1].shift(-1)
+    fut_min = ahead.min()[::-1].shift(-1)
+    down = (move < -SPIKE_MOVE) & (fut_max >= mid)
+    up = (move > SPIKE_MOVE) & (fut_min <= mid)
+    return bool((down | up).any())
+
+
 def prepare_signals(
     strategy: BaseStrategy, frames: dict[str, pd.DataFrame], calendar: pd.Index
 ) -> SignalMatrix:
     """Run `strategy` on each full frame and lay the result on `calendar`.
 
     A ticker whose signal generation raises is dropped and logged, never
-    silently: its error is kept in `SignalMatrix.errors`."""
+    silently: its error is kept in `SignalMatrix.errors`. A ticker failing
+    `suspect_spike` is dropped and listed in `SignalMatrix.suspect`."""
     cols: dict[str, list[pd.Series]] = {
         k: [] for k in ("open", "high", "low", "close", "signal", "sl", "tp")
     }
     tickers: list[str] = []
     errors: dict[str, str] = {}
+    suspect: list[str] = []
     for ticker in sorted(frames):
         df = frames[ticker]
+        if suspect_spike(df["Close"]):
+            suspect.append(ticker)
+            logger.warning("%s: suspect data (reverting spike), excluded", ticker)
+            continue
         try:
             out = strategy.generate_signals(df)
             BaseStrategy.validate_output(out)
@@ -199,6 +235,7 @@ def prepare_signals(
         sl_off=matrix("sl"),
         tp_off=matrix("tp"),
         errors=errors,
+        suspect=suspect,
     )
 
 
@@ -217,6 +254,7 @@ class _Position:
     stop: float
     target: float
     entry_fees: float
+    time_due: bool = False
 
     @property
     def risk(self) -> float:
@@ -281,6 +319,8 @@ def run_portfolio_backtest(
     positions: dict[int, _Position] = {}
     trades: list[dict] = []
     skipped: dict[str, int] = {}
+    flags = [f"suspect data: {t}" for t in prepared.suspect]
+    halted = False
     if prepared.errors:
         skipped[SIGNAL_ERROR] = len(prepared.errors)
     equity = np.empty(T)
@@ -324,17 +364,23 @@ def run_portfolio_backtest(
 
     for k in range(T):
         if k > 0:
-            # 1. Opposite-signal exits at the open.
-            if config.exit_on_opposite_signal:
-                for p in list(positions.values()):
-                    o = O[k, p.col]
-                    if S[k - 1, p.col] == -p.side and not math.isnan(o):
-                        close_position(p, k, o, "signal")
+            # 1. Overdue time stops, then opposite-signal exits, at the open.
+            for p in list(positions.values()):
+                o = O[k, p.col]
+                if math.isnan(o):
+                    continue
+                if p.time_due:
+                    close_position(p, k, o, "time")
+                elif config.exit_on_opposite_signal and S[k - 1, p.col] == -p.side:
+                    close_position(p, k, o, "signal")
 
             # 2. Entries from yesterday's signals, best reward:risk first.
             sig = S[k - 1]
             want = (sig == 1) | ((sig == -1) & config.allow_shorts)
             cand = np.flatnonzero(want & ~held)
+            if halted:
+                bump(EQUITY_BELOW_ZERO, len(cand))
+                cand = cand[:0]
             if len(cand):
                 if not short_ok[k - 1]:
                     blocked = sig[cand] == -1
@@ -418,8 +464,11 @@ def run_portfolio_backtest(
             c = C[k, p.col]
             if k == T - 1:
                 close_position(p, k, M[k, p.col], "end")
-            elif k - p.entry_k >= config.time_stop_days and not math.isnan(c):
-                close_position(p, k, c, "time")
+            elif k - p.entry_k >= config.time_stop_days:
+                if math.isnan(c):
+                    p.time_due = True  # no bar today: exit at its next open
+                else:
+                    close_position(p, k, c, "time")
 
         # 5. Mark to market.
         gross = 0.0
@@ -432,6 +481,11 @@ def run_portfolio_backtest(
         cash_curve[k] = cash
         invested[k] = gross / value if value > 0 else 0.0
         equity_prev = value
+        for bad, label in ((value, EQUITY_BELOW_ZERO), (cash, CASH_BELOW_ZERO)):
+            if bad < -_EPS and label not in flags:
+                flags.append(label)
+                logger.warning("%s: %s on %s", strategy.name, label, index[k].date())
+        halted = halted or value <= 0 or cash < -_EPS
 
     trades_df = pd.DataFrame(
         trades,
@@ -464,4 +518,5 @@ def run_portfolio_backtest(
         avg_invested_pct=float(invested.mean() * 100),
         skipped=skipped,
         strategy_name=strategy.name,
+        flags=flags,
     )
