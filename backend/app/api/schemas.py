@@ -555,6 +555,11 @@ class ExecutionOrderRequest(BaseModel):
     limit_price: float | None = Field(default=None, gt=0)
     stop_loss: float | None = Field(default=None, gt=0)
     take_profit: float | None = Field(default=None, gt=0)
+    intent: Literal["ENTRY", "EXIT"] | None = Field(
+        default=None,
+        description="ENTRY is guarded, EXIT always goes through. "
+        "Unset: buy = ENTRY, sell = EXIT.",
+    )
 
     @field_validator("ticker")
     @classmethod

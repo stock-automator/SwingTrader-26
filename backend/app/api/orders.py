@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -37,6 +37,8 @@ from ..execution.broker import (
     ExecutionBroker,
     PaperBroker,
 )
+from ..execution.market_clock import MarketClock, get_market_clock
+from .execution import raise_if_blocked
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +61,11 @@ class OrderSubmitRequest(BaseModel):
             "for broker='PAPER' with order_type='MARKET'. Ignored by "
             "broker='ALPACA', which prices its own fill."
         ),
+    )
+    intent: Literal["ENTRY", "EXIT"] | None = Field(
+        default=None,
+        description="ENTRY is guarded, EXIT always goes through. "
+        "Unset: buy = ENTRY, sell = EXIT.",
     )
 
 
@@ -218,10 +225,14 @@ def _mark_cancelled(order_id: str) -> None:
 
 @router.post("/submit", response_model=RoutedOrderResponse)
 async def submit_order(
-    request: OrderSubmitRequest, settings: Settings = Depends(get_settings)
+    request: OrderSubmitRequest,
+    settings: Settings = Depends(get_settings),
+    clock: MarketClock = Depends(get_market_clock),
 ) -> dict:
     """Routes one order through `PaperBroker` or `AlpacaBroker` and
-    persists the outcome - filled, rejected, or (Alpaca only) pending."""
+    persists the outcome - filled, rejected, or (Alpaca only) pending.
+    A blocked ENTRY (`execution.guards`) is a 422 and never reaches the
+    broker or the order table."""
     broker_name = request.broker.upper()
     if broker_name not in _VALID_BROKERS:
         raise HTTPException(
@@ -236,6 +247,15 @@ async def submit_order(
             status_code=422,
             detail="reference_price is required for a PAPER MARKET order",
         )
+
+    await run_in_threadpool(
+        raise_if_blocked,
+        request.ticker,
+        request.side,
+        request.intent,
+        settings,
+        clock,
+    )
 
     broker = _broker_for(broker_name, settings)
     order_id = str(uuid.uuid4())

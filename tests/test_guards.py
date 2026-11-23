@@ -1,78 +1,11 @@
-"""Unit tests for `execution.guards` - session clock and earnings/split
-lockout, independent of the FastAPI wiring (see `test_execution_api.py`'s
-`TestDispatchGuards` for that)."""
-
-from datetime import datetime
+"""Unit tests for `execution.guards.EarningsLockoutGuard`, independent of the
+FastAPI wiring. Session checks live in `test_market_clock.py` and
+`enforce_order_guards` in `test_order_guards_f1.py` (batch 02, F1)."""
 
 import pandas as pd
 import pytest
 
-from backend.app.execution.guards import (
-    SESSION_AFTER_HOURS,
-    SESSION_CLOSED,
-    SESSION_PRE_MARKET,
-    SESSION_REGULAR,
-    EarningsLockoutGuard,
-    MarketSessionGuard,
-    check_order_guards,
-)
-
-# All fixed moments below are a known Wednesday/Saturday in Eastern time.
-_WEDNESDAY = datetime(2026, 9, 16)
-_SATURDAY = datetime(2026, 9, 19)
-
-
-class TestMarketSessionGuard:
-    def test_regular_session(self):
-        guard = MarketSessionGuard()
-        assert guard.current_session(_WEDNESDAY.replace(hour=10)) == SESSION_REGULAR
-
-    def test_pre_market(self):
-        guard = MarketSessionGuard()
-        assert guard.current_session(_WEDNESDAY.replace(hour=5)) == SESSION_PRE_MARKET
-
-    def test_after_hours(self):
-        guard = MarketSessionGuard()
-        assert guard.current_session(_WEDNESDAY.replace(hour=17)) == SESSION_AFTER_HOURS
-
-    def test_overnight_is_closed(self):
-        guard = MarketSessionGuard()
-        assert guard.current_session(_WEDNESDAY.replace(hour=1)) == SESSION_CLOSED
-
-    def test_weekend_is_closed(self):
-        guard = MarketSessionGuard()
-        assert guard.current_session(_SATURDAY.replace(hour=10)) == SESSION_CLOSED
-
-    def test_holiday_is_closed(self):
-        holiday = pd.Timestamp(_WEDNESDAY.date())
-        guard = MarketSessionGuard(holidays=frozenset({holiday}))
-        assert guard.current_session(_WEDNESDAY.replace(hour=10)) == SESSION_CLOSED
-
-    def test_regular_session_allows_dispatch(self):
-        allowed, reason = MarketSessionGuard().allows_dispatch(
-            _WEDNESDAY.replace(hour=10)
-        )
-        assert allowed is True
-        assert reason is None
-
-    def test_closed_blocks_dispatch(self):
-        allowed, reason = MarketSessionGuard().allows_dispatch(_SATURDAY)
-        assert allowed is False
-        assert "closed" in reason.lower()
-
-    def test_extended_hours_blocked_by_default(self):
-        allowed, reason = MarketSessionGuard().allows_dispatch(
-            _WEDNESDAY.replace(hour=5)
-        )
-        assert allowed is False
-        assert "extended-hours" in reason.lower() or "pre_market" in reason.lower()
-
-    def test_extended_hours_allowed_when_opted_in(self):
-        allowed, reason = MarketSessionGuard(allow_extended_hours=True).allows_dispatch(
-            _WEDNESDAY.replace(hour=5)
-        )
-        assert allowed is True
-        assert reason is not None  # still flagged as illiquid, just not blocked
+from backend.app.execution.guards import EarningsLockoutGuard
 
 
 class TestEarningsLockoutGuard:
@@ -123,21 +56,3 @@ class TestEarningsLockoutGuard:
         as_of = pd.Timestamp("2026-09-16 10:00", tz="America/New_York")
         blocked, _ = guard.is_blocked(as_of, [pd.Timestamp("2026-09-17")])
         assert blocked is True
-
-
-class TestCheckOrderGuards:
-    def test_both_gates_pass(self):
-        result = check_order_guards(
-            pd.Timestamp("2026-09-16 10:00"),
-            earnings_dates=[pd.Timestamp("2026-01-01")],
-        )
-        assert result.allowed is True
-        assert result.reasons == []
-
-    def test_session_and_earnings_reasons_both_reported(self):
-        result = check_order_guards(
-            pd.Timestamp("2026-09-19 10:00"),  # Saturday
-            earnings_dates=[pd.Timestamp("2026-09-19")],
-        )
-        assert result.allowed is False
-        assert len(result.reasons) == 2

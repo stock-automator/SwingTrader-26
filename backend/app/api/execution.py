@@ -7,28 +7,20 @@ underlying SDK client is always paper (`execution/alpaca_client.py`
 hardcodes `paper=True`); there is no setting anywhere that makes this
 endpoint place a live order.
 
-`submit_order` also runs `execution.guards.check_order_guards` first (unless
-`Settings.execution_guards_enabled` is off): a closed/illiquid-session
-dispatch or one landing inside an earnings/split lockout window is rejected
-with a 422 rather than sent to Alpaca, regardless of whether the account is
-paper or (in the future) live.
+`submit_order` always runs `execution.guards.enforce_order_guards` first: a
+new ENTRY outside the regular session (per Alpaca's calendar), inside an
+earnings/split lockout, or whose calendar lookup failed is rejected with a
+422 and never sent to Alpaca. An EXIT always goes through.
 """
 
 from __future__ import annotations
 
-import logging
-
-import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..config import Settings, get_settings
-from ..data.loader import DataUnavailableError, fetch_earnings_dates, fetch_stock_splits
 from ..execution.alpaca_client import AlpacaExecutionClient, AlpacaNotConfiguredError
-from ..execution.guards import (
-    EarningsLockoutGuard,
-    MarketSessionGuard,
-    check_order_guards,
-)
+from ..execution.guards import enforce_order_guards, intent_for
+from ..execution.market_clock import MarketClock, get_market_clock
 from .schemas import (
     AlpacaAccountResponse,
     CloseAllPositionsRequest,
@@ -38,8 +30,6 @@ from .schemas import (
     PortfolioHistoryResponse,
     PositionsResponse,
 )
-
-log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/execution", tags=["execution"])
 
@@ -57,48 +47,21 @@ def _require_configured(client: AlpacaExecutionClient) -> None:
         )
 
 
-def _current_moment() -> pd.Timestamp:
-    """Wall-clock "now", Eastern - its own function so tests can monkeypatch
-    a fixed moment instead of depending on whatever time the suite runs at."""
-    return pd.Timestamp.now(tz="America/New_York")
-
-
-def _enforce_dispatch_guards(ticker: str, settings: Settings) -> None:
-    """Raises 422 if `execution.guards.check_order_guards` rejects dispatching
-    `ticker` right now. No-ops entirely if guards are disabled via settings."""
-    if not settings.execution_guards_enabled:
-        return
-
-    earnings_dates: list = []
-    split_dates: list = []
-    try:
-        earnings_dates = fetch_earnings_dates(ticker)
-    except DataUnavailableError as exc:
-        log.warning(
-            "execution guard: earnings calendar unavailable for %s: %s", ticker, exc
-        )
-    try:
-        split_dates = fetch_stock_splits(ticker)
-    except DataUnavailableError as exc:
-        log.warning(
-            "execution guard: split history unavailable for %s: %s", ticker, exc
-        )
-
-    result = check_order_guards(
-        _current_moment(),
-        earnings_dates=earnings_dates,
-        split_dates=split_dates,
-        session_guard=MarketSessionGuard(
-            allow_extended_hours=settings.execution_allow_extended_hours
-        ),
-        earnings_guard=EarningsLockoutGuard(
-            lockout_hours=settings.earnings_lockout_hours
-        ),
-    )
+def raise_if_blocked(
+    ticker: str,
+    side: str,
+    intent: str | None,
+    settings: Settings,
+    clock: MarketClock,
+) -> None:
+    """422 with every reason if `enforce_order_guards` blocks this order.
+    Shared by both order routes (`/execution/orders`, `/orders/submit`)."""
+    resolved = intent_for(side, intent)
+    result = enforce_order_guards(ticker, resolved, settings, clock)
     if not result.allowed:
         raise HTTPException(
             status_code=422,
-            detail="Order dispatch blocked: " + "; ".join(result.reasons),
+            detail=f"Order blocked ({resolved}): " + " ".join(result.reasons),
         )
 
 
@@ -107,10 +70,11 @@ def submit_order(
     request: ExecutionOrderRequest,
     client: AlpacaExecutionClient = Depends(_client),
     settings: Settings = Depends(get_settings),
+    clock: MarketClock = Depends(get_market_clock),
 ) -> dict:
     """Places a MARKET, LIMIT, or BRACKET paper order."""
     _require_configured(client)
-    _enforce_dispatch_guards(request.ticker, settings)
+    raise_if_blocked(request.ticker, request.side, request.intent, settings, clock)
 
     try:
         if request.order_type == "MARKET":
@@ -150,7 +114,7 @@ def close_all_positions(
     cancels every open order. Requires `{"confirm": true}` - this is a
     destructive, account-wide action even on a paper account.
 
-    Deliberately does not run `_enforce_dispatch_guards`: the session/
+    Deliberately does not run the order guards: the session/
     earnings guards exist to stop new risk from going *on*, and must never
     be able to block an emergency de-risking action from coming *off*."""
     if not request.confirm:

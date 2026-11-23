@@ -137,20 +137,20 @@ class Settings:
         alpaca_api_key: Alpaca paper-trading API key. Unset means the
             execution endpoints return 503 rather than silently no-opping.
         alpaca_api_secret: Alpaca paper-trading API secret.
-        execution_guards_enabled: Whether `POST /api/v1/execution/orders`
-            runs `execution.guards.check_order_guards` before dispatching.
-            Off only for local/paper testing outside market hours - leave
-            on in any deployment a real decision is made from.
-        execution_allow_extended_hours: Whether the session guard treats
-            pre-market/after-hours as dispatchable (still noisy/illiquid) or
-            blocks them like a closed market. See `execution.guards.
-            MarketSessionGuard`.
+        execution_allow_extended_hours: Whether a new entry may go out in
+            Alpaca's pre-market/after-hours session (still noisy/illiquid)
+            or is blocked like a closed market. See `execution.guards.
+            enforce_order_guards`.
         earnings_lockout_hours: Hours before/after a scheduled earnings
             release or stock split during which new entries are blocked.
             See `execution.guards.EarningsLockoutGuard`.
+
+    Secret fields (API keys, tokens, webhook URLs) are `repr=False`, so
+    logging or printing a `Settings` never shows them; reading the attribute
+    still returns the real value.
     """
 
-    finnhub_api_key: str | None = None
+    finnhub_api_key: str | None = field(default=None, repr=False)
     data_dir: Path = Path("data/raw")
     allow_downloads: bool = True
     cors_origins: tuple[str, ...] = field(default=DEFAULT_CORS_ORIGINS)
@@ -164,14 +164,13 @@ class Settings:
     ws_poll_seconds: float = 15.0
     max_backtest_tickers: int = 10
     journal_path: Path = Path("data/trades_live.csv")
-    telegram_bot_token: str | None = None
+    telegram_bot_token: str | None = field(default=None, repr=False)
     telegram_chat_id: str | None = None
-    discord_webhook_url: str | None = None
-    generic_webhook_url: str | None = None
+    discord_webhook_url: str | None = field(default=None, repr=False)
+    generic_webhook_url: str | None = field(default=None, repr=False)
     alert_config_path: Path = Path("config/alerts_channels.json")
-    alpaca_api_key: str | None = None
-    alpaca_api_secret: str | None = None
-    execution_guards_enabled: bool = True
+    alpaca_api_key: str | None = field(default=None, repr=False)
+    alpaca_api_secret: str | None = field(default=None, repr=False)
     execution_allow_extended_hours: bool = False
     earnings_lockout_hours: int = 48
 
@@ -219,7 +218,6 @@ def get_settings() -> Settings:
         ),
         alpaca_api_key=os.environ.get("ALPACA_API_KEY") or None,
         alpaca_api_secret=os.environ.get("ALPACA_API_SECRET") or None,
-        execution_guards_enabled=_env_bool("EXECUTION_GUARDS_ENABLED", True),
         execution_allow_extended_hours=_env_bool(
             "EXECUTION_ALLOW_EXTENDED_HOURS", False
         ),

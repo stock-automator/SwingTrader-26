@@ -1,131 +1,41 @@
 """
-Order-dispatch safety guards.
+Order-dispatch safety guards, run by every order route immediately before
+an order reaches a broker (`api/execution.py`, `api/orders.py`).
 
-Two independent gates, both meant to run immediately before an order is
-sent to the broker (`api/execution.py`), not at screening time:
+`enforce_order_guards` is the single entry point. An EXIT always passes and
+makes no lookups - a guard must never stop risk coming *off*. An ENTRY must
+pass both gates, and fails closed if either cannot be checked:
 
-`MarketSessionGuard`
-    Refuses to dispatch while the US market is closed, and by default
-    refuses illiquid pre-market/after-hours sessions too - a paper fill
-    outside regular hours can look fine in a backtest and still be
-    unrepresentative of what a live order would actually get filled at.
-
-`EarningsLockoutGuard`
-    Refuses to dispatch a new entry within `lockout_hours` (default 48) of
-    a scheduled earnings release *or* a stock split, in either direction
-    (before or after) - a swing strategy fit on ordinary price action has
-    no edge pricing in an event that can gap the stock overnight.
-
-Both guards fail closed on their own clock/calendar math and fail *open* on
-missing external data (no earnings/split calendar available for a ticker
-does not block the order - see `EarningsLockoutGuard.is_blocked`) - the same
-"unscoreable is not blocked" convention `quant.screener.CatalystFilter`
-already uses for the screening-time earnings filter this guard complements.
+- Session: the Alpaca trading calendar (`execution.market_clock`) must
+  report a REGULAR session - holidays, weekends and the time after a
+  half-day's early close are all closed. A calendar error blocks the entry.
+- `EarningsLockoutGuard`: no earnings release or stock split within
+  `lockout_hours` (default 48) either side. A lookup error blocks the entry;
+  an empty calendar (e.g. an ETF) is "nothing to block on".
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 
-#: Every session boundary below is Eastern - the US market's own clock -
-#: regardless of what timezone the server or caller runs in.
-_EASTERN = ZoneInfo("America/New_York")
+from ..data.loader import fetch_earnings_dates, fetch_stock_splits
 
-_PRE_MARKET_OPEN = time(4, 0)
-_REGULAR_OPEN = time(9, 30)
-_REGULAR_CLOSE = time(16, 0)
-_AFTER_HOURS_CLOSE = time(20, 0)
+if TYPE_CHECKING:
+    from ..config import Settings
+    from .market_clock import MarketClock
 
-SESSION_CLOSED = "CLOSED"
-SESSION_PRE_MARKET = "PRE_MARKET"
-SESSION_REGULAR = "REGULAR"
-SESSION_AFTER_HOURS = "AFTER_HOURS"
+OrderIntent = Literal["ENTRY", "EXIT"]
+
+log = logging.getLogger(__name__)
 
 #: Suppress a new entry within this many hours of a scheduled earnings
 #: release or stock split, on either side of it.
 DEFAULT_EARNINGS_LOCKOUT_HOURS = 48
-
-
-def _as_eastern(when: datetime) -> datetime:
-    """Normalize `when` to an aware Eastern-time datetime.
-
-    A naive `datetime` is assumed to already be Eastern (the convention
-    every caller in this module follows) rather than the host's local zone -
-    guessing the host's zone would make the same test non-deterministic
-    across machines.
-    """
-    if when.tzinfo is None:
-        return when.replace(tzinfo=_EASTERN)
-    return when.astimezone(_EASTERN)
-
-
-@dataclass(frozen=True)
-class MarketSessionGuard:
-    """US equity market clock, approximated with weekday + time-of-day.
-
-    Deliberately has no real NYSE holiday calendar wired in (the same
-    trade-off `quant.screener.CatalystFilter` makes for trading-day
-    counting) - a market holiday that falls on a weekday will read as
-    `REGULAR` here. Pass `holidays` with the current year's NYSE closures if
-    that gap matters for your deployment.
-
-    Args:
-        allow_extended_hours: When `True`, pre-market and after-hours count
-            as dispatchable sessions (still flagged in the returned reason
-            text as illiquid). `False` (the default) only allows `REGULAR`.
-        holidays: Calendar dates (Eastern) the market is fully closed on
-            despite being a weekday.
-    """
-
-    allow_extended_hours: bool = False
-    holidays: frozenset[pd.Timestamp] = field(default_factory=frozenset)
-
-    def current_session(self, now: datetime | None = None) -> str:
-        """Which of `SESSION_*` `now` (Eastern, defaults to wall-clock
-        `datetime.now()`) falls into."""
-        moment = _as_eastern(now or datetime.now(_EASTERN))
-
-        if moment.weekday() >= 5:  # Saturday/Sunday
-            return SESSION_CLOSED
-        if pd.Timestamp(moment.date()) in self.holidays:
-            return SESSION_CLOSED
-
-        clock = moment.time()
-        if clock < _PRE_MARKET_OPEN or clock >= _AFTER_HOURS_CLOSE:
-            return SESSION_CLOSED
-        if clock < _REGULAR_OPEN:
-            return SESSION_PRE_MARKET
-        if clock < _REGULAR_CLOSE:
-            return SESSION_REGULAR
-        return SESSION_AFTER_HOURS
-
-    def allows_dispatch(self, now: datetime | None = None) -> tuple[bool, str | None]:
-        """Whether an order may be dispatched right now.
-
-        Returns:
-            `(True, None)` if dispatch is allowed, else `(False, reason)`.
-        """
-        session = self.current_session(now)
-
-        if session == SESSION_CLOSED:
-            return False, "Market is closed - order dispatch is not allowed."
-        if session == SESSION_REGULAR:
-            return True, None
-
-        # PRE_MARKET or AFTER_HOURS
-        if self.allow_extended_hours:
-            return True, (
-                f"Dispatching during {session} - liquidity and spreads are "
-                "materially worse than regular hours."
-            )
-        return False, (
-            f"Market is in {session} - extended-hours dispatch is disabled "
-            "(allow_extended_hours=False)."
-        )
 
 
 @dataclass(frozen=True)
@@ -161,9 +71,9 @@ class EarningsLockoutGuard:
         """Whether an entry at `as_of` falls inside the lockout window of
         any date in `earnings_dates` or `split_dates`.
 
-        `None`/empty calendars are "nothing to check" (fail open), not "no
-        catalysts exist" - the caller could not fetch the calendar, which is
-        a data-availability gap, not a clean bill of health.
+        `None`/empty calendars mean nothing to block on. A calendar that
+        could not be fetched is the caller's problem: `enforce_order_guards`
+        fails closed on a lookup error before ever reaching this.
         """
         as_of = pd.Timestamp(as_of)
         if as_of.tzinfo is not None:
@@ -186,7 +96,7 @@ class EarningsLockoutGuard:
 
 @dataclass(frozen=True)
 class GuardResult:
-    """Combined outcome of every guard `check_order_guards` ran."""
+    """Combined outcome of every guard `enforce_order_guards` ran."""
 
     allowed: bool
     reasons: list[str] = field(default_factory=list)
@@ -195,33 +105,63 @@ class GuardResult:
         return {"allowed": self.allowed, "reasons": self.reasons}
 
 
-def check_order_guards(
-    as_of: pd.Timestamp | datetime,
-    earnings_dates: list[pd.Timestamp] | None = None,
-    split_dates: list[pd.Timestamp] | None = None,
-    session_guard: MarketSessionGuard | None = None,
-    earnings_guard: EarningsLockoutGuard | None = None,
+def intent_for(side: str, intent: OrderIntent | None) -> OrderIntent:
+    """Explicit `intent`, else buy = ENTRY and sell = EXIT."""
+    return intent or ("ENTRY" if side.lower() == "buy" else "EXIT")
+
+
+def _session_reasons(
+    now: pd.Timestamp, settings: Settings, clock: MarketClock
+) -> list[str]:
+    try:
+        info = clock.session(now.to_pydatetime())
+    except Exception as exc:  # any calendar failure blocks a new entry
+        log.warning("order guard: market calendar unavailable: %s", exc)
+        return [
+            "Market calendar unavailable - new entries are blocked "
+            f"({type(exc).__name__})."
+        ]
+    if info.state == "REGULAR":
+        return []
+    if info.state == "EXTENDED" and settings.execution_allow_extended_hours:
+        return []
+    if info.state == "EXTENDED":
+        return [f"Market is in extended hours ({info.reason}) - entries blocked."]
+    return [f"Market is closed ({info.reason}) - entries blocked."]
+
+
+def _catalyst_dates(label: str, fetch, ticker: str) -> tuple[list, str | None]:
+    try:
+        return fetch(ticker), None
+    except Exception as exc:  # any lookup failure blocks a new entry
+        log.warning(
+            "order guard: %s calendar unavailable for %s: %s", label, ticker, exc
+        )
+        return (
+            [],
+            f"{label.capitalize()} calendar unavailable for {ticker} - entry blocked.",
+        )
+
+
+def enforce_order_guards(
+    ticker: str,
+    intent: OrderIntent,
+    settings: Settings,
+    clock: MarketClock,
 ) -> GuardResult:
-    """Run the session guard and the earnings/split lockout guard together.
+    """Run every dispatch guard for one order. EXIT is always allowed with
+    no lookups; ENTRY collects every failing reason, not just the first."""
+    if intent == "EXIT":
+        return GuardResult(allowed=True)
 
-    Session and catalyst checks are independent - both run regardless of
-    whether the other already failed, so a rejected order's `reasons` always
-    explains everything wrong with it, not just the first gate hit.
-    """
-    session_guard = session_guard or MarketSessionGuard()
-    earnings_guard = earnings_guard or EarningsLockoutGuard()
-    moment = pd.Timestamp(as_of)
+    now = pd.Timestamp.now(tz="America/New_York")
+    reasons = _session_reasons(now, settings, clock)
+    earnings, earnings_error = _catalyst_dates("earnings", fetch_earnings_dates, ticker)
+    splits, splits_error = _catalyst_dates("split", fetch_stock_splits, ticker)
+    reasons += [r for r in (earnings_error, splits_error) if r]
 
-    reasons: list[str] = []
-
-    session_ok, session_reason = session_guard.allows_dispatch(moment.to_pydatetime())
-    if not session_ok and session_reason:
-        reasons.append(session_reason)
-
-    blocked, catalyst_reason = earnings_guard.is_blocked(
-        moment, earnings_dates, split_dates
-    )
-    if blocked and catalyst_reason:
-        reasons.append(catalyst_reason)
-
-    return GuardResult(allowed=session_ok and not blocked, reasons=reasons)
+    guard = EarningsLockoutGuard(lockout_hours=settings.earnings_lockout_hours)
+    blocked, reason = guard.is_blocked(now, earnings, splits)
+    if blocked and reason:
+        reasons.append(reason)
+    return GuardResult(allowed=not reasons, reasons=reasons)
