@@ -248,6 +248,10 @@ class OrderTicketResponse(BaseModel):
     reward_risk_ratio: float
     tradable: bool
     note: str | None
+    fx_cost_usd: float
+    risk_gbp: float | None
+    notional_gbp: float | None
+    fx_note: str | None
 
 
 class OrderTicketsResponse(BaseModel):
