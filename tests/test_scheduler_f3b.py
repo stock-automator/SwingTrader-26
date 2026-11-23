@@ -41,13 +41,13 @@ CANNED_TEXT = "No trades today: canned.\n\nResearch only, paper trading."
 def _settings(tmp_path, **kw) -> Settings:
     data = tmp_path / "raw"
     data.mkdir(exist_ok=True)
-    watchlist = tmp_path / "watchlist.txt"
-    watchlist.write_text("AAA\nBBB\n")
+    universe = tmp_path / "universe.json"
+    universe.write_text(json.dumps({"symbols": ["AAA", "BBB"], "names": {}}))
     kw.setdefault("scheduler_enabled", False)
     return Settings(
         data_dir=data,
         allow_downloads=False,
-        watchlist_path=watchlist,
+        universe_path=universe,
         journal_path=tmp_path / "trades.csv",
         alert_config_path=tmp_path / "alerts_channels.json",
         **kw,

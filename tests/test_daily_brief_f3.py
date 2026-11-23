@@ -8,6 +8,7 @@ synthetic parquet files in `tmp_path`; Telegram HTTP is a fake `requests.post`.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from datetime import date, datetime
@@ -55,12 +56,12 @@ def _settings(tmp_path, last_day="2026-11-17", tickers=TICKERS, **kw) -> Setting
     data.mkdir(exist_ok=True)
     for i, ticker in enumerate([*tickers, "SPY"]):
         _bars(last_day, start=50.0 + i).to_parquet(data / f"{ticker}.parquet")
-    watchlist = tmp_path / "watchlist.txt"
-    watchlist.write_text("\n".join(tickers) + "\n")
+    universe = tmp_path / "universe.json"
+    universe.write_text(json.dumps({"symbols": list(tickers), "names": {}}))
     return Settings(
         data_dir=data,
         allow_downloads=False,
-        watchlist_path=watchlist,
+        universe_path=universe,
         journal_path=tmp_path / "trades.csv",
         alert_config_path=tmp_path / "alerts_channels.json",
         **kw,

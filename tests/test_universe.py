@@ -19,9 +19,9 @@ import backend.app.data.universe as universe_mod
 from backend.app.data.universe import (
     DENYLIST,
     UniverseManager,
-    UniverseSyncResult,
     sanitize_ticker,
 )
+from backend.app.quant.data.parquet_manager import ParquetSyncManager
 
 
 def _write_parquet(path: Path, rows: int = 5) -> None:
@@ -270,9 +270,10 @@ class TestSyncFallback:
         assert "NVDA" in symbols
         assert len(symbols) > 20
 
-    def test_sync_still_writes_a_result_when_network_is_unavailable(
+    def test_sync_keeps_previous_file_when_network_is_unavailable(
         self, manager, monkeypatch
     ):
+        """F4: any source falling back keeps the previous file byte-for-byte."""
         monkeypatch.setattr(
             pd,
             "read_html",
@@ -281,40 +282,55 @@ class TestSyncFallback:
             ),
         )
         manager.data_dir.mkdir(parents=True, exist_ok=True)
-        # Give a handful of the static-fallback names real data so the
-        # active list isn't empty after the broken-data purge.
-        for ticker in ("AAPL", "MSFT", "NVDA"):
-            _write_parquet(manager.data_dir / f"{ticker}.parquet")
+        _write_parquet(manager.data_dir / "AAPL.parquet")
+        previous = json.dumps(
+            {"symbols": ["AAPL"], "names": {"AAPL": "Apple Inc."}, "synced_at": "x"}
+        )
+        manager.config_path.write_text(previous)
 
-        result = manager.sync()
+        result = manager.sync().as_dict()
 
-        assert manager.config_path.exists()
-        assert isinstance(result, UniverseSyncResult)
-        assert result.source_counts["sp500"] > 50
-        assert result.source_counts["nasdaq100"] > 20
-        assert set(result.symbols) == {"AAPL", "MSFT", "NVDA"}
-
-        on_disk = json.loads(manager.config_path.read_text())
-        assert on_disk["symbols"] == result.symbols
-        assert on_disk["synced_at"] == result.synced_at
-        assert on_disk["source_counts"] == result.source_counts
+        assert result["kept_previous"] is True
+        assert set(result["source_status"].values()) == {"fallback"}
+        assert manager.config_path.read_text() == previous
 
 
 class TestReadRoundTrip:
-    def test_read_after_sync_matches(self, manager, monkeypatch):
-        monkeypatch.setattr(
-            pd,
-            "read_html",
-            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline")),
+    def test_read_after_live_sync_matches(self, manager, monkeypatch):
+        sp = pd.DataFrame(
+            {
+                "Symbol": [f"Z{i:03d}" for i in range(480)] + ["AAPL"],
+                "Security": [f"Zeta {i}" for i in range(480)] + ["Apple Inc."],
+            }
         )
+        ndx = [
+            pd.DataFrame(
+                {
+                    "Company": [f"Nova {i}" for i in range(95)],
+                    "Ticker": [f"N{i:03d}" for i in range(95)],
+                }
+            )
+        ]
+
+        def fake(url):
+            return [sp] if url == universe_mod._SP500_WIKI_URL else ndx
+
+        monkeypatch.setattr(UniverseManager, "_fetch_tables", staticmethod(fake))
+
+        def fake_sync_ticker(self, ticker, now=None):
+            _write_parquet(Path(self.data_dir) / f"{ticker}.parquet")
+
+        monkeypatch.setattr(ParquetSyncManager, "sync_ticker", fake_sync_ticker)
         manager.data_dir.mkdir(parents=True, exist_ok=True)
         _write_parquet(manager.data_dir / "AAPL.parquet")
 
         synced = manager.sync()
         read_back = manager.read()
 
+        assert synced.as_dict()["kept_previous"] is False
         assert read_back is not None
-        assert read_back.as_dict() == synced.as_dict()
+        assert read_back.symbols == synced.symbols
+        assert manager.config_path.exists()
 
     def test_read_returns_none_when_never_synced(self, manager):
         assert manager.read() is None

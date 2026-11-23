@@ -11,6 +11,7 @@ They are expected to change with the data: every new archive added to
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -18,7 +19,7 @@ import pandas as pd
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-WATCHLIST = REPO_ROOT / "config" / "watchlist.txt"
+UNIVERSE = REPO_ROOT / "config" / "universe.json"
 RAW_DIR = REPO_ROOT / "data" / "raw"
 DELISTED_DIR = REPO_ROOT / "data" / "delisted"
 
@@ -31,12 +32,7 @@ ARCHIVES = {
 
 
 def _watchlist() -> set[str]:
-    tickers = set()
-    for line in WATCHLIST.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            tickers.add(line.upper())
-    return tickers
+    return {s.strip().upper() for s in json.loads(UNIVERSE.read_text())["symbols"]}
 
 
 def _last_day(path: Path) -> date:

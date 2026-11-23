@@ -776,7 +776,7 @@ class TestScreenerWebSocket:
 
         fast_settings = Settings(
             allow_downloads=True,
-            watchlist_path=get_settings().watchlist_path,
+            universe_path=get_settings().universe_path,
             ws_poll_seconds=0.05,
         )
         import backend.app.api.screener as screener_module

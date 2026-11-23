@@ -3,6 +3,7 @@ ticket reads it cache-only."""
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from pathlib import Path
 
@@ -33,10 +34,10 @@ TICKET = {
 
 @pytest.fixture
 def client(tmp_path: Path):
-    watchlist = tmp_path / "watchlist.txt"
-    watchlist.write_text("AAPL\nMSFT\n")
+    universe = tmp_path / "universe.json"
+    universe.write_text(json.dumps({"symbols": ["AAPL", "MSFT"], "names": {}}))
     settings = Settings(
-        allow_downloads=False, data_dir=tmp_path, watchlist_path=watchlist
+        allow_downloads=False, data_dir=tmp_path, universe_path=universe
     )
     app.dependency_overrides[get_settings] = lambda: settings
     data_sync._job_state.in_progress = False
@@ -62,7 +63,9 @@ def test_f6_default_sync_includes_gbpusd(client, monkeypatch) -> None:
 
 
 def test_f6_default_sync_gbpusd_not_duplicated(client, tmp_path, monkeypatch) -> None:
-    (tmp_path / "watchlist.txt").write_text("AAPL\nGBPUSD=X\n")
+    (tmp_path / "universe.json").write_text(
+        json.dumps({"symbols": ["AAPL", "GBPUSD=X"], "names": {}})
+    )
     monkeypatch.setattr(data_sync, "_run_sync", lambda t, d: None)
     tickers = client.post("/api/v1/data/sync", json={}).json()["tickers"]
     assert tickers.count("GBPUSD=X") == 1

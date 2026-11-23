@@ -42,7 +42,7 @@ def client(tmp_path: Path) -> TestClient:
     settings = Settings(
         data_dir=data_dir,
         allow_downloads=False,
-        watchlist_path=Path("config/watchlist.txt"),
+        universe_path=Path("config/universe.json"),
         screener_max_tickers=750,
     )
     app.dependency_overrides[get_settings] = lambda: settings
