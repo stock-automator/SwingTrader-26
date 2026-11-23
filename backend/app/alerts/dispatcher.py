@@ -30,6 +30,11 @@ log = logging.getLogger(__name__)
 #: a request thread indefinitely.
 REQUEST_TIMEOUT_SECONDS = 5
 
+#: Telegram rejects a `sendMessage` text longer than this.
+TELEGRAM_MAX_CHARS = 4096
+#: Room kept in each split part for its "(i/n)\n" prefix.
+PART_PREFIX_RESERVE = 16
+
 
 @dataclass(frozen=True)
 class AlertMessage:
@@ -43,7 +48,9 @@ class AlertMessage:
 
 
 class TelegramAlertChannel:
-    """Posts to the Telegram Bot API's `sendMessage` endpoint."""
+    """Posts plain text (no `parse_mode`) to the Telegram Bot API's
+    `sendMessage` endpoint, so a ticker like `BRK_B` or a `*` in a note can
+    never make Telegram reject the message as malformed Markdown."""
 
     name = "telegram"
 
@@ -51,27 +58,66 @@ class TelegramAlertChannel:
         self.bot_token = bot_token
         self.chat_id = chat_id
 
+    def _post(self, text: str) -> None:
+        response = requests.post(
+            f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
+            json={"chat_id": self.chat_id, "text": text},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+
     def send(self, message: AlertMessage) -> None:
         """Raises `requests.RequestException` on a network failure, or
         `requests.HTTPError` on a non-2xx response."""
-        lines = [f"*{message.title}*", message.body]
+        lines = [message.title, message.body]
         if message.ticker:
             lines.insert(1, f"Ticker: {message.ticker}")
         if message.direction:
             lines.insert(2, f"Direction: {message.direction}")
         if message.url:
             lines.append(message.url)
+        self._post("\n".join(lines))
 
-        response = requests.post(
-            f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
-            json={
-                "chat_id": self.chat_id,
-                "text": "\n".join(lines),
-                "parse_mode": "Markdown",
-            },
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
+    def send_text(self, text: str) -> int:
+        """Send `text`, split on newlines into "(i/n)" parts that each fit
+        Telegram's limit. Returns the number of parts sent; raises like
+        `send` as soon as any part fails."""
+        parts = split_message(text)
+        for part in parts:
+            self._post(part)
+        return len(parts)
+
+
+def _spans(length: int, size: int) -> list[tuple[int, int]]:
+    return [(start, start + size) for start in range(0, length, size)]
+
+
+def split_message(text: str, limit: int = TELEGRAM_MAX_CHARS) -> list[str]:
+    """`text` as-is if it fits, else line-aligned chunks prefixed "(i/n)".
+
+    A single line longer than a chunk is hard-split, so nothing is dropped.
+    """
+    if len(text) <= limit:
+        return [text]
+    budget = limit - PART_PREFIX_RESERVE
+    pieces: list[str] = []
+    for line in text.split("\n"):
+        pieces.extend(line[start:end] for start, end in _spans(len(line), budget))
+        if not line:
+            pieces.append("")
+    chunks: list[str] = []
+    current: str | None = None
+    for piece in pieces:
+        if current is not None and len(current) + 1 + len(piece) <= budget:
+            current = f"{current}\n{piece}"
+        else:
+            if current is not None:
+                chunks.append(current)
+            current = piece
+    if current is not None:
+        chunks.append(current)
+    total = len(chunks)
+    return [f"({i}/{total})\n{chunk}" for i, chunk in enumerate(chunks, start=1)]
 
 
 class DiscordAlertChannel:
