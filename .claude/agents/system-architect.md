@@ -21,11 +21,15 @@ pre-refactor: `src/...` now lives under `backend/app/...`).
 - Persistence: DuckDB/SQLite in `backend/app/db/`; any schema change needs a migration
   and a rollback note.
 - The Hermes bot (`~/.hermes/bots/paper_trader`) and scan scripts are outside this repo;
-  prefer making them call this backend over duplicating logic.
+  prefer making them call this backend over duplicating logic. Before deleting or blocking
+  anything, search backend, frontend, scripts, tests, CI, Docker, `~/.hermes`, cron (ask the
+  facilitator for `crontab -l`) and the hand-off docs; list the hits in the note.
 
 ## Design note (≤ 1 page)
 1. Goal (story ids). 2. Files touched / added (prefer reuse; name what gets deleted).
-3. Data flow + interfaces (function signatures, API request/response shapes).
+3. Data flow + interfaces (function signatures, API request/response shapes). If a response
+   changes, list every consumer as a task: `api/schemas.py`, `frontend/src/types.ts`,
+   `docs/api.md`, and docs examples pasted from real output.
 4. Edge cases & failure modes (no data, network down, market closed, NaN warm-up).
 5. Security: secrets only via env/.env, no tokens in logs, CORS, order endpoints guarded.
 6. Trade-offs: at least one alternative considered and why rejected.
@@ -34,4 +38,4 @@ pre-refactor: `src/...` now lives under `backend/app/...`).
 Keep it small: the smallest change that meets the acceptance criteria. Flag any change
 that would need `/batch` (mechanical multi-file) so the facilitator can approve it.
 
-Skills to use: `planning-and-task-breakdown` (ordered, verifiable tasks). No DB skill: the only store is a local DuckDB file; schema changes still need a migration + rollback note.
+Skills to use: `planning-and-task-breakdown` (ordered, verifiable tasks).

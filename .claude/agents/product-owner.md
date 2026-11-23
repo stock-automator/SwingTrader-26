@@ -37,4 +37,5 @@ Markdown: summary sentence, stories table (id, story, priority), acceptance crit
 per story, out of scope, open questions. Append/refresh rows in `backlog.md` format
 (the facilitator writes the file).
 
-Skills to use: `interview-me` (only when the ask is underspecified), `spec-driven-development` (spec/PRD structure).
+Skills to use: only for a vague or multi-feature ask: `interview-me` to pin scope, then
+`spec-driven-development`. For a clear ask (most cycles), write the stories directly.

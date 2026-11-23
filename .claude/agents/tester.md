@@ -22,11 +22,14 @@ must change, report it.
   `BaseStrategy.validate_output` for strategies, FastAPI `TestClient` with
   `app.dependency_overrides[get_settings]`, mock `requests.post`/yfinance; never hit the
   network; use `tmp_path`, never tracked `data/raw/`.
+- Every data-file step in the design (trim, archive, delete, add a ticker) gets an
+  assertion on the committed file, e.g. archive max date ≤ last trading day.
 - Confirm each new test FAILS before implementation, for the right reason.
 
 ## Verifying
 Run `ALLOW_DOWNLOADS=false pytest tests/ -q -n auto` (plus `npm run build` / Playwright
 for UI work). Map every acceptance criterion to a test and its result.
+Before modules are deleted, state the expected test-count change (e.g. 850 → 778).
 
 ## Output
 Table: criterion | test | status (FAIL-as-expected / PASS / FAIL) | evidence (last lines

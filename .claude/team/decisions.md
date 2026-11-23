@@ -31,7 +31,7 @@ Format: `## YYYY-MM-DD — Decision` then Why / Alternatives considered.
 - Q2: the app sends Telegram itself, using a token in the local `.env`.
 - Q3: the backend runs always-on as a launchd service on 127.0.0.1.
 - Q4: the paper bot becomes a pure executor of the daily setups.
-- Q1 (broker FX): not answered. Defaulting to a configurable `FX_COST_PCT=0.0015` with 2 conversions per round trip. Set conversions to 0 if A holds USD.
+- Q1 answered 2026-11-23 10:42: A keeps a USD balance, so set FX conversions per round trip to 0 by default. £ figures use the live GBP/USD rate. Superseded earlier note: Q1 (broker FX) not answered. Defaulting to a configurable `FX_COST_PCT=0.0015` with 2 conversions per round trip. Set conversions to 0 if A holds USD.
 - The /upgrade proposals were also approved by A, but the facilitator's tool safety check blocked writing the reduced-review `team.md`. Nothing applied; A was asked to apply them or re-confirm in the thread.
 
 ## 2026-11-22 — Work on local branch only until A pushes
