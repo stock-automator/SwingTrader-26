@@ -271,6 +271,8 @@ stay in `.env`; logs go to `logs/`. To remove it:
 `launchctl bootout gui/$(id -u)/com.swingtrader.backend`, then delete
 `~/Library/LaunchAgents/com.swingtrader.backend.plist`.
 
+Cron runs `scripts/paper_executor.py` at 14:35 UK on weekdays; it places the cached daily brief's setups as paper bracket orders.
+
 ### Running the tests (optional, for the curious)
 
 ```bash
