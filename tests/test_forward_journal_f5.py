@@ -331,6 +331,39 @@ class TestF5AlpacaActivities:
         AlpacaExecutionClient("k", "s", client=fake).get_fill_activities(after)
         assert str(fake.calls[0][1].get("after", "")).startswith("2026-11-16")
 
+    def test_f5_get_fill_activities_times_out_on_a_hung_call(self, monkeypatch):
+        import threading
+
+        from backend.app.execution import alpaca_client as ac
+
+        release = threading.Event()
+
+        class Hung:
+            def get(self, path, data=None, **kwargs):
+                release.wait(5)
+                return []
+
+        monkeypatch.setattr(ac, "ACTIVITIES_TIMEOUT_SECONDS", 0.2)
+        try:
+            with pytest.raises(TimeoutError):
+                AlpacaExecutionClient("k", "s", client=Hung()).get_fill_activities()
+        finally:
+            release.set()
+
+    def test_f5_get_fill_activities_stops_when_page_token_is_ignored(self):
+        full_page = _paged(100)
+
+        class Repeats:
+            calls = 0
+
+            def get(self, path, data=None, **kwargs):
+                Repeats.calls += 1
+                return list(full_page)
+
+        got = AlpacaExecutionClient("k", "s", client=Repeats()).get_fill_activities()
+        assert Repeats.calls == 2  # second page repeats the last id -> stop
+        assert len(got) == 200
+
     def test_f5_get_fill_activities_empty_account(self):
         FakeSdk.activities, FakeSdk.error = [], None
         client = AlpacaExecutionClient("k", "s", client=FakeSdk())

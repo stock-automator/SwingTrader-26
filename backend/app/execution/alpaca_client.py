@@ -9,7 +9,8 @@ the API layer (and its tests) never need to import `alpaca` types directly.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,6 +29,8 @@ VALID_SIDES = frozenset({"buy", "sell"})
 ACTIVITIES_PAGE_SIZE = 100
 #: alpaca-py has no request timeout, so the whole paged fetch gets one.
 ACTIVITIES_TIMEOUT_SECONDS = 10
+#: Hard cap on pages (100 fills each) per fetch, in case paging never ends.
+ACTIVITIES_MAX_PAGES = 200
 
 
 class AlpacaNotConfiguredError(RuntimeError):
@@ -265,24 +268,41 @@ class AlpacaExecutionClient:
         `ACTIVITIES_TIMEOUT_SECONDS`, and whatever the SDK raises on an
         HTTP error."""
         client = self._require_client()
+        deadline = time.monotonic() + ACTIVITIES_TIMEOUT_SECONDS
+        outcome: dict[str, Any] = {}
 
-        def fetch() -> list[dict]:
-            found: list[dict] = []
-            params: dict[str, Any] = {
-                "direction": "asc",
-                "page_size": ACTIVITIES_PAGE_SIZE,
-            }
-            if after is not None:
-                params["after"] = after.isoformat()
-            while True:
-                page = client.get("/account/activities/FILL", params) or []
-                found.extend(page)
-                if len(page) < ACTIVITIES_PAGE_SIZE:
-                    return found
-                params["page_token"] = page[-1]["id"]
+        def fetch() -> None:
+            try:
+                found: list[dict] = []
+                params: dict[str, Any] = {
+                    "direction": "asc",
+                    "page_size": ACTIVITIES_PAGE_SIZE,
+                }
+                if after is not None:
+                    params["after"] = after.isoformat()
+                last_token = None
+                for _ in range(ACTIVITIES_MAX_PAGES):
+                    # Stop paging once the caller has given up waiting.
+                    if time.monotonic() > deadline:
+                        return
+                    page = client.get("/account/activities/FILL", params) or []
+                    found.extend(page)
+                    if len(page) < ACTIVITIES_PAGE_SIZE:
+                        break
+                    token = page[-1]["id"]
+                    if token == last_token:  # provider ignored page_token
+                        break
+                    last_token = params["page_token"] = token
+                outcome["value"] = found
+            except Exception as exc:  # noqa: BLE001 - re-raised in caller
+                outcome["error"] = exc
 
-        pool = ThreadPoolExecutor(max_workers=1)
-        try:
-            return pool.submit(fetch).result(timeout=ACTIVITIES_TIMEOUT_SECONDS)
-        finally:
-            pool.shutdown(wait=False)
+        # A daemon thread, so a hung SDK call can never block process exit.
+        worker = threading.Thread(target=fetch, daemon=True)
+        worker.start()
+        worker.join(timeout=ACTIVITIES_TIMEOUT_SECONDS)
+        if worker.is_alive() or ("value" not in outcome and "error" not in outcome):
+            raise TimeoutError("Alpaca fill activities fetch timed out")
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["value"]
