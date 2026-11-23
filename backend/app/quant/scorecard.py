@@ -7,16 +7,25 @@ split to the last bar) separately, long-only and, when the strategy emits
 short entries, long+short. Signals are generated once over full history, so
 the test window starts with warmed-up indicators.
 
-Composite score (higher is better), from percentile ranks across rows:
+Composite score (higher is better): the weighted sum of each criterion's
+percentile rank across all rows (`COMPOSITE_WEIGHTS`, summing to 1):
 
-    0.35 return vs exposure-matched SPY
-    0.20 profit factor
-    0.15 max drawdown (shallower is better)
-    0.15 consistency (% of calendar years with a positive return)
-    0.15 robustness (worst full-window CAGR across +/-20% parameter changes)
+    0.25 return vs exposure-matched SPY (percentage points)
+    0.15 profit factor
+    0.05 win rate
+    0.05 payoff (average win / average loss)
+    0.10 max drawdown (shallower is better)
+    0.05 trade count (more trades, more confidence)
+    0.10 year consistency (% of calendar years with a positive return)
+    0.10 regime consistency (% of SPY macro regimes with a positive return)
+    0.15 robustness (worst long-only build-period CAGR when each numeric
+         parameter moves +/-20%, or +/-1 for small integers)
 
-Each of the first four blends 70% test period with 30% build period. Rows
-flagged "too few trades" are halved and sort below every other row.
+Win rate and payoff are light because profit factor already combines them.
+Every criterion except robustness blends 70% test period with 30% build
+period. Robustness uses the build period (2016-2022) only, so no test data
+feeds parameter sensitivity. Rows flagged "too few trades" are halved and
+sort below every other row; "test much worse than build" is a flag only.
 """
 
 from __future__ import annotations
@@ -49,14 +58,19 @@ FLAG_FEW_TRADES = "too few trades"
 FLAG_TEST_WORSE = "test much worse than build"
 FLAG_SHORT_BORROW = "short-side unmodelled borrow"
 
-#: (metric key, weight) blended 70/30 test/build; robustness is separate.
-PERIOD_WEIGHTS = (
-    ("vs_spy_pct", 0.35),
-    ("profit_factor", 0.20),
-    ("max_drawdown_pct", 0.15),
-    ("positive_years_pct", 0.15),
-)
-ROBUSTNESS_WEIGHT = 0.15
+#: Criterion -> weight. All but "robustness" are period-stat keys blended
+#: `TEST_SHARE` test / rest build; see the module docstring.
+COMPOSITE_WEIGHTS = {
+    "vs_spy_pct": 0.25,
+    "profit_factor": 0.15,
+    "win_rate_pct": 0.05,
+    "payoff": 0.05,
+    "max_drawdown_pct": 0.10,
+    "trades": 0.05,
+    "positive_years_pct": 0.10,
+    "positive_regimes_pct": 0.10,
+    "robustness": 0.15,
+}
 TEST_SHARE = 0.7
 
 
@@ -109,11 +123,15 @@ def curve_stats(
     yearly = (year_end / base - 1) * 100
 
     regime_returns: dict[str, float] = {}
+    positive_regimes = None
     if regime is not None:
         daily = equity.pct_change().iloc[1:]
         prior = regime.reindex(equity.index).shift(1).iloc[1:].fillna("UNKNOWN")
         grouped = (1 + daily).groupby(prior).prod() - 1
         regime_returns = {str(k): _round(v * 100) for k, v in grouped.items()}
+        known = grouped.drop("UNKNOWN", errors="ignore")
+        if len(known):
+            positive_regimes = (known > 0).mean() * 100
 
     return {
         "start": equity.index[0].date().isoformat(),
@@ -126,6 +144,7 @@ def curve_stats(
         "yearly_returns_pct": {int(y): _round(v) for y, v in yearly.items()},
         "positive_years_pct": _round((yearly > 0).mean() * 100),
         "regime_returns_pct": regime_returns,
+        "positive_regimes_pct": _round(positive_regimes),
     }
 
 
@@ -137,6 +156,7 @@ def period_stats(result: PortfolioResult, spy: pd.DataFrame, regime) -> dict:
     stats["exposure_pct"] = _round(result.exposure_pct)
     stats["avg_invested_pct"] = _round(result.avg_invested_pct)
     stats["skipped"] = dict(result.skipped)
+    stats["flags"] = [f for f in result.flags if not f.startswith("suspect data")]
     if len(trades):
         stats["exit_reasons"] = trades["exit_reason"].value_counts().to_dict()
         stats["avg_holding_days"] = _round(trades["holding_days"].mean(), 1)
@@ -168,19 +188,25 @@ def numeric_params(cls: type) -> dict[str, int | float]:
 
 
 def param_variants(name: str, cls: type | None = None) -> list[dict]:
-    """Each numeric param at -20% and +20%; ints round and stay >= 1, and a
-    rounding that lands back on the default is dropped."""
+    """Each numeric param at -20% and +20%. Ints round and stay >= 1; an int
+    whose +/-20% rounds back to its default (0, 2) steps by -1 and +1."""
     cls = cls or REGISTRY[name]
     variants = []
     for param, default in numeric_params(cls).items():
-        for factor in (1 - PERTURBATION, 1 + PERTURBATION):
-            value = default * factor
-            if isinstance(default, int):
-                value = max(1, int(round(value)))
-                if value == default:
-                    continue
-            variants.append({"param": param, "value": value})
+        values = [default * (1 - PERTURBATION), default * (1 + PERTURBATION)]
+        if isinstance(default, int):
+            values = [int(round(v)) for v in values]
+            if default in values:
+                values = [default - 1, default + 1]
+            else:
+                values = [max(1, v) for v in values]
+        variants += [{"param": param, "value": v} for v in values]
     return variants
+
+
+def robustness_window(start=BUILD_START, split_date: str = SPLIT_DATE) -> tuple:
+    """The build period, where robustness reruns live: [start, split)."""
+    return start, pd.Timestamp(split_date) - pd.Timedelta(days=1)
 
 
 def make_strategy(
@@ -202,7 +228,7 @@ def full_window_cagr(
     regime: pd.Series | None = None,
     prepared: SignalMatrix | None = None,
 ) -> float | None:
-    """Long-only CAGR over the whole window - the robustness yardstick."""
+    """Long-only CAGR over [start, end] - the robustness yardstick."""
     result = run_portfolio_backtest(
         strategy,
         frames,
@@ -294,20 +320,26 @@ def score_strategy(
         build = period_stats(run(start, split - pd.Timedelta(days=1)), spy, regime)
         test = period_stats(run(split, end), spy, regime)
         shorts_taken = build["short_trades"] + test["short_trades"]
-        variants[variant] = {
-            "build": build,
-            "test": test,
-            "flags": score_flags(build, test, shorts_taken),
-        }
+        flags = score_flags(build, test, shorts_taken)
+        flags += [f for f in build["flags"] + test["flags"] if f not in flags]
+        variants[variant] = {"build": build, "test": test, "flags": flags}
 
+    rob_start, rob_end = robustness_window(start, split_date)
     base_cagr = full_window_cagr(
-        strategy, frames, spy, config, start, end, regime=regime, prepared=prepared
+        strategy,
+        frames,
+        spy,
+        config,
+        rob_start,
+        rob_end,
+        regime=regime,
+        prepared=prepared,
     )
     runs = []
     if robustness and name in REGISTRY:
         runs = [
             perturbation_run(
-                name, v["param"], v["value"], frames, spy, config, start, end
+                name, v["param"], v["value"], frames, spy, config, rob_start, rob_end
             )
             for v in param_variants(name, type(strategy))
         ]
@@ -315,9 +347,10 @@ def score_strategy(
         "strategy": name,
         "display_name": strategy.name,
         "params": numeric_params(type(strategy)),
-        "full_cagr_pct": base_cagr,
+        "build_cagr_pct": base_cagr,
         "variants": variants,
         "signal_errors": prepared.errors,
+        "suspect_data": list(prepared.suspect),
         "robustness": summarize_robustness(base_cagr, runs) if runs else None,
     }
 
@@ -354,13 +387,14 @@ def composite_rank(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
     score = pd.Series(0.0, index=range(len(rows)))
-    for key, weight in PERIOD_WEIGHTS:
+    for key, weight in COMPOSITE_WEIGHTS.items():
+        if key == "robustness":
+            values = [r.get("robustness_worst_cagr_pct") for r in rows]
+            score += weight * _pct_rank(values)
+            continue
         test = _pct_rank([r["test"].get(key) for r in rows])
         build = _pct_rank([r["build"].get(key) for r in rows])
         score += weight * (TEST_SHARE * test + (1 - TEST_SHARE) * build)
-    score += ROBUSTNESS_WEIGHT * _pct_rank(
-        [r.get("robustness_worst_cagr_pct") for r in rows]
-    )
     ranked = []
     for i, r in enumerate(rows):
         few = FLAG_FEW_TRADES in r.get("flags", [])
@@ -382,17 +416,20 @@ def _fmt(value, digits: int = 1) -> str:
 def scorecard_markdown(rows: list[dict], scores: list[dict]) -> str:
     """Ranked table plus per-strategy notes."""
     lines = [
-        "| Rank | Strategy | Variant | Score | Test CAGR % | Test vs SPY pp "
+        "| Rank | Strategy | Variant | Score | Test return % "
+        "| Test exp-matched SPY % | Test vs SPY pp | Test CAGR % "
         "| Test PF | Test win % | Test payoff | Test max DD % | Test trades "
-        "| Build CAGR % | Build vs SPY pp | Build trades | Worst ±20% CAGR % "
-        "| Flags |",
-        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Build CAGR % | Build vs SPY pp | Build trades "
+        "| Worst ±20% build CAGR % | Flags |",
+        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:"
+        "|---:|---:|---:|---:|---|",
     ]
     for r in rows:
         t, b = r["test"], r["build"]
         lines.append(
             f"| {r['rank']} | {r['strategy']} | {r['variant']} | {r['score']:.3f} "
-            f"| {_fmt(t['cagr_pct'])} | {_fmt(t['vs_spy_pct'])} "
+            f"| {_fmt(t['total_return_pct'])} | {_fmt(t['spy_matched_return_pct'])} "
+            f"| {_fmt(t['vs_spy_pct'])} | {_fmt(t['cagr_pct'])} "
             f"| {_fmt(t['profit_factor'], 2)} | {_fmt(t['win_rate_pct'])} "
             f"| {_fmt(t['payoff'], 2)} | {_fmt(t['max_drawdown_pct'])} "
             f"| {t['trades']} | {_fmt(b['cagr_pct'])} | {_fmt(b['vs_spy_pct'])} "
@@ -437,7 +474,7 @@ def scorecard_markdown(rows: list[dict], scores: list[dict]) -> str:
         rob = s.get("robustness")
         if rob:
             lines.append(
-                f"- Robustness (long-only, full window, each param ±20%, "
+                f"- Robustness (long-only, build period, each param ±20% or ±1, "
                 f"{len(rob['runs'])} reruns): CAGR {_fmt(rob['worst_cagr_pct'])}% "
                 f"to {_fmt(rob['best_cagr_pct'])}% (spread "
                 f"{_fmt(rob['spread_pct'])} pp), {_fmt(rob['profitable_pct'], 0)}% "

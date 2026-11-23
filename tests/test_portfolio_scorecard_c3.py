@@ -670,7 +670,9 @@ def test_no_bar_on_fill_day_skipped_and_counted():
 def test_signal_error_ticker_dropped_and_counted():
     good = signal_on(frame(), 5)
     bad = signal_on(frame(), 5).assign(boom=1)
-    res = run_portfolio_backtest(Exploding(), {"AAA": good, "BAD": bad}, frame(), free())
+    res = run_portfolio_backtest(
+        Exploding(), {"AAA": good, "BAD": bad}, frame(), free()
+    )
     assert list(res.trades["ticker"]) == ["AAA"]
     assert res.skipped["signal errors (tickers)"] == 1
 
@@ -697,7 +699,7 @@ def test_no_flags_on_a_clean_run():
 
 def spliced(df, day, factor=0.04, bars=1):
     for col in ("Open", "High", "Low", "Close"):
-        df.iloc[day : day + bars, df.columns.get_loc(col)] *= factor
+        df.iloc[slice(day, day + bars), df.columns.get_loc(col)] *= factor
     return df
 
 

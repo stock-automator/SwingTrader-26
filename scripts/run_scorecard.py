@@ -4,7 +4,7 @@ Strategy scorecard over the cached universe (cycle 03 step 2).
 
 Runs every registered strategy through the portfolio engine on 2016 to the
 split (build) and the split to the last cached bar (test), long-only and
-long+short, plus the +/-20% parameter reruns, and writes a ranked table to
+long+short, plus the build-period +/-20% parameter reruns, and writes a ranked table to
 `docs/scorecard.md` and the full numbers to `data/reports/scorecard.json`.
 Cached bars only: nothing is downloaded. Work is spread over processes by
 (strategy, parameter set); each worker loads the cache once.
@@ -36,9 +36,11 @@ from backend.app.data.loader import (  # noqa: E402
 from backend.app.quant.portfolio import PortfolioConfig  # noqa: E402
 from backend.app.quant.scorecard import (  # noqa: E402
     BUILD_START,
+    COMPOSITE_WEIGHTS,
     SPLIT_DATE,
     param_variants,
     perturbation_run,
+    robustness_window,
     score_strategy,
     scorecard_markdown,
     scorecard_rows,
@@ -87,8 +89,9 @@ def _task(task: tuple) -> tuple:
             start=_CTX["start"],
         )
     param, value = rest
+    start, end = robustness_window(_CTX["start"], _CTX["split_date"])
     return task, perturbation_run(
-        name, param, value, _CTX["frames"], _CTX["spy"], config, _CTX["start"]
+        name, param, value, _CTX["frames"], _CTX["spy"], config, start, end
     )
 
 
@@ -168,8 +171,16 @@ def main(argv: list[str] | None = None) -> dict:
     ordered = [scores[n] for n in names]
     for score in ordered:
         runs = sorted(perturbations[score["strategy"]], key=lambda r: r["param"])
-        score["robustness"] = summarize_robustness(score["full_cagr_pct"], runs)
+        score["robustness"] = summarize_robustness(score["build_cagr_pct"], runs)
     rows = scorecard_rows(ordered)
+    suspect = sorted({t for score in ordered for t in score["suspect_data"]})
+    if suspect:
+        print(
+            f"WARNING: {len(suspect)} tickers excluded as suspect data: "
+            f"{', '.join(suspect)}",
+            file=sys.stderr,
+        )
+    weights = ", ".join(f"{w:.2f} {k}" for k, w in COMPOSITE_WEIGHTS.items())
     spy = _CTX["spy"]
     runtime = time.time() - began
     header = [
@@ -182,6 +193,10 @@ def main(argv: list[str] | None = None) -> dict:
         f"`{args.universe.name}`"
         + (f"; {len(missing)} not cached: {', '.join(missing)}" if missing else "")
         + ".",
+        "- Suspect data (a >40% one-day close move that retraces at least half "
+        "within 5 bars), excluded from every run: "
+        + (", ".join(f"suspect data: {t}" for t in suspect) if suspect else "none")
+        + ".",
         f"- Build {args.start} to {args.split_date} (exclusive); held-out test "
         f"{args.split_date} to {spy.index[-1]:%Y-%m-%d}. Signals use full "
         "history, so the test period starts warmed up.",
@@ -192,11 +207,15 @@ def main(argv: list[str] | None = None) -> dict:
         "spread per leg, FX per Settings.",
         "- 'vs SPY' = strategy return minus SPY held at the strategy's own "
         "invested fraction (exposure-matched), in percentage points.",
-        "- Score: percentile ranks, 70% test / 30% build, weighted 0.35 vs "
-        "SPY, 0.20 profit factor, 0.15 max drawdown, 0.15 positive years, "
-        "plus 0.15 robustness (worst long-only CAGR across each parameter "
-        "at ±20%). Rows with fewer than 30 trades in either period are "
-        "halved and sort last.",
+        "- Composite score: weighted percentile ranks across rows, 70% test / "
+        f"30% build: {weights}. Positive regimes = % of SPY macro regimes "
+        "(at the prior close) with a positive return. Robustness = worst "
+        "long-only build-period CAGR with each numeric parameter at ±20% "
+        "(±1 for small integers); it uses 2016-2022 only, so no test data "
+        "feeds the score through it. Rows with fewer than 30 trades in "
+        "either period are halved and sort last.",
+        "- An 'equity below zero' flag means a short gapped past its "
+        "collateral and the run stopped opening positions.",
         "- Caveats: survivorship bias (today's index members only); short "
         "borrow and fees not modelled; whole shares.",
         "",
@@ -210,6 +229,7 @@ def main(argv: list[str] | None = None) -> dict:
         "end": f"{spy.index[-1]:%Y-%m-%d}",
         "universe_size": len(_CTX["frames"]),
         "missing_symbols": missing,
+        "suspect_data": suspect,
         "runtime_seconds": round(runtime, 1),
         "rows": rows,
         "strategies": ordered,
