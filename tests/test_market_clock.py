@@ -188,6 +188,10 @@ class TestPlainCalendarWithoutSessionBounds:
         # The pydantic model with session_open/close left unset (None).
         assert session_for(_ny(2026, 9, 16, 9, 29), _day(WEDNESDAY)).state == "CLOSED"
 
+    @pytest.mark.skipif(
+        "session_open" not in Calendar.model_fields,
+        reason="this alpaca-py Calendar has no session bounds (older version)",
+    )
     def test_f1_session_bounds_present_pre_market_is_extended(self):
         day = Calendar(
             date=WEDNESDAY,
