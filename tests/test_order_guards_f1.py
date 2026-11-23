@@ -145,13 +145,84 @@ class TestGuardSwitchRemoved:
         finally:
             get_settings.cache_clear()
 
+    def test_f1_settings_repr_masks_telegram_chat_id(self):
+        settings = Settings(telegram_bot_token="tok-xyz", telegram_chat_id="98765")
+        text = repr(settings)
+        assert "tok-xyz" not in text
+        assert "98765" not in text
+
+
+# ------------------------------------------------- earnings fetch fail-closed
+
+
+class _FakeYfTicker:
+    """yfinance `Ticker` stand-in: `get_earnings_dates` returns `None`, which
+    is what yfinance 1.8 does when it swallows a scrape failure (it logs
+    "No earnings dates found" and returns None instead of raising)."""
+
+    def __init__(self, symbol, quote_type="EQUITY"):
+        self.ticker = symbol
+        self._quote_type = quote_type
+        self.info = {"quoteType": quote_type, "symbol": symbol}
+        self.fast_info = {"quoteType": quote_type}
+
+    def get_earnings_dates(self, limit=12, offset=0):
+        return None
+
+    def get_info(self):
+        return self.info
+
+
+@pytest.fixture
+def yf_none(monkeypatch):
+    """Every `yfinance.Ticker` returns None for earnings; ETF symbols
+    (`SPY`, `QQQ`) report quoteType ETF, everything else EQUITY."""
+    import yfinance
+
+    etfs = {"SPY", "QQQ"}
+    monkeypatch.setattr(
+        yfinance,
+        "Ticker",
+        lambda s, *a, **k: _FakeYfTicker(
+            s.upper(), "ETF" if s.upper() in etfs else "EQUITY"
+        ),
+    )
+
+
+class TestEarningsFetchFailClosed:
+    def test_f1_loader_none_for_stock_is_unavailable(self, yf_none):
+        from backend.app.data.loader import fetch_earnings_dates
+
+        with pytest.raises(DataUnavailableError):
+            fetch_earnings_dates("AAPL")
+
+    def test_f1_loader_none_for_etf_is_empty(self, yf_none):
+        from backend.app.data.loader import fetch_earnings_dates
+
+        assert fetch_earnings_dates("SPY") == []
+
+    def test_f1_guard_blocks_stock_entry_when_yfinance_returns_none(
+        self, yf_none, monkeypatch
+    ):
+        from backend.app.data import loader
+
+        monkeypatch.setattr(guards, "fetch_earnings_dates", loader.fetch_earnings_dates)
+        monkeypatch.setattr(guards, "fetch_stock_splits", lambda t, *a, **k: [])
+        result = enforce_order_guards("AAPL", "ENTRY", Settings(), FakeMarketClock())
+        assert result.allowed is False
+        assert "unavailable" in " ".join(result.reasons).lower()
+
 
 # --------------------------------------------------------------- API wiring
 
 
 class _CountingTradingClient:
-    def __init__(self):
+    def __init__(self, positions=None):
         self.submits = 0
+        self.positions = positions if positions is not None else []
+
+    def get_all_positions(self):
+        return list(self.positions)
 
     def submit_order(self, order_data):
         from types import SimpleNamespace
@@ -197,6 +268,49 @@ def _detail(response) -> str:
 _EXEC_URL = "/api/v1/execution/orders"
 
 
+_HELD: list[dict] = []  # positions the `broker_spy` Alpaca fake reports
+
+
+def _position(symbol="AAPL", qty=5.0, side="long"):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        symbol=symbol,
+        side=SimpleNamespace(value=side),
+        qty=str(qty),
+        avg_entry_price="100",
+        current_price="100",
+        market_value=str(100 * qty),
+        cost_basis=str(100 * qty),
+        unrealized_pl="0",
+        unrealized_plpc="0",
+    )
+
+
+@pytest.fixture
+def held(monkeypatch):
+    """`held(sdk, symbol, qty, side)` gives the Alpaca account one open
+    position - on the SDK fake and on every `AlpacaExecutionClient`, however
+    the route builds it - so a sell can be recognised as an exit."""
+
+    def _set(sdk=None, symbol="AAPL", qty=5.0, side="long"):
+        position = _position(symbol, qty, side)
+        if sdk is not None:
+            sdk.positions = [position]
+        from backend.app.execution.alpaca_client import _position_to_dict
+
+        monkeypatch.setattr(
+            AlpacaExecutionClient,
+            "get_positions",
+            lambda self: [_position_to_dict(position)],
+        )
+        _HELD[:] = [_position_to_dict(position)]
+
+    _HELD.clear()
+    yield _set
+    _HELD.clear()
+
+
 def _exec_body(side="buy", **extra):
     return {"ticker": "AAPL", "side": side, "qty": 1, "order_type": "MARKET", **extra}
 
@@ -229,18 +343,61 @@ class TestExecutionOrdersRoute:
         assert "unavailable" in _detail(response)
         assert sdk.submits == 0
 
-    def test_f1_sell_defaults_to_exit_and_goes_through_when_closed(self, api):
+    def test_f1_sell_of_held_long_is_exit_and_goes_through_when_closed(self, api, held):
         client, sdk, clock = api
+        held(sdk, qty=5)
         clock.state = "CLOSED"
         assert client.post(_EXEC_URL, json=_exec_body("sell")).status_code == 200
         assert sdk.submits == 1
 
-    def test_f1_explicit_exit_intent_on_buy_goes_through(self, api):
+    def test_f1_sell_of_unheld_symbol_is_guarded_when_closed(self, api, held):
+        client, sdk, clock = api
+        held(sdk, symbol="MSFT", qty=5)
+        clock.state = "CLOSED"
+        response = client.post(_EXEC_URL, json=_exec_body("sell"))
+        assert response.status_code == 422
+        assert sdk.submits == 0
+
+    def test_f1_sell_more_than_held_is_guarded_when_closed(self, api, held):
+        client, sdk, clock = api
+        held(sdk, qty=1)
+        clock.state = "CLOSED"
+        body = _exec_body("sell", qty=5)
+        assert client.post(_EXEC_URL, json=body).status_code == 422
+        assert sdk.submits == 0
+
+    def test_f1_sell_against_short_position_is_guarded_when_closed(self, api, held):
+        client, sdk, clock = api
+        held(sdk, qty=-5, side="short")
+        clock.state = "CLOSED"
+        assert client.post(_EXEC_URL, json=_exec_body("sell")).status_code == 422
+        assert sdk.submits == 0
+
+    def test_f1_explicit_exit_on_unheld_sell_is_guarded_when_closed(self, api):
+        client, sdk, clock = api
+        clock.state = "CLOSED"
+        body = _exec_body("sell", intent="EXIT")
+        assert client.post(_EXEC_URL, json=body).status_code == 422
+        assert sdk.submits == 0
+
+    def test_f1_sell_is_guarded_when_position_lookup_fails(self, api, monkeypatch):
+        client, sdk, clock = api
+        clock.state = "CLOSED"
+
+        def _down():
+            raise ConnectionError("alpaca positions down")
+
+        monkeypatch.setattr(sdk, "get_all_positions", _down)
+        assert client.post(_EXEC_URL, json=_exec_body("sell")).status_code == 422
+        assert sdk.submits == 0
+
+    def test_f1_explicit_exit_intent_on_buy_is_not_let_through(self, api):
+        """Reviewer BLOCK: `intent="EXIT"` on a buy bypassed every guard."""
         client, sdk, clock = api
         clock.state = "CLOSED"
         body = _exec_body("buy", intent="EXIT")
-        assert client.post(_EXEC_URL, json=body).status_code == 200
-        assert sdk.submits == 1
+        assert client.post(_EXEC_URL, json=body).status_code == 422
+        assert sdk.submits == 0
 
     def test_f1_explicit_entry_intent_on_sell_is_guarded(self, api):
         client, sdk, clock = api
@@ -291,6 +448,9 @@ def broker_spy(monkeypatch):
         def submit_limit_order(self, ticker, qty, side, limit_price):
             return {"id": "alp-1", "status": "accepted"}
 
+        def get_positions(self):
+            return list(_HELD)
+
     monkeypatch.setattr(orders_module, "AlpacaExecutionClient", _FakeAlpaca)
     return calls
 
@@ -339,14 +499,44 @@ class TestOrdersSubmitRoute:
         assert "earnings" in _detail(response)
         assert broker_spy == []
 
-    @pytest.mark.parametrize("broker", ["PAPER", "ALPACA"])
-    def test_f1_exit_goes_through_when_calendar_down(self, api, broker_spy, broker):
+    def test_f1_alpaca_sell_of_held_long_goes_through_when_calendar_down(
+        self, api, broker_spy, held
+    ):
         client, _, clock = api
+        held(qty=5)
         clock.raises = ConnectionError("alpaca down")
-        response = client.post(_SUBMIT_URL, json=_submit_body(broker, "sell"))
+        response = client.post(_SUBMIT_URL, json=_submit_body("ALPACA", "sell"))
         assert response.status_code == 200
         assert len(broker_spy) == 1
-        assert clock.calls == 0
+
+    def test_f1_alpaca_sell_of_unheld_symbol_is_422_when_closed(
+        self, api, broker_spy, held
+    ):
+        client, _, clock = api
+        held(symbol="MSFT", qty=5)
+        clock.state = "CLOSED"
+        response = client.post(_SUBMIT_URL, json=_submit_body("ALPACA", "sell"))
+        assert response.status_code == 422
+        assert broker_spy == []
+
+    def test_f1_paper_sell_is_treated_as_entry_when_closed(self, api, broker_spy):
+        """PaperBroker keeps no positions, so a PAPER sell can't be proven an
+        exit and is guarded like an entry."""
+        client, _, clock = api
+        clock.state = "CLOSED"
+        response = client.post(_SUBMIT_URL, json=_submit_body("PAPER", "sell"))
+        assert response.status_code == 422
+        assert broker_spy == []
+
+    @pytest.mark.parametrize("broker", ["PAPER", "ALPACA"])
+    def test_f1_explicit_exit_intent_on_buy_is_not_let_through(
+        self, api, broker_spy, broker
+    ):
+        client, _, clock = api
+        clock.state = "CLOSED"
+        body = _submit_body(broker, "buy", intent="EXIT")
+        assert client.post(_SUBMIT_URL, json=body).status_code == 422
+        assert broker_spy == []
 
     def test_f1_explicit_entry_intent_on_sell_is_guarded(self, api, broker_spy):
         client, _, clock = api

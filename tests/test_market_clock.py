@@ -145,3 +145,57 @@ class TestMarketClock:
         client = _FakeTradingClient(raises=ConnectionError("alpaca down"))
         with pytest.raises(Exception):
             MarketClock(client).session(_ny(2026, 9, 16, 10, 0))
+
+
+def _plain_day(d: str, open_: str = "09:30", close: str = "16:00"):
+    """A calendar day carrying only `date`/`open`/`close` - older alpaca-py
+    `Calendar` objects have no `session_open`/`session_close` at all."""
+    from types import SimpleNamespace
+
+    day = date.fromisoformat(d)
+    return SimpleNamespace(
+        date=day,
+        open=datetime.combine(day, datetime.strptime(open_, "%H:%M").time()),
+        close=datetime.combine(day, datetime.strptime(close, "%H:%M").time()),
+    )
+
+
+class TestPlainCalendarWithoutSessionBounds:
+    """Reviewer BLOCK (F1 loop 1): outside regular hours `session_for` read
+    `session_open`/`session_close` unconditionally and raised AttributeError
+    on a plain calendar day, so the guard blocked entries as "calendar
+    unavailable" instead of "closed"."""
+
+    @pytest.mark.parametrize(
+        "day, moment",
+        [
+            ("2026-09-16", _ny(2026, 9, 16, 9, 29)),  # one minute before open
+            ("2026-09-16", _ny(2026, 9, 16, 18, 0)),  # after the close
+        ],
+        ids=["09:29", "18:00"],
+    )
+    def test_f1_plain_calendar_outside_hours_is_closed(self, day, moment):
+        info = session_for(moment, _plain_day(day))
+        assert info.state == "CLOSED"
+
+    def test_f1_plain_calendar_half_day_after_early_close_is_closed(self):
+        half = _plain_day("2026-11-27", close="13:00")
+        info = session_for(_ny(2026, 11, 27, 13, 30), half)
+        assert info.state == "CLOSED"
+        assert info.close == _ny(2026, 11, 27, 13, 0)
+
+    def test_f1_model_without_session_bounds_is_closed_pre_market(self):
+        # The pydantic model with session_open/close left unset (None).
+        assert session_for(_ny(2026, 9, 16, 9, 29), _day(WEDNESDAY)).state == "CLOSED"
+
+    def test_f1_session_bounds_present_pre_market_is_extended(self):
+        day = Calendar(
+            date=WEDNESDAY,
+            open="09:30",
+            close="16:00",
+            session_open="0400",
+            session_close="2000",
+        )
+        assert session_for(_ny(2026, 9, 16, 8, 0), day).state == "EXTENDED"
+        assert session_for(_ny(2026, 9, 16, 18, 0), day).state == "EXTENDED"
+        assert session_for(_ny(2026, 9, 16, 20, 30), day).state == "CLOSED"
