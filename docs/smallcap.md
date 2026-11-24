@@ -106,7 +106,7 @@ The first run exposed two data errors and review found two more, all fixed in th
 
 1. The $5 test used split-adjusted closes, so stocks that later reverse-split (CBIO, GDC) showed adjusted prices of $600 to $7,750 while trading for pennies. The rule means the price that traded, so the test now uses unadjusted SIP closes.
 2. Alpaca chains a reused symbol with no gap: SN jumped 116x in a day (Sanchez Energy's OTC tail, then SharkNinja), LINE 448x, SPRB 124x, WW 159x (post-bankruptcy shares). Their 6-1 returns of +10,000% and more swamped the composite's unwinsorised z-score. A one-day move beyond 10x now starts a new segment. The threshold was set from these data errors (the largest real move found was DFDV's 9.4x), not from strategy results.
-3. (Review) Positions were carried across a segment break, so the jump (BHVN on 2022-10-04) was booked as profit. A holding is now sold at its last close before the break.
+3. (Review) Positions were carried across a segment break, so the jump was booked as profit or loss (BHVN: a fake -94.5% loss). A holding is now sold at its last close before the break.
 4. (Review) Dollar volume used adjusted close x volume. Dividend adjustment lowers past prices but not volumes, so the $5M test, the top-500 exclusion, the cost tier and the pre-screen depended on later dividends. All four now use unadjusted close x unadjusted volume.
 
 Rules, signals and costs are unchanged. 1x costs, first run versus this run:
