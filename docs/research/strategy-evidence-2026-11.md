@@ -56,3 +56,21 @@ A asked for a steady edge with a good reward-to-risk ratio; options, hedges and 
 - **Judged on:** CAGR, max drawdown, Sharpe, Calmar (CAGR / max drawdown), worst year and % positive months.
 - **Test periods:** build 2016–2022, test 2023+; also full-history results where the ETF data goes back to 2007, which covers 2008.
 - **Costs:** 2bp per side.
+
+## Cycle 07b pre-registered rules (2026-11-24): small and mid caps
+
+The cycle 06 result on the S&P 500 was no earnings drift: the top-decile drift had t of 0.06 in the build period and −0.67 in the test period. The research expects these effects to survive mainly outside the largest stocks.
+
+- **Universe (survivorship-free):**
+  - US common stocks on NYSE, Nasdaq and AMEX, active and inactive, taken from Alpaca's assets list. Exclude ETFs, funds, ADRs, preferreds, warrants and units, using EDGAR's 10-K/10-Q filers and the SIC code where available.
+  - Monthly eligibility: price ≥ $5, and 20-day average dollar volume ≥ $5M a day (tradeable for a small account).
+  - Exclude the 500 largest by dollar volume (that's the S&P 500 space we already tested).
+- **Signals** (decided at the month-end close, traded at the next open):
+  1. **1-month reversal (Jegadeesh 1990):** buy the lowest decile of last month's return and hold 1 month.
+  2. **6-1 momentum:** top decile, hold 1 month.
+  3. **Earnings drift (EAR):** same rules as cycle 06, with EDGAR 8-K Item 2.02 dates.
+  4. **Composite:** the average of the cross-sectional z-scores of (−1m return), (6-1 return) and (the latest EAR within 60 days, else 0). Buy the top 20, equal weight, rebalanced monthly.
+- **Costs:** 10bp per side for stocks above $20M/day in dollar volume, 20bp per side below that. Also report results at 2× costs.
+- **Sizing:** long-only for the headline; long-short only as a diagnostic.
+- **Split:** build 2016–2022, test 2023+.
+- **Benchmarks:** IWM, SPY, and an equal-weight version of the universe.
