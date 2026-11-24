@@ -43,6 +43,10 @@ USER_AGENT = "SwingTrader-26 research bot"
 #: 8 requests a second, under SEC's limit of 10.
 MIN_INTERVAL_SECONDS = 0.125
 TIMEOUT_SECONDS = 30
+#: Attempts per request on a 5xx answer (full-text search returns transient
+#: 500s), `RETRY_WAIT_SECONDS` apart. 4xx answers are never retried.
+RETRIES = 3
+RETRY_WAIT_SECONDS = 2.0
 
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
@@ -102,12 +106,26 @@ class EdgarClient:
     def _fetch(self, url: str, params: dict | None = None) -> object:
         if self.offline:
             raise EdgarError(f"offline and not cached: {url} {params or ''}")
+        for attempt in range(1, RETRIES + 1):
+            response = self._request(url, params)
+            if response.status_code < 500 or attempt == RETRIES:
+                break
+            log.warning("%s HTTP %s, retry %d", url, response.status_code, attempt)
+            self._sleep(RETRY_WAIT_SECONDS)
+        if response.status_code != 200:
+            raise EdgarError(
+                f"{url} {params or ''} returned HTTP {response.status_code}: "
+                f"{response.text[:300]}"
+            )
+        return response.json()
+
+    def _request(self, url: str, params: dict | None):
         if self._last is not None:
             wait = MIN_INTERVAL_SECONDS - (self._clock() - self._last)
             if wait > 0:
                 self._sleep(wait)
         try:
-            response = self._get(
+            return self._get(
                 url,
                 params=params,
                 headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"},
@@ -118,11 +136,6 @@ class EdgarClient:
         finally:
             self._last = self._clock()
             self.requests += 1
-        if response.status_code != 200:
-            raise EdgarError(
-                f"{url} returned HTTP {response.status_code}: {response.text[:300]}"
-            )
-        return response.json()
 
     def _cached(self, path: Path, url: str, params: dict | None = None) -> object:
         if path.exists():
