@@ -9,6 +9,12 @@ brief's `shortlist_equity`. Open risk is the `risk_usd` recorded when this
 executor placed a position (`open` in the state file); a held position it
 did not place counts as `UNKNOWN_RISK_PCT`. Each pick carries its strategy in
 Alpaca's `client_order_id` so the forward journal can attribute it.
+
+Momentum sleeve: `main` first runs `scripts/momentum_sleeve.py` (it trades
+only on the first NYSE trading day of a month). Names in the sleeve's state
+file (`SLEEVE_PATH`) are the sleeve's: this executor never trades them, and
+they count toward neither `MAX_POSITIONS` nor the heat cap. An unreadable
+sleeve file counts nothing as sleeve, so the limits only get tighter.
 """
 
 import json
@@ -19,7 +25,10 @@ from pathlib import Path
 import requests
 
 BASE_URL = "http://127.0.0.1:8000"
-STATE_PATH = Path(__file__).resolve().parents[1] / "data/reports/executor_state.json"
+ROOT = Path(__file__).resolve().parents[1]
+STATE_PATH = ROOT / "data/reports/executor_state.json"
+#: The momentum sleeve's state (`Settings.momentum_state_path`).
+SLEEVE_PATH = ROOT / "data/reports/momentum_sleeve.json"
 TIMEOUT = 15
 #: Cycle 03 Gate 1 limits (`PortfolioConfig`), applied to shortlist picks.
 MAX_POSITIONS = 6
@@ -34,6 +43,14 @@ def _state() -> dict:
     except (OSError, ValueError):
         return {}
     return state if isinstance(state, dict) else {}
+
+
+def _sleeve_tickers() -> set[str]:
+    try:
+        holdings = json.loads(SLEEVE_PATH.read_text()).get("holdings") or {}
+    except (OSError, ValueError, AttributeError):
+        return set()
+    return {str(t).upper() for t in holdings} if isinstance(holdings, dict) else set()
 
 
 def _save(day: str, tickers: list[str], book: dict) -> None:
@@ -77,6 +94,9 @@ def run_once(base_url: str = BASE_URL, session=requests, now=None) -> dict:
         out["reason"] = f"positions unavailable (HTTP {pos.status_code})"
         return out
     held = {p["symbol"] for p in positions}
+    sleeve = _sleeve_tickers()
+    # The sleeve's names are not this book's: no cap, no heat, no trades.
+    book_held = held - sleeve
     state = _state()
     done = state.get("tickers", []) if state.get("date") == day else []
     book = {
@@ -103,7 +123,8 @@ def run_once(base_url: str = BASE_URL, session=requests, now=None) -> dict:
 
     def takeable(s: dict) -> bool:
         t, last = s["ticker"], s.get("last_price")
-        if t in held or t in done or (last is not None and last <= s["stop"]):
+        stopped = last is not None and last <= s["stop"]
+        if t in held or t in sleeve or t in done or stopped:
             out["skipped"].append(t)
             return False
         return True
@@ -123,14 +144,14 @@ def run_once(base_url: str = BASE_URL, session=requests, now=None) -> dict:
     def open_risk() -> float:
         return sum(
             float((book.get(t) or {}).get("risk_usd") or UNKNOWN_RISK_PCT * equity)
-            for t in held | set(done)
+            for t in book_held | set(done)
         )
 
     for p in picks:
         if not takeable(p):
             continue
         t = p["ticker"]
-        if len(held | set(done)) >= MAX_POSITIONS:
+        if len(book_held | set(done)) >= MAX_POSITIONS:
             out["limited"].append(f"{t}: max positions ({MAX_POSITIONS})")
             continue
         if open_risk() + float(p["risk_usd"]) > MAX_HEAT_PCT * equity + 1e-9:
@@ -141,7 +162,21 @@ def run_once(base_url: str = BASE_URL, session=requests, now=None) -> dict:
     return out
 
 
+def run_sleeve() -> None:
+    """The momentum sleeve's monthly rebalance; any failure is reported
+    and never stops the swing run."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from scripts import momentum_sleeve
+
+        print(momentum_sleeve.summary(momentum_sleeve.run()))
+    except Exception as exc:  # noqa: BLE001 - the swing run still goes ahead
+        print(f"momentum_sleeve: failed ({type(exc).__name__})")
+
+
 def main() -> int:
+    run_sleeve()
     try:
         out = run_once()
     except requests.RequestException as exc:

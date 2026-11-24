@@ -562,3 +562,95 @@ def test_sleeve_size_follows_the_setting(sleeve, tmp_path):
         for p in s.posts
     )
     assert notional == pytest.approx(5000.0, abs=0.1)
+
+
+# ------------------------------------------- the swing executor and the sleeve
+
+EXECUTOR = Path(__file__).resolve().parents[1] / "scripts" / "paper_executor.py"
+NOV_23 = datetime(2026, 11, 23, 14, 35, tzinfo=UK)
+SLEEVE_NAMES = [f"S{k}" for k in range(10)]
+
+
+@pytest.fixture
+def swing(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("paper_executor_x", EXECUTOR)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "STATE_PATH", tmp_path / "executor_state.json")
+    monkeypatch.setattr(mod, "SLEEVE_PATH", tmp_path / "momentum_sleeve.json")
+    mod.SLEEVE_PATH.write_text(
+        json.dumps({"holdings": {t: 1.5 for t in SLEEVE_NAMES}, "month": "2026-11"})
+    )
+    return mod
+
+
+def swing_session(picks, setups=(), held=()):
+    shortlist = [{"strategy": "zscore_mean_reversion", "picks": list(picks)}]
+    brief = {
+        "stale": False,
+        "setups": list(setups),
+        "shortlist": shortlist,
+        "shortlist_equity": 10_000.0,
+    }
+    positions = [pos(t, 1.5) for t in held]
+    return Session(positions=positions, brief=Resp(200, brief))
+
+
+def swing_pick(t, risk=100.0):
+    return {
+        "ticker": t,
+        "strategy": "zscore_mean_reversion",
+        "entry": 10.0,
+        "stop": 9.0,
+        "target": 13.0,
+        "shares": 7,
+        "risk_usd": risk,
+    }
+
+
+def test_sleeve_names_do_not_count_toward_the_six_position_cap(swing):
+    s = swing_session([swing_pick("AAA", risk=10.0)], held=["H1", *SLEEVE_NAMES])
+    out = swing.run_once(session=s, now=NOV_23)
+    assert out["placed"] == ["AAA"] and out["limited"] == []
+
+
+def test_sleeve_names_add_no_heat(swing):
+    # 10 unknown positions would be 10% assumed heat, over the 6% cap.
+    s = swing_session([swing_pick("AAA", risk=500.0)], held=SLEEVE_NAMES)
+    out = swing.run_once(session=s, now=NOV_23)
+    assert out["placed"] == ["AAA"]
+
+
+def test_swing_never_trades_a_sleeve_name(swing):
+    setup = {**swing_pick("S0"), "shares": 5}
+    s = swing_session([swing_pick("S1")], setups=[setup])  # not yet filled
+    out = swing.run_once(session=s, now=NOV_23)
+    assert s.posts == [] and sorted(out["skipped"]) == ["S0", "S1"]
+
+
+def test_unreadable_sleeve_state_counts_nothing_as_sleeve(swing):
+    swing.SLEEVE_PATH.write_text("{broken")
+    s = swing_session([swing_pick("AAA", risk=10.0)], held=SLEEVE_NAMES[:6])
+    out = swing.run_once(session=s, now=NOV_23)
+    assert out["placed"] == [] and "max positions" in out["limited"][0]
+
+
+def test_executor_runs_the_sleeve_before_the_swing_book(swing, monkeypatch):
+    calls = []
+    monkeypatch.setattr(swing, "run_sleeve", lambda: calls.append("sleeve"))
+    monkeypatch.setattr(
+        swing, "run_once", lambda: calls.append("swing") or {**dict.fromkeys(
+            ("placed", "skipped", "blocked", "limited"), []), "reason": ""}
+    )
+    assert swing.main() == 0 and calls == ["sleeve", "swing"]
+
+
+def test_a_crashing_sleeve_never_stops_the_swing_run(swing, monkeypatch, capsys):
+    import scripts.momentum_sleeve as script
+
+    def boom(**kwargs):
+        raise RuntimeError("cache exploded")
+
+    monkeypatch.setattr(script, "run", boom)
+    swing.run_sleeve()
+    assert "momentum_sleeve: failed (RuntimeError)" in capsys.readouterr().out
