@@ -148,9 +148,9 @@ def test_build_panel_excludes_spliced_tickers_with_the_portfolio_filter(monkeypa
 
 
 def test_build_panel_uses_spy_calendar_and_leaves_missing_bars_nan():
-    idx = _calendar(10)
-    late = _frame(np.full(5, 20.0), idx[5:])
-    panel = build_panel({"LATE": late}, _frame(np.full(10, 100.0), idx))
+    idx = _calendar(30)
+    late = _frame(np.full(25, 20.0), idx[5:])
+    panel = build_panel({"LATE": late}, _frame(np.full(30, 100.0), idx))
     assert list(panel.index) == list(idx)
     assert panel.close["LATE"].iloc[:5].isna().all()
     assert panel.adv["LATE"].iloc[-1] == pytest.approx(20.0 * 1e7)
@@ -214,7 +214,7 @@ def test_simulate_exits_delisted_holding_at_last_close():
     assert exit_["date"] == idx[30]
     assert exit_["price"] == pytest.approx(gone["Close"].iloc[-1] * (1 - 0.0005))
     assert res.delisted_exits == 1
-    assert res.holdings.loc[idx[30]:].eq(0).all()
+    assert res.holdings.loc[idx[30] :].eq(0).all()
 
 
 def test_simulate_market_filter_holds_cash():
