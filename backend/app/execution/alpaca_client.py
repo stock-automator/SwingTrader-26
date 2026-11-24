@@ -138,8 +138,11 @@ class AlpacaExecutionClient:
             self._client = TradingClient(self.api_key, self.api_secret, paper=True)
         return self._client
 
-    def submit_market_order(self, ticker: str, qty: float, side: str) -> dict:
-        """Places a day market order. Raises `AlpacaNotConfiguredError` if
+    def submit_market_order(
+        self, ticker: str, qty: float, side: str, client_order_id: str | None = None
+    ) -> dict:
+        """Places a day market order (fractional `qty` allowed), tagged with
+        `client_order_id` when given. Raises `AlpacaNotConfiguredError` if
         no credentials are set."""
         client = self._require_client()
         request = MarketOrderRequest(
@@ -147,6 +150,7 @@ class AlpacaExecutionClient:
             qty=qty,
             side=_side(side),
             time_in_force=TimeInForce.DAY,
+            client_order_id=client_order_id,
         )
         return _order_to_dict(client.submit_order(request))
 

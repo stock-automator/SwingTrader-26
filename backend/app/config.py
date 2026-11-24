@@ -174,6 +174,9 @@ class Settings:
             comma-separated).
         scorecard_path: The scorecard JSON (`scripts/run_scorecard.py`)
             whose test-period line heads each shortlist section.
+        momentum_sleeve_pct: Share of paper account equity the momentum
+            sleeve (`execution.momentum_sleeve`) holds, split equally across
+            its names (`MOMENTUM_SLEEVE_PCT`, default 0.30).
 
     Secret fields (API keys, tokens, webhook URLs) are `repr=False`, so
     logging or printing a `Settings` never shows them; reading the attribute
@@ -208,6 +211,7 @@ class Settings:
     scheduler_enabled: bool = True
     shortlist_strategies: tuple[str, ...] = DEFAULT_SHORTLIST_STRATEGIES
     scorecard_path: Path = Path("data/reports/scorecard.json")
+    momentum_sleeve_pct: float = 0.30
 
     @property
     def has_finnhub(self) -> bool:
@@ -221,6 +225,12 @@ class Settings:
     def universe_status_path(self) -> Path:
         """Outcome of the last universe sync attempt, for the weekly report."""
         return self.universe_path.with_name("universe_status.json")
+
+    @property
+    def momentum_state_path(self) -> Path:
+        """The momentum sleeve's holdings, beside the swing executor's state
+        (`data/reports/` for the default `data/raw` cache)."""
+        return Path(self.data_dir).parent / "reports" / "momentum_sleeve.json"
 
 
 @lru_cache(maxsize=1)
@@ -273,4 +283,5 @@ def get_settings() -> Settings:
         scorecard_path=Path(
             os.environ.get("SCORECARD_PATH", "data/reports/scorecard.json")
         ),
+        momentum_sleeve_pct=_env_float("MOMENTUM_SLEEVE_PCT", 0.30),
     )
