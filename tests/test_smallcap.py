@@ -708,6 +708,7 @@ def test_runner_run_writes_the_report_and_doc(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "ETF", etf)
     monkeypatch.setattr(runner, "REPORT_JSON", tmp_path / "smallcap.json")
     monkeypatch.setattr(runner, "DOC", tmp_path / "smallcap.md")
+    monkeypatch.setattr(runner, "FIRST_RUN", tmp_path / "first.json")
     monkeypatch.setattr(sc, "EXCLUDE_TOP", 5)
     monkeypatch.setattr(ed, "MIN_POOL", 20)
 
@@ -735,6 +736,7 @@ def test_runner_run_writes_the_report_and_doc(tmp_path, monkeypatch):
         runner.MOMENTUM,
         runner.COMPOSITE,
     }
+    assert u["price_test"] == "adjusted closes (unadjusted bars missing)"
     doc = (tmp_path / "smallcap.md").read_text()
     assert "Long-short diagnostic" in doc and "At 2x costs" in doc
 
@@ -743,3 +745,52 @@ def test_fetch_batch_can_request_unadjusted_bars():
     http = FakeAlpaca()
     _downloader(http, adjustment="raw").fetch_batch(["C"])
     assert http.calls[0]["params"]["adjustment"] == "raw"
+
+
+# --- Data fixes after the first run: symbol reuse without a gap, traded price -------
+
+
+def test_segment_age_restarts_at_a_tenfold_one_day_move():
+    values = np.full(60, 0.35)
+    values[40:] = 41.0  # SN: an OTC tail at $0.35, then SharkNinja at $41
+    values[20] = 0.35 * 9  # a real 9x day (DFDV +843%) is not a new segment
+    values[21:40] = 0.35 * 9
+    close = pd.DataFrame({"X": values}, index=IDX)
+    age = sc.segment_age(close)["X"]
+    assert age.iloc[20] == 21
+    assert age.iloc[40] == 1
+    down = pd.DataFrame({"Y": np.r_[np.full(30, 50.0), np.full(30, 4.0)]}, index=IDX)
+    assert sc.segment_age(down)["Y"].iloc[30] == 1  # 12.5x down
+
+
+def test_price_test_uses_the_traded_close_when_given():
+    frames = {
+        # Adjusted for a later 1:100 reverse split: $50 adjusted, $0.50 traded.
+        "RS": ohlcv(np.full(60, 50.0), volume=200_000),
+        "OK": ohlcv(np.full(60, 50.0), volume=200_000),
+    }
+    traded = {
+        "RS": pd.Series(0.5, index=IDX),
+        "OK": pd.Series(np.r_[np.full(30, np.nan), np.full(30, 50.0)], index=IDX),
+    }
+    panel = sc.build_universe_panel(frames, spy(), traded=traded)
+    elig = sc.eligible(panel, exclude_top=0)
+    assert not elig["RS"].any()
+    # A missing traded close falls back to the adjusted close.
+    assert elig["OK"].iloc[25] and elig["OK"].iloc[45]
+    assert sc.eligible(sc.build_universe_panel(frames, spy()), exclude_top=0)[
+        "RS"
+    ].iloc[45]
+
+
+def test_runner_traded_closes_fall_back_loudly(tmp_path, caplog):
+    runner = _load_runner()
+    traded, label = runner._traded(tmp_path, ["A"])
+    assert traded is None and "missing" in label
+    assert "adjusted closes" in caplog.text
+    folder = tmp_path / runner.UNADJUSTED_DIR
+    folder.mkdir()
+    _write_ohlcv(folder / "A.parquet", np.array([1.0, 2.0]), IDX[:2], 10.0)
+    traded, label = runner._traded(tmp_path, ["A", "B"])
+    assert traded["A"].tolist() == [1.0, 2.0]
+    assert label == "unadjusted closes (1 tickers, 1 without)"

@@ -48,6 +48,7 @@ UNADJUSTED_DIR = "unadjusted"
 EVENTS_FILE = "_events.parquet"
 REPORT_JSON = ROOT / "data/reports/smallcap.json"
 DOC = ROOT / "docs/smallcap.md"
+FIRST_RUN = ROOT / "data/reports/smallcap_first_run.json"
 REVERSAL, MOMENTUM, EARNINGS, COMPOSITE = (
     "1m reversal (bottom decile)",
     "6-1 momentum (top decile)",
@@ -166,6 +167,25 @@ def _etf(symbol: str) -> pd.DataFrame:
     return pd.read_parquet(ETF / f"{symbol}.parquet").rename(columns=str.capitalize)
 
 
+def _traded(raw: Path, tickers: list[str]) -> tuple[dict | None, str]:
+    """Unadjusted closes for the $5 test, or None (adjusted closes, logged
+    and recorded in the report) when they were not downloaded."""
+    folder = raw / UNADJUSTED_DIR
+    if not folder.exists():
+        log.warning("no %s: the $5 test uses adjusted closes", folder)
+        return None, "adjusted closes (unadjusted bars missing)"
+    out, missing = {}, 0
+    for t in tickers:
+        path = folder / f"{t}.parquet"
+        if path.exists():
+            out[t] = pd.read_parquet(path, columns=["Close"])["Close"]
+        else:
+            missing += 1
+    if missing:
+        log.warning("%d tickers have no unadjusted bars: adjusted close used", missing)
+    return out, f"unadjusted closes ({len(out)} tickers, {missing} without)"
+
+
 def _membership(elig: pd.DataFrame) -> pd.DataFrame:
     """Eligible names at each month end, dated the next session: the list
     used for that month's trading (earnings drift `member_at_day0`)."""
@@ -277,13 +297,16 @@ def run(args: argparse.Namespace) -> int:
     common = classified[classified["common"].astype(bool)]
     frames = {t: pd.read_parquet(args.raw / f"{t}.parquet") for t in common["ticker"]}
     spy, iwm = _etf("SPY"), _etf("IWM")
-    panel = sc.build_universe_panel(frames, spy)
+    traded, price_test = _traded(args.raw, list(frames))
+    panel = sc.build_universe_panel(frames, spy, traded=traded)
+    del traded
     index = panel.index
     log.info("panel %d sessions x %d tickers", len(index), len(panel.tickers))
     del frames
 
     elig = sc.eligible(panel)
-    counts = sc.monthly_counts(elig)
+    counts_all = sc.monthly_counts(elig)
+    segment_starts = int((panel.age == 1).to_numpy().sum())
     r1, r61 = sc.return_1m(panel), sc.return_6_1(panel)
     prices = ed.Prices(
         open=panel.open,
@@ -301,6 +324,7 @@ def run(args: argparse.Namespace) -> int:
 
     first = _first_rank_day(index, signals)
     split = int(index.searchsorted(pd.Timestamp(SPLIT_DATE)))
+    counts = counts_all[counts_all.index >= index[first]]
     windows = {
         "build": (index[first + 1], index[split - 1]),
         "test": (index[split], index[-1]),
@@ -375,6 +399,8 @@ def run(args: argparse.Namespace) -> int:
                 .value_counts()
                 .items()
             },
+            "price_test": price_test,
+            "segment_breaks": segment_starts - len(panel.tickers),
             "spliced_dropped": len(panel.suspect),
             "spliced_examples": panel.suspect[:20],
             "panel_tickers": len(panel.tickers),
@@ -512,15 +538,22 @@ of {c["symbols"]:,} resolved to a CIK ({sources}); **{c["unresolved"]:,} could \
 not be classified and are excluded**. Common stocks (10-K / 10-Q filers, SIC \
 not 6221 / 6722 / 6726): {c["common"]:,}. Not common: {reasons}.
 - Spliced-bar filter (`portfolio.suspect_spike`): {u["spliced_dropped"]} \
-tickers dropped. Bar gaps over {sc.MAX_GAP} sessions start a new segment \
-(reused symbols); returns never span one.
-- Eligible names per month end (price >= $5, 20-day dollar volume >= $5M, \
-not in the top {sc.EXCLUDE_TOP} by dollar volume): min {pm["min"]:,}, \
+tickers dropped. A bar gap over {sc.MAX_GAP} sessions or a one-day move \
+beyond {sc.MAX_JUMP:g}x either way starts a new segment (reused symbols); \
+returns never span one: {u.get("segment_breaks", 0):,} breaks.
+- Eligible names per month end from the build start (traded price >= $5 on \
+{u.get("price_test", "adjusted closes")}, 20-day dollar volume >= $5M, not \
+in the top {sc.EXCLUDE_TOP} by dollar volume): min {pm["min"]:,}, \
 median {pm["median"]:,.0f}, max {pm["max"]:,} (build \
 {u["eligible_per_month_build"]["median"]:,.0f}, test \
 {u["eligible_per_month_test"]["median"]:,.0f} median).
 - Delisted: {d["delisted"]:,} of the {d["ever_eligible"]:,} names ever \
-eligible ({d["pct"]:.1f}%) have no bar on the last session.
+eligible ({d["pct"]:.1f}%) have no bar on the last session. This is low for \
+ten years of small caps: Alpaca's inactive list misses delisted names whose \
+symbol moved on, so some survivorship bias remains.
+- Known exclusions: banks that file with the FDIC, not the SEC (OZK, \
+TowneBank; FRC and SBNY in cycle 06), have no 10-K on EDGAR and are \
+excluded, as are foreign filers (20-F / 40-F).
 - Earnings events (8-K Item 2.02): {e["events"]:,}; from the build start \
 {e["events_in_window"]:,}, of which {e["member_events"]:,} were in the \
 eligible list of their month; signals \
@@ -568,6 +601,46 @@ Event study (abnormal return vs SPY from the day +2 open to the day +61 \
 close, gross):
 
 {_study_table(report)}
+
+{_first_run(report)}"""
+
+
+def _first_run(report: dict) -> str:
+    """The first run, before the two data fixes, for the record."""
+    if not FIRST_RUN.exists():
+        return ""
+    first = json.loads(FIRST_RUN.read_text())
+    rows = []
+    for period in ("build", "test"):
+        for name in ORDER:
+            a = first["periods"][period]["1x"][name]
+            b = report["periods"][period]["1x"][name]
+            rows.append(
+                f"| {period} | {name} | {_fmt(a['cagr_pct'])} | {_fmt(b['cagr_pct'])} "
+                f"| {_fmt(a['sharpe'], 2)} | {_fmt(b['sharpe'], 2)} |"
+            )
+    return f"""## Data fixes after the first run (disclosed)
+
+The first run exposed two data errors, fixed in the data layer and not in \
+the rules:
+
+1. The $5 test used split-adjusted closes, so stocks that later reverse-split \
+(CBIO, GDC) showed adjusted prices of $600 to $7,750 while trading for \
+pennies. The rule means the price that traded, so the test now uses \
+unadjusted SIP closes (dollar volume was already right: close x volume is \
+unchanged by adjustment).
+2. Alpaca chains a reused symbol with no gap: SN jumped 116x in a day \
+(Sanchez Energy's OTC tail, then SharkNinja), LINE 448x, SPRB 124x, WW 159x \
+(post-bankruptcy shares). Their 6-1 returns of +10,000% and more swamped the \
+composite's unwinsorised z-score. A one-day move beyond {sc.MAX_JUMP:g}x now \
+starts a new segment. The threshold was set from these data errors (the \
+largest real move found was DFDV's 9.4x), not from strategy results.
+
+Rules, signals and costs are unchanged. 1x costs, first run versus this run:
+
+| Period | Run | CAGR % first | CAGR % now | Sharpe first | Sharpe now |
+|---|---|---:|---:|---:|---:|
+{chr(10).join(rows)}
 """
 
 

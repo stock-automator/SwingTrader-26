@@ -3,8 +3,8 @@ Small and mid caps (cycle 07b). Rules pre-registered in
 `docs/research/strategy-evidence-2026-11.md`, used as written:
 
 - universe: EDGAR-classified common stocks (`data.broad_universe`), active
-  and delisted. Eligible at a month-end close: a bar that day, close >=
-  `MIN_PRICE`, 20-day average dollar volume >= `MIN_ADV`, and not among the
+  and delisted. Eligible at a month-end close: a bar that day, traded
+  (unadjusted) close >= `MIN_PRICE`, 20-day average dollar volume >= `MIN_ADV`, and not among the
   `EXCLUDE_TOP` largest common stocks by that dollar volume;
 - signals at the month-end close, traded at the next open, held a month:
   1. reversal: the lowest decile of the 1-month (21-session) return;
@@ -23,8 +23,8 @@ Small and mid caps (cycle 07b). Rules pre-registered in
 
 Data hygiene: tickers with a spliced bar (`portfolio.suspect_spike`) are
 dropped (`momentum.build_panel`); a bar gap longer than `MAX_GAP` sessions
-starts a new segment (Alpaca reuses symbols), and returns never reach back
-across it (`segment_age`).
+or a one-day move beyond `MAX_JUMP` times starts a new segment (Alpaca
+reuses symbols), and returns never reach back across it (`segment_age`).
 """
 
 from __future__ import annotations
@@ -64,6 +64,11 @@ EAR_DAYS = 60
 TOP_COMPOSITE = 20
 DECILE = 10
 MAX_GAP = 10
+#: A one-day close ratio beyond this (up or down) is another security under
+#: the same symbol (SN: Sanchez Energy's OTC tail at $0.35, then SharkNinja
+#: at $41), not a trade: it starts a new segment. Real moves found in the
+#: data stay below it (DFDV +843% in a day).
+MAX_JUMP = 10.0
 
 #: rank-day position -> {ticker: weight of equity}.
 Selector = Callable[[int], dict[str, float]]
@@ -73,29 +78,49 @@ Selector = Callable[[int], dict[str, float]]
 class UniversePanel(Panel):
     #: Sessions since the current bar segment began (NaN before any bar).
     age: pd.DataFrame | None = None
+    #: Unadjusted (traded) closes for the price test; None = use `close`.
+    traded_close: pd.DataFrame | None = None
 
 
-def segment_age(close: pd.DataFrame, max_gap: int = MAX_GAP) -> pd.DataFrame:
+def segment_age(
+    close: pd.DataFrame, max_gap: int = MAX_GAP, max_jump: float = MAX_JUMP
+) -> pd.DataFrame:
     """Sessions since each ticker's current segment began, counting the
     first bar as 1. More than `max_gap` sessions without a bar end a
-    segment; the next bar starts a new one."""
+    segment, and so does a close more than `max_jump` times (or under
+    1/`max_jump` of) the previous bar's; the next bar starts a new one."""
     has = close.notna().to_numpy()
+    ratio = (close / close.ffill().shift(1)).to_numpy()
+    jump = has & ((ratio > max_jump) | (ratio < 1.0 / max_jump))
     pos = np.arange(len(close), dtype=float)[:, None] * np.ones(close.shape[1])
     last_bar = pd.DataFrame(np.where(has, pos, np.nan)).ffill()
     prev_bar = last_bar.shift(1).to_numpy()
     gap = pos - prev_bar - 1
-    new = has & (np.isnan(prev_bar) | (gap > max_gap))
+    new = has & (np.isnan(prev_bar) | (gap > max_gap) | jump)
     start = pd.DataFrame(np.where(new, pos, np.nan)).ffill().to_numpy()
     return pd.DataFrame(pos - start + 1, index=close.index, columns=close.columns)
 
 
 def build_universe_panel(
-    frames: dict[str, pd.DataFrame], spy: pd.DataFrame
+    frames: dict[str, pd.DataFrame],
+    spy: pd.DataFrame,
+    traded: dict[str, pd.Series] | None = None,
 ) -> UniversePanel:
-    """`momentum.build_panel` (spliced tickers dropped) plus `age`."""
+    """`momentum.build_panel` (spliced tickers dropped) plus `age` and, from
+    `traded` (ticker -> unadjusted closes), `traded_close`."""
     base = build_panel(frames, spy)
     fields = {k: getattr(base, k) for k in base.__dataclass_fields__}
-    return UniversePanel(**fields, age=segment_age(base.close))
+    traded_close = None
+    if traded is not None:
+        traded_close = pd.DataFrame(
+            {t: traded[t].reindex(base.index) for t in base.tickers if t in traded},
+            index=base.index,
+            columns=base.tickers,
+            dtype=float,
+        )
+    return UniversePanel(
+        **fields, age=segment_age(base.close), traded_close=traded_close
+    )
 
 
 def return_1m(panel: UniversePanel) -> pd.DataFrame:
@@ -120,7 +145,11 @@ def eligible(
     has = panel.close.notna()
     adv = panel.adv.where(has)
     rank = adv.rank(axis=1, ascending=False, method="first")
-    return has & (panel.close >= min_price) & (adv >= min_adv) & (rank > exclude_top)
+    price = panel.close
+    traded = getattr(panel, "traded_close", None)
+    if traded is not None:
+        price = traded.where(traded.notna(), panel.close)
+    return has & (price >= min_price) & (adv >= min_adv) & (rank > exclude_top)
 
 
 def monthly_counts(elig: pd.DataFrame) -> pd.Series:
