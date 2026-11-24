@@ -15,6 +15,7 @@ from backend.app.quant.etf_strategies import (
     abs_momentum_weights,
     break_even_cost,
     cached_frame,
+    distribution_adjust,
     equal_weights,
     intraday_positions,
     last_complete_end,
@@ -272,6 +273,31 @@ def test_run_rebalanced_weights_drift_within_month():
 # --------------------------------------------------------------------------
 # Caches and data hygiene
 # --------------------------------------------------------------------------
+
+
+def test_distribution_adjust_removes_unadjusted_spin_off_gap():
+    # XLF paid its XLRE spin-off on 2016-09-19 and Alpaca leaves the drop in
+    # the "all"-adjusted bars. Earlier bars are scaled by open / prev close.
+    idx = pd.to_datetime(["2016-09-15", "2016-09-16", "2016-09-19", "2016-09-20"])
+    df = pd.DataFrame(
+        {
+            "open": [19.0, 19.5, 16.1, 16.2],
+            "high": [19.8, 19.7, 16.2, 16.3],
+            "low": [18.9, 19.4, 16.0, 16.1],
+            "close": [19.6, 20.0, 16.0, 16.4],
+            "volume": [1.0, 2.0, 3.0, 4.0],
+        },
+        index=idx,
+    )
+    out = distribution_adjust(df, pd.Timestamp("2016-09-19"))
+    f = 16.1 / 20.0
+    assert out["close"].tolist() == pytest.approx([19.6 * f, 20.0 * f, 16.0, 16.4])
+    assert out["open"].iloc[0] == pytest.approx(19.0 * f)
+    assert out["high"].iloc[1] == pytest.approx(19.7 * f)
+    assert out["volume"].tolist() == [1.0, 2.0, 3.0, 4.0]
+    # The ex-date gap is now zero; the input is not mutated.
+    assert out["open"].iloc[2] / out["close"].iloc[1] == pytest.approx(1.0)
+    assert df["close"].iloc[1] == 20.0
 
 
 def test_cached_frame_fetches_once_then_reads_cache(tmp_path):

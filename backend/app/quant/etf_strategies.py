@@ -50,6 +50,18 @@ def cached_frame(
     return df
 
 
+def distribution_adjust(df: pd.DataFrame, ex_date: pd.Timestamp) -> pd.DataFrame:
+    """Scale OHLC before `ex_date` by its open / previous close, removing a
+    distribution the vendor left unadjusted (XLF's XLRE spin-off,
+    2016-09-19). Assumes no market move over that one gap."""
+    out = df.copy()
+    before = out.index < ex_date
+    factor = out.loc[ex_date, "open"] / out.loc[before, "close"].iloc[-1]
+    cols = ["open", "high", "low", "close"]
+    out.loc[before, cols] = out.loc[before, cols] * factor
+    return out
+
+
 # --------------------------------------------------------------------------
 # 1. SPY intraday momentum
 # --------------------------------------------------------------------------
