@@ -271,7 +271,7 @@ stay in `.env`; logs go to `logs/`. To remove it:
 `launchctl bootout gui/$(id -u)/com.swingtrader.backend`, then delete
 `~/Library/LaunchAgents/com.swingtrader.backend.plist`.
 
-Cron runs `scripts/paper_executor.py` at 14:35 UK on weekdays; it places the cached daily brief's setups as paper bracket orders.
+Cron runs `scripts/paper_executor.py` at 14:35 UK on weekdays; it places the cached daily brief's setups as paper bracket orders. It then places the shortlist picks the same way, each tagged with its strategy in Alpaca's `client_order_id` (`st-<date>-<strategy>-<ticker>`). Picks stop at 6 open positions (every held position counts) or 6% open risk on the shortlist's $10,000 account, and a ticker is placed at most once a day.
 
 ### Running the tests (optional, for the curious)
 
@@ -329,6 +329,8 @@ cp .env.example .env
 | `FX_COST_PCT` | `0.0015` | Broker currency-conversion fee per conversion (fraction of notional). |
 | `FX_CONVERSIONS_PER_ROUND_TRIP` | `0` | GBP<->USD conversions per round trip. `0` = USD balance, no FX cost; `2` = convert in and out every trade. |
 | `SCHEDULER_ENABLED` | `true` | Runs the scheduled jobs (07:30 UK data sync, 08:00 UK daily brief, universe refresh). Set `false` to turn them off. |
+| `SHORTLIST_STRATEGIES` | `zscore_mean_reversion,supertrend_psar,bollinger_keltner_squeeze` | Strategies that get a shortlist section in the daily brief, in order (comma-separated registry ids). |
+| `SCORECARD_PATH` | `data/reports/scorecard.json` | Scorecard whose test-period line heads each shortlist section. If it's missing, each section says `NO SCORECARD YET`. |
 
 > **Never commit a real `.env` file.** It's already excluded via
 > `.gitignore` — only `.env.example` (with no real keys in it) is tracked.

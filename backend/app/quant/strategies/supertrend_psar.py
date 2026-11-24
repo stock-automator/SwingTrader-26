@@ -241,6 +241,11 @@ class SupertrendPSARStrategy(BaseStrategy):
 
         return out
 
+    def signal_strength(self, signals: pd.DataFrame) -> pd.Series:
+        """Close above the Supertrend line, in ATRs: a cleaner flip ranks
+        higher."""
+        return (signals["Close"] - signals["supertrend"]) / signals["atr"]
+
     def __repr__(self) -> str:
         return (
             f"SupertrendPSARStrategy(supertrend_period={self.supertrend_period}, "

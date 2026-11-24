@@ -20,3 +20,6 @@ htmlcov/
 
 # launchd service logs (deploy/launchd)
 logs/
+
+# Gap-and-Go 5-minute bars (re-downloadable, never committed)
+data/intraday/

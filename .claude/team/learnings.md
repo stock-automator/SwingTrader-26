@@ -1,6 +1,7 @@
 # Team learnings
 
-<!-- newest operational lesson pinned here until the next /retro files it -->
+<!-- newest operational lessons pinned here until the next /retro files them -->
+- 2026-11-23 [domain-expert] [domain] Before trusting any backtest, scan the cache for >40% one-day moves that revert within 5 bars. ~130 tickers had spliced bars from an old sync, and one short showed a fake $28k loss. (c66eba3)
 - 2026-11-23 [developer] [bug] `latest_market_close` used the Mac's UK local time, so a 17:43 London sync (12:43 New York) cached a partial Monday bar that append-only syncs never correct. Judge market events on America/New_York time, and never write bars from an unfinished session. (bfefed4)
 
 Every agent reads this before starting. One line per lesson, newest at the bottom:

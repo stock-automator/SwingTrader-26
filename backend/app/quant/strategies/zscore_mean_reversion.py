@@ -168,6 +168,10 @@ class ZScoreMeanReversionStrategy(BaseStrategy):
 
         return out
 
+    def signal_strength(self, signals: pd.DataFrame) -> pd.Series:
+        """How far below its mean the close is: `-zscore`, deeper = stronger."""
+        return -signals["zscore"]
+
     def __repr__(self) -> str:
         return (
             f"ZScoreMeanReversionStrategy(zscore_period={self.zscore_period}, "

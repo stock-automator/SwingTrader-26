@@ -139,6 +139,11 @@ class BollingerKeltnerSqueezeStrategy(BaseStrategy):
 
         return out
 
+    def signal_strength(self, signals: pd.DataFrame) -> pd.Series:
+        """Close above the upper Bollinger band, in ATRs: the breakout's
+        margin."""
+        return (signals["Close"] - signals["bb_upper"]) / signals["atr"]
+
     def __repr__(self) -> str:
         return (
             f"BollingerKeltnerSqueezeStrategy(bb_period={self.bb_period}, "

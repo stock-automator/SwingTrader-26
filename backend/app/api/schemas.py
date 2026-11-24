@@ -635,6 +635,14 @@ class ExecutionOrderRequest(BaseModel):
         "only if the Alpaca account holds at least qty long of the ticker; "
         "every other order is guarded as an entry.",
     )
+    client_order_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+        description="Alpaca client order id, e.g. the paper executor's "
+        "strategy tag. BRACKET orders only.",
+    )
 
     @field_validator("ticker")
     @classmethod
@@ -1143,15 +1151,42 @@ class DailyBriefSetup(BaseModel):
     reason: str
 
 
+class DailyBriefShortlistPick(BaseModel):
+    ticker: str
+    strategy: str
+    entry: float
+    stop: float
+    target: float
+    shares: int
+    risk_usd: float
+    risk_gbp: float | None
+    strength: float | None
+
+
+class DailyBriefShortlistSection(BaseModel):
+    """One strategy's shortlist: its scorecard line (`trails_spy` is null
+    without one) and up to 3 picks, or `note` saying why there are none."""
+
+    strategy: str
+    scorecard: str
+    trails_spy: bool | None
+    note: str
+    picks: list[DailyBriefShortlistPick]
+
+
 class DailyBriefResponse(BaseModel):
     """`GET /api/v1/reports/daily`: the cached brief, its plain-text
-    rendering and when it was built (`computed_at`, ISO 8601 UTC)."""
+    rendering and when it was built (`computed_at`, ISO 8601 UTC).
+    `shortlist` is empty and `shortlist_equity` null in a brief cached
+    before the shortlist existed."""
 
     as_of: str | None
     last_session: str
     regime: str
     stale: bool
     setups: list[DailyBriefSetup]
+    shortlist: list[DailyBriefShortlistSection] = []
+    shortlist_equity: float | None = None
     text: str
     computed_at: str
 

@@ -616,6 +616,22 @@ When Alpaca keys are set it also carries `Day trades used: n/3 (last 5
 days)` from the paper account; the line is left out without keys or if
 Alpaca can't be reached.
 
+After the setups comes the shortlist: one section per strategy in
+`SHORTLIST_STRATEGIES` (default: the scorecard's top 3, long-only). Each
+section reuses that strategy's scan from the same build (no extra scan),
+ranks the strategy's own long signals by its own signal strength
+(`signal_strength`), and keeps up to 3 that pass the live gate (the 2.5R
+reward:risk floor and the earnings/split lockout). Picks are sized like the
+portfolio engine: 1% risk on a $10,000 account, capped at 25% of it per
+position. The section header carries the strategy's test-period line from
+`SCORECARD_PATH`: return vs SPY held at the same exposure, profit factor and
+max drawdown. It says `trails S&P — paper only` when that return trails SPY,
+and `NO SCORECARD YET` when the file or the strategy's row is missing. When the
+market regime blocks new longs, every section says so instead of listing
+picks. In the JSON, `shortlist` holds each section (`strategy`, `scorecard`,
+`trails_spy`, `note`, `picks`) and `shortlist_equity` is the sizing account.
+A brief cached before the shortlist existed returns `shortlist: []`.
+
 The backend's scheduler builds the brief Monday to Friday at 08:00 UK
 (after a 07:30 UK data sync), caches it in
 `<DATA_DIR>/reports/daily_brief.json` and sends it to Telegram when

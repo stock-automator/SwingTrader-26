@@ -39,6 +39,14 @@ DEFAULT_CORS_ORIGIN_REGEX = (
     r"|100\.\d{1,3}\.\d{1,3}\.\d{1,3}):\d+$"
 )
 
+#: The daily brief's per-strategy shortlist sections (cycle 03 step 4), in
+#: order: the scorecard's top 3, long-only. `REGISTRY` ids.
+DEFAULT_SHORTLIST_STRATEGIES = (
+    "zscore_mean_reversion",
+    "supertrend_psar",
+    "bollinger_keltner_squeeze",
+)
+
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
@@ -75,6 +83,13 @@ def _env_optional_int(name: str, default: int | None) -> int | None:
         return int(raw)
     except ValueError:
         return default
+
+
+def _env_csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
 @dataclass(frozen=True)
@@ -154,6 +169,11 @@ class Settings:
         scheduler_enabled: Whether app startup runs the in-process
             APScheduler jobs (universe refresh, 07:30 UK data sync, 08:00 UK
             daily brief). Off under tests and for a one-off `uvicorn` run.
+        shortlist_strategies: Strategy ids that get a shortlist section in
+            the daily brief, in display order (`SHORTLIST_STRATEGIES`,
+            comma-separated).
+        scorecard_path: The scorecard JSON (`scripts/run_scorecard.py`)
+            whose test-period line heads each shortlist section.
 
     Secret fields (API keys, tokens, webhook URLs) are `repr=False`, so
     logging or printing a `Settings` never shows them; reading the attribute
@@ -186,6 +206,8 @@ class Settings:
     fx_cost_pct: float = 0.0015
     fx_conversions_per_round_trip: int = 0
     scheduler_enabled: bool = True
+    shortlist_strategies: tuple[str, ...] = DEFAULT_SHORTLIST_STRATEGIES
+    scorecard_path: Path = Path("data/reports/scorecard.json")
 
     @property
     def has_finnhub(self) -> bool:
@@ -245,4 +267,10 @@ def get_settings() -> Settings:
         fx_cost_pct=_env_float("FX_COST_PCT", 0.0015),
         fx_conversions_per_round_trip=_env_int("FX_CONVERSIONS_PER_ROUND_TRIP", 0),
         scheduler_enabled=_env_bool("SCHEDULER_ENABLED", True),
+        shortlist_strategies=_env_csv(
+            "SHORTLIST_STRATEGIES", DEFAULT_SHORTLIST_STRATEGIES
+        ),
+        scorecard_path=Path(
+            os.environ.get("SCORECARD_PATH", "data/reports/scorecard.json")
+        ),
     )

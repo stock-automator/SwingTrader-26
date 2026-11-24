@@ -116,6 +116,7 @@ def submit_order(
             stop_loss=request.stop_loss,
             take_profit=request.take_profit,
             limit_price=request.limit_price,
+            client_order_id=request.client_order_id,
         )
     except AlpacaNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

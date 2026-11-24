@@ -72,3 +72,7 @@ Format: `## YYYY-MM-DD — Decision` then Why / Alternatives considered.
   - Strip heredocs and quoted strings and match only at command positions. Otherwise commit messages and scripts that merely *mention* a blocked command got blocked.
 - Test cases are in `.claude/hooks/test-block-dangerous-git.sh`.
 - **Alternatives:** the upstream script unchanged.
+
+## 2026-11-23 — Cycle 03 Gate 1 approved with defaults; leaner build loop (A)
+- A said "start triggering what we discussed", which accepts the cycle-03 defaults: $10k, 1% risk, 25% max per position, 6 positions, 6% heat, 40-day time stop, long+short, 2016–22 tune / 2023+ test, 3 picks per strategy section.
+- A asked to conserve tokens without losing quality. For this cycle, the developer writes the failing tests first (the TDD skill) and an independent reviewer verifies. The separate tester run is skipped, and every gate is kept.

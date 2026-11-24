@@ -155,6 +155,9 @@ class Setup:
     note: str | None = None
     reward_risk_ratio: float | None = None
     notional_value: float | None = None
+    #: The strategy's own `signal_strength` on the latest bar (LONG only);
+    #: ranks one strategy's picks, not comparable across strategies.
+    strength: float | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -185,6 +188,14 @@ def _round(value: float | None, places: int) -> float | None:
         return None
     number = float(value)
     return round(number, places) if math.isfinite(number) else None
+
+
+def _latest_strength(strategy: BaseStrategy, signals: pd.DataFrame) -> float | None:
+    strength = strategy.signal_strength(signals)
+    if strength is None:
+        return None
+    value = float(strength.iloc[-1])
+    return value if math.isfinite(value) else None
 
 
 def scan_ticker(
@@ -262,6 +273,7 @@ def scan_ticker(
     }
 
     if signal == 1:
+        common["strength"] = _latest_strength(strategy, signals)
         order = risk_manager.build_order(
             entry_price=close,
             sl_type=str(latest["sl_type"]),
