@@ -44,23 +44,36 @@ def test_needed_lists_uncached_members_with_asof_a_month_before_they_left(tmp_pa
     assert pp.needed(m, [tmp_path]) == {"AA": "2016-09-26", "TWTR": "2016-02-29"}
 
 
-def test_fetch_all_applies_query_overrides_and_cuts_at_their_end(tmp_path):
+def test_fetch_all_applies_query_overrides_and_keep_windows(tmp_path):
     seen = []
 
     def alpaca(symbol, asof):
         seen.append((symbol, asof))
         return _bars("2019-03-01", 30)
 
-    overrides = {"TFCFA": ("FOXA", "2019-01-24", "2019-03-19")}
     pp.fetch_all(
-        {"TFCFA": "2019-01-27"},
+        {"TFCFA": "2019-01-27", "WRK": "2024-05-26"},
         tmp_path,
         sources=[("alpaca", alpaca)],
-        overrides=overrides,
+        overrides={"TFCFA": ("FOXA", "2019-01-24")},
+        keep={"TFCFA": (None, "2019-03-19"), "WRK": ("2019-03-05", None)},
     )
-    assert seen == [("FOXA", "2019-01-24")]
-    df = load_prices("TFCFA", data_dir=tmp_path, allow_download=False)
-    assert df.index[-1] == pd.Timestamp("2019-03-19")
+    assert seen == [("FOXA", "2019-01-24"), ("WRK", "2024-05-26")]
+    tfcfa = load_prices("TFCFA", data_dir=tmp_path, allow_download=False)
+    assert tfcfa.index[-1] == pd.Timestamp("2019-03-19")
+    wrk = load_prices("WRK", data_dir=tmp_path, allow_download=False)
+    assert wrk.index[0] == pd.Timestamp("2019-03-05")
+    assert wrk.index[-1] == pd.Timestamp("2019-04-11")
+
+
+def test_keep_windows_cover_the_known_symbol_splices():
+    """Alpaca chains a symbol to its successor on the event day (cycle 04b
+    data check): each of these needs a cut at the last member month end."""
+    assert pp.KEEP["AA"] == (None, "2016-10-31")
+    assert pp.KEEP["ARNC"] == (None, "2020-03-31")
+    assert pp.KEEP["DWDP"] == (None, "2019-05-31")
+    assert pp.KEEP["WRK"] == ("2016-05-16", None)
+    assert pp.QUERY_OVERRIDES["TFCFA"][0] == "FOXA"
 
 
 def test_fetch_all_overwrite_refetches_existing_files(tmp_path):

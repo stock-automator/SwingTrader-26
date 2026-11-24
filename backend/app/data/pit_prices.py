@@ -9,8 +9,10 @@ before its first), so the symbol resolves to the company that held it shortly
 before it left: a symbol created by a rename after 2015 (TSO -> ANDV) does not
 exist at the first snapshot, and on the event day the symbol can already map
 to a successor (AA on 2016-10-31 returns the new Alcoa). Alpaca links a
-series by symbol chain, so a symbol a successor kept (FOXA after Disney bought
-21st Century Fox) needs a `QUERY_OVERRIDES` entry with an end date.
+series by symbol chain, so where a successor kept the symbol the bars after
+the event belong to another company: `KEEP` cuts those (found by scanning the
+fetched files for one-day moves over 40%), and `QUERY_OVERRIDES` queries a
+member by its earlier symbol (21st Century Fox).
 
 Each result, including failures, is kept in `_status.json`: a negative cache,
 so failed tickers are not refetched unless asked. Errors are logged as
@@ -36,12 +38,27 @@ ASOF_DAYS = 35
 #: (symbol, asof YYYY-MM-DD) -> OHLCV frame, empty when the source has none.
 Fetcher = Callable[[str, str], pd.DataFrame]
 
-#: ticker -> (symbol to query, asof, last bar to keep). 21st Century Fox's
-#: shares traded as FOXA / FOX until 2019-03-18 and as TFCFA / TFCF on
-#: 2019-03-19, its last day; from then on FOXA / FOX are the new Fox Corp.
-QUERY_OVERRIDES: dict[str, tuple[str, str, str]] = {
-    "TFCFA": ("FOXA", "2019-01-24", "2019-03-19"),
-    "TFCF": ("FOX", "2019-01-24", "2019-03-19"),
+#: ticker -> (symbol to query, asof). 21st Century Fox's shares traded as
+#: FOXA / FOX until 2019-03-18 and as TFCFA / TFCF on 2019-03-19, its last day.
+QUERY_OVERRIDES: dict[str, tuple[str, str]] = {
+    "TFCFA": ("FOXA", "2019-01-24"),
+    "TFCF": ("FOX", "2019-01-24"),
+}
+
+#: ticker -> (first, last) bar to keep, None = open-ended.
+KEEP: dict[str, tuple[str | None, str | None]] = {
+    # From 2019-03-19 FOXA / FOX are the new Fox Corp.
+    "TFCFA": (None, "2019-03-19"),
+    "TFCF": (None, "2019-03-19"),
+    # AA is the new Alcoa from 2016-11-01 (81.37 -> 20.87); the old one is ARNC.
+    "AA": (None, "2016-10-31"),
+    # ARNC is the Arconic Corp spin-off from 2020-04-01 (64.24 -> 15.00).
+    "ARNC": (None, "2020-03-31"),
+    # DWDP became DD with a 1-for-3 reverse split Alpaca left unadjusted.
+    "DWDP": (None, "2019-05-31"),
+    # Bars before the 2016-05-16 Ingevity spin-off are on another scale
+    # (186.22 -> 28.67).
+    "WRK": ("2016-05-16", None),
 }
 
 #: ticker -> source to try first. Alpaca starts these at a later symbol
@@ -91,7 +108,8 @@ def fetch_all(
     sources: list[tuple[str, Fetcher]],
     retry_failed: bool = False,
     secrets: Iterable[str] = (),
-    overrides: dict[str, tuple[str, str, str]] | None = None,
+    overrides: dict[str, tuple[str, str]] | None = None,
+    keep: dict[str, tuple[str | None, str | None]] | None = None,
     overwrite: bool = False,
     prefer: dict[str, str] | None = None,
 ) -> dict[str, dict]:
@@ -111,7 +129,8 @@ def fetch_all(
         if ticker in status and status[ticker].get("source") is None:
             if not (retry_failed or overwrite):
                 continue
-        symbol, query_asof, end = (overrides or {}).get(ticker, (ticker, asof, None))
+        symbol, query_asof = (overrides or {}).get(ticker, (ticker, asof))
+        first_bar, last_bar = (keep or {}).get(ticker, (None, None))
         errors: dict[str, str] = {}
         got = None
         first = (prefer or {}).get(ticker)
@@ -119,8 +138,8 @@ def fetch_all(
         for name, fetch in ordered:
             try:
                 df = fetch(symbol, query_asof)
-                if end is not None and df is not None:
-                    df = df.loc[: pd.Timestamp(end)]
+                if df is not None and (first_bar or last_bar):
+                    df = df.loc[first_bar:last_bar]
             except Exception as exc:  # network, auth, symbol unknown
                 errors[name] = _scrub(f"{type(exc).__name__}: {exc}", secrets)[:300]
                 continue

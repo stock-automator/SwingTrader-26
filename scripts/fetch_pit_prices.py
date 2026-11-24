@@ -105,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         retry_failed=args.retry_failed,
         secrets=secrets,
         overrides=pp.QUERY_OVERRIDES,
+        keep=pp.KEEP,
         overwrite=args.overwrite,
         prefer=pp.PREFER,
     )
