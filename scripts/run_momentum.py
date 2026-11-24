@@ -291,6 +291,14 @@ one-day moves over 40% are cut (AA 2016-11, ARNC 2020-04, DWDP 2019-06, WRK \
 before 2016-05-16, 21st Century Fox after 2019-03-19); smaller splices or \
 spin-off adjustments could remain. XL has no bars before its 2016-07 \
 redomicile.
+- One price file per symbol. The {cov["member_months"] - cov["with_price"]} \
+unpriced member-months are mostly reused symbols whose file now belongs to \
+a later company with no bars that early: DOW (Dow Chemical to 2017-08), SNDK \
+(SanDisk to 2016-05), Q (Quintiles to 2017-11); the rest are XL before \
+2016-07, WRK before 2016-05-16 and final months of buyouts. The one reused \
+symbol with bars in the old member's months, DD (E.I. du Pont to 2017-08), \
+tracks Alpaca's E.I. du Pont bars at a steady 1.99 price ratio (one-off \
+check, 2026-11-24).
 - A delisted exit sells at the last close; cash or shares paid in a merger \
 after that close are not modelled.
 - Adjustment artefacts in `data/raw` (cycle 04 check): 10 cached series \
