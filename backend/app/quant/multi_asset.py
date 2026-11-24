@@ -209,3 +209,19 @@ def return_agreement(
     r = (r / r.shift(1) - 1).dropna()
     bad = r[(r["a"] - r["b"]).abs() > tol]
     return float(r["a"].corr(r["b"])), bad
+
+
+def patch_bad_closes(
+    a: pd.DataFrame, ref: pd.DataFrame, tol: float = 0.01
+) -> tuple[pd.DataFrame, pd.DatetimeIndex]:
+    """Repair one-session bad closes in `a` against reference vendor `ref`:
+    where the close ratio a/ref moves more than `tol` from the previous
+    session and is back within `tol` the next, the close becomes
+    ref close x previous ratio. Persistent level shifts (adjustment
+    differences) are left alone. Returns the repaired frame and the days."""
+    k = a["close"] / ref["close"].reindex(a.index)
+    prev = k.shift(1)
+    bad = ((k / prev - 1).abs() > tol) & ((k.shift(-1) / prev - 1).abs() <= tol)
+    out = a.copy()
+    out.loc[bad, "close"] = (ref["close"].reindex(a.index) * prev)[bad]
+    return out, a.index[bad.to_numpy()]

@@ -21,6 +21,7 @@ from backend.app.quant.multi_asset import (
     gtaa_aggressive_weights,
     gtaa_weights,
     inverse_vol_weights,
+    patch_bad_closes,
     period_metrics,
     return_agreement,
     sma_filter,
@@ -266,15 +267,32 @@ def test_return_agreement_flags_unadjusted_distribution():
     assert corr > 0.9
 
 
+def test_patch_bad_closes_repairs_one_day_prints_but_not_level_shifts():
+    idx = pd.bdate_range("2020-03-02", periods=10)
+    y = ohlc(pd.Series([100, 101, 90, 99, 98, 97, 96, 95, 94, 93], idx, dtype=float))
+    a = y * 2.0
+    a.loc[idx[2], "close"] = 2.0 * 95  # bad print, reverts next session
+    a.loc[a.index >= idx[6], "close"] *= 1.014  # level shift: an adjustment difference
+    fixed, days = patch_bad_closes(a, y, tol=0.01)
+    assert days.tolist() == [idx[2]]
+    assert fixed.loc[idx[2], "close"] == pytest.approx(180.0)
+    assert fixed.loc[idx[2], "open"] == a.loc[idx[2], "open"]
+    assert (fixed.loc[fixed.index != idx[2]] == a.loc[a.index != idx[2]]).all().all()
+
+
 @pytest.mark.parametrize(
     "sym", ["SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "SHY", "GLD", "DBC", "VNQ"]
 )
 def test_real_sources_agree_where_they_overlap(sym):
-    """Alpaca SIP (2016+) vs yfinance auto-adjusted daily returns: the
-    pre-registered splice requires correlation > 0.99."""
+    """Alpaca SIP (2016+) vs yfinance auto-adjusted daily returns, after the
+    one-day bad Alpaca closes are repaired: correlation must be > 0.99."""
     alp, yfp = ETF_DIR / f"{sym}.parquet", ETF_DIR / "yf" / f"{sym}.parquet"
     if not (alp.exists() and yfp.exists()):
         pytest.skip("ETF cache absent; run scripts/run_multi_asset.py")
-    a, y = pd.read_parquet(alp)["close"], pd.read_parquet(yfp)["close"]
-    corr, _ = return_agreement(a, y)
+    a, y = pd.read_parquet(alp), pd.read_parquet(yfp)
+    fixed, days = patch_bad_closes(a, y)
+    corr, bad = return_agreement(fixed["close"], y["close"])
     assert corr > 0.99
+    assert len(days) <= 5  # repairs stay rare
+    # Nothing left that looks like a spliced or unadjusted bar.
+    assert (bad[["a", "b"]].abs() < 0.40).all().all()
