@@ -200,10 +200,16 @@ def simulate(
     max_positions: int = MAX_POSITIONS,
     cost: float = COST_PER_SIDE,
     initial_capital: float = INITIAL_CAPITAL,
+    costs: np.ndarray | None = None,
 ) -> EventResult:
     """Trade `signals` (`ticker, entry, exit_plan, ear, signal, day0`)
     entering on sessions `a`..`b`; positions still open at `b` are marked to
-    its close."""
+    its close. `costs` (sessions x tickers, optional) replaces the flat
+    `cost` with a per-side rate for each trade's session and ticker."""
+
+    def rate(i: int, j: int) -> float:
+        return cost if costs is None else float(costs[i, j])
+
     index = prices.close.index
     tickers = list(prices.close.columns)
     column = {t: j for j, t in enumerate(tickers)}
@@ -246,11 +252,12 @@ def simulate(
                     if not np.isfinite(price):
                         no_open += 1
                         continue
-                    notional = size if side < 0 else min(size, cash / (1 + cost))
+                    c = rate(i, j)
+                    notional = size if side < 0 else min(size, cash / (1 + c))
                     if notional <= 0:
                         skipped += 1
                         continue
-                    cash -= side * notional + notional * cost
+                    cash -= side * notional + notional * c
                     positions.append(
                         dict(
                             j=j,
@@ -260,6 +267,7 @@ def simulate(
                             exit_plan=int(ev["exit_plan"]),
                             price=price,
                             ev=ev,
+                            cost_in=c,
                         )
                     )
                     entered.append(row_id)
@@ -275,7 +283,7 @@ def simulate(
                 price, reason = closes[i, j], HOLD_EXIT
             else:
                 continue
-            fee = p["shares"] * price * cost
+            fee = p["shares"] * price * rate(i, j)
             cash += p["side"] * p["shares"] * price - fee
             ev = p["ev"]
             trades.append(
@@ -290,7 +298,7 @@ def simulate(
                     price,
                     reason,
                     p["shares"],
-                    fee + p["shares"] * p["price"] * cost,
+                    fee + p["shares"] * p["price"] * p["cost_in"],
                     p["side"] * (price / p["price"] - 1),
                 )
             )
