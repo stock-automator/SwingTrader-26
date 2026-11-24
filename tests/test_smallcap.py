@@ -8,10 +8,14 @@ import json
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from backend.app.data import broad_universe as bu
+from backend.app.quant import earnings_drift as ed
+from backend.app.quant import smallcap as sc
+from backend.app.quant.momentum import build_panel
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -313,3 +317,314 @@ def test_classify_logs_an_edgar_error_and_keeps_going(caplog):
     assert out.loc["OLD", "reason"] == "EDGAR error"
     assert bool(out.loc["AAPL", "common"]) is True
     assert "OLD" in caplog.text and "HTTP 500" in caplog.text
+
+
+# --- Panel, gaps and the spliced-bar filter ----------------------------------
+
+IDX = pd.bdate_range("2020-01-01", periods=60)
+
+
+def ohlcv(close, volume=1_000_000.0, index=IDX) -> pd.DataFrame:
+    close = pd.Series(close, index=index[: len(close)], dtype=float)
+    return pd.DataFrame(
+        {
+            "Open": close,
+            "High": close,
+            "Low": close,
+            "Close": close,
+            "Volume": volume,
+        }
+    ).dropna()
+
+
+def spy(index=IDX) -> pd.DataFrame:
+    return ohlcv(np.full(len(index), 300.0), index=index)
+
+
+def test_panel_drops_spliced_tickers_with_the_portfolio_filter():
+    spliced = np.full(60, 100.0)
+    spliced[30] = 4.0  # 100 -> 4 -> 100: a spliced bar
+    panel = sc.build_universe_panel(
+        {"GOOD": ohlcv(np.full(60, 50.0)), "BAD": ohlcv(spliced)}, spy()
+    )
+    assert panel.tickers == ["GOOD"]
+    assert panel.suspect == ["BAD"]
+
+
+def test_segment_age_restarts_after_a_long_gap():
+    close = pd.DataFrame({"X": np.arange(1.0, 61.0)}, index=IDX)
+    close.iloc[10:13, 0] = np.nan  # 3-session halt: same segment
+    close.iloc[20 : 20 + sc.MAX_GAP + 1, 0] = np.nan  # long gap: new company
+    age = sc.segment_age(close)["X"]
+    assert age.iloc[9] == 10
+    assert age.iloc[13] == 14  # the short halt does not restart the count
+    first_back = 20 + sc.MAX_GAP + 1
+    assert age.iloc[first_back] == 1
+    assert age.iloc[first_back + 4] == 5
+
+
+def test_returns_are_not_computed_across_a_symbol_reuse_gap():
+    close = np.full(60, 10.0)
+    close[25:36] = np.nan  # 11 sessions with no bar
+    close[36:] = 80.0  # another company took the symbol
+    panel = sc.build_universe_panel({"X": ohlcv(close)}, spy())
+    r1 = sc.return_1m(panel)["X"]
+    assert np.isnan(r1.iloc[36 + sc.R1_DAYS - 1])
+    assert r1.iloc[36 + sc.R1_DAYS] == pytest.approx(0.0)
+    assert r1.iloc[24] == pytest.approx(0.0)
+
+
+# --- Eligibility ------------------------------------------------------------------
+
+
+def _eligibility_panel():
+    frames = {
+        # ADV = close * volume.
+        "BIG1": ohlcv(np.full(60, 100.0), volume=1_000_000),  # $100M, top
+        "BIG2": ohlcv(np.full(60, 90.0), volume=1_000_000),  # $90M, top
+        "MID": ohlcv(np.full(60, 50.0), volume=200_000),  # $10M
+        "CHEAP": ohlcv(np.full(60, 4.0), volume=5_000_000),  # $20M, < $5
+        "THIN": ohlcv(np.full(60, 20.0), volume=100_000),  # $2M
+        "SMALL": ohlcv(np.full(60, 10.0), volume=600_000),  # $6M
+    }
+    return sc.build_universe_panel(frames, spy())
+
+
+def test_eligibility_needs_price_dollar_volume_and_excludes_the_largest():
+    panel = _eligibility_panel()
+    elig = sc.eligible(panel, exclude_top=2)
+    day = elig.iloc[30]
+    assert sorted(day[day].index) == ["MID", "SMALL"]
+    # The first ADV_DAYS - 1 sessions have no 20-day average yet.
+    assert not elig.iloc[sc.ADV_DAYS - 2].any()
+
+
+def test_monthly_eligibility_counts_and_summary():
+    panel = _eligibility_panel()
+    elig = sc.eligible(panel, exclude_top=2)
+    counts = sc.monthly_counts(elig)
+    # Month ends of IDX (Jan, Feb; March is unfinished): Jan has 23 sessions.
+    assert counts.index.tolist() == [pd.Timestamp("2020-01-31"), pd.Timestamp("2020-02-28")]
+    assert counts.tolist() == [2, 2]
+    assert sc.count_summary(counts) == {"min": 2, "median": 2.0, "max": 2}
+
+
+def test_delisted_share_counts_eligible_names_whose_bars_end_early():
+    frames = {
+        "ALIVE": ohlcv(np.full(60, 10.0), volume=600_000),
+        "GONE": ohlcv(np.full(40, 10.0), volume=600_000),
+        "NEVER": ohlcv(np.full(30, 1.0), volume=600_000),  # never eligible
+    }
+    panel = sc.build_universe_panel(frames, spy())
+    elig = sc.eligible(panel, exclude_top=0)
+    out = sc.delisted_share(panel, elig)
+    assert out == {"ever_eligible": 2, "delisted": 1, "pct": 50.0}
+
+
+# --- Signals ----------------------------------------------------------------------
+
+
+def test_selections_reversal_momentum_and_equal_weight():
+    names = [f"S{k}" for k in range(20)]
+    elig = pd.Series(True, index=names)
+    elig["S19"] = False
+    r1 = pd.Series(np.arange(20.0), index=names)  # S0 lowest
+    r61 = pd.Series(-np.arange(20.0), index=names)  # S0 highest
+    assert sc.lowest_decile(r1, elig) == {"S0": 1.0}  # 19 eligible -> 1 name
+    assert sc.highest_decile(r61, elig) == {"S0": 1.0}
+    ew = sc.equal_weight(elig)
+    assert len(ew) == 19 and ew["S1"] == pytest.approx(1 / 19)
+    assert sc.top_n(pd.Series([3.0, 1.0, 2.0], index=list("abc")), 2) == {
+        "a": 0.5,
+        "c": 0.5,
+    }
+
+
+def test_composite_is_the_mean_cross_sectional_zscore():
+    names = ["A", "B", "C", "D"]
+    elig = pd.Series([True, True, True, False], index=names)
+    r1 = pd.Series([0.10, -0.10, 0.0, -0.5], index=names)
+    r61 = pd.Series([0.30, 0.10, 0.20, 0.9], index=names)
+    ear = pd.Series([0.0, 0.0, 0.06, 0.2], index=names)
+    score = sc.composite_score(r1, r61, ear, elig)
+    assert list(score.index) == ["A", "B", "C"]
+
+    def z(x):
+        x = np.asarray(x, dtype=float)
+        return (x - x.mean()) / x.std(ddof=0)
+
+    want = (z([-0.10, 0.10, 0.0]) + z([0.30, 0.10, 0.20]) + z([0, 0, 0.06])) / 3
+    assert score.to_numpy() == pytest.approx(want)
+
+
+def test_composite_needs_both_returns_and_survives_a_constant_column():
+    elig = pd.Series(True, index=list("ABC"))
+    r1 = pd.Series([0.1, np.nan, 0.0], index=list("ABC"))
+    r61 = pd.Series([0.1, 0.2, 0.3], index=list("ABC"))
+    ear = pd.Series(0.0, index=list("ABC"))  # no EAR within 60 days: all 0
+    score = sc.composite_score(r1, r61, ear, elig)
+    assert list(score.index) == ["A", "C"]
+    assert np.isfinite(score).all()
+
+
+def test_latest_ear_holds_for_60_sessions_then_zero():
+    index = pd.bdate_range("2020-01-01", periods=100)
+    table = pd.DataFrame(
+        {"ticker": ["A", "A", "B"], "known": [5, 10, 7], "ear": [0.1, -0.2, 0.3]}
+    )
+    out = sc.latest_ear(table, index, ["A", "B", "C"])
+    assert out["A"].iloc[4] == 0.0
+    assert out["A"].iloc[5] == pytest.approx(0.1)
+    assert out["A"].iloc[10] == pytest.approx(-0.2)
+    assert out["A"].iloc[10 + sc.EAR_DAYS - 1] == pytest.approx(-0.2)
+    assert out["A"].iloc[10 + sc.EAR_DAYS] == 0.0
+    assert out["B"].iloc[7 + sc.EAR_DAYS - 1] == pytest.approx(0.3)
+    assert (out["C"] == 0).all()
+
+
+# --- Costs and the monthly simulator --------------------------------------------------
+
+
+def test_cost_tiers_use_the_previous_close_dollar_volume():
+    adv = pd.DataFrame({"X": [30e6, 10e6, np.nan], "Y": [5e6, 25e6, 25e6]})
+    rates = sc.cost_rates(adv)
+    assert rates["X"].tolist()[1:] == pytest.approx([0.0010, 0.0020])
+    assert rates["Y"].tolist()[1:] == pytest.approx([0.0020, 0.0010])
+    assert sc.cost_rates(adv, mult=2.0)["X"].iloc[1] == pytest.approx(0.0020)
+    assert rates.iloc[0].tolist() == pytest.approx([0.0020, 0.0020])
+
+
+def _sim_panel():
+    # 2020-01-31 (position 22) is a month end with a full 20-day ADV.
+    index = pd.bdate_range("2020-01-01", periods=45)
+    a = np.full(45, 10.0)
+    a[24:] = 11.0  # +10% from 2020-02-04
+    frames = {
+        "A": ohlcv(a, volume=10_000_000, index=index),  # $100M: 10bp
+        "B": ohlcv(np.full(45, 10.0), volume=100_000, index=index),  # $1M: 20bp
+    }
+    return sc.build_universe_panel(frames, spy(index)), index
+
+
+def test_monthly_simulator_trades_at_the_next_open_with_tiered_costs():
+    panel, index = _sim_panel()
+    feb3 = index.get_loc(pd.Timestamp("2020-02-03"))
+
+    def pick(i):
+        return {"A": 0.5, "B": 0.5}
+
+    res = sc.simulate_monthly(panel, pick, "2020-02-03", "2020-02-28")
+    buys = res.trades[res.trades["side"] == "buy"].set_index("ticker")
+    assert set(buys.index) == {"A", "B"}
+    assert (buys["date"] == index[feb3]).all()
+    # 10bp on A (liquid), 20bp on B, on 5000 each of 10k.
+    assert buys.loc["A", "cost"] == pytest.approx(5000 / 1.001 * 0.001, rel=1e-3)
+    assert buys.loc["B", "cost"] == pytest.approx(5000 / 1.002 * 0.002, rel=1e-3)
+    assert res.equity.iloc[-1] == pytest.approx(
+        10_000 / 2 / 1.001 * 1.1 + 10_000 / 2 / 1.002, rel=1e-6
+    )
+    double = sc.simulate_monthly(panel, pick, "2020-02-03", "2020-02-28", mult=2.0)
+    assert double.equity.iloc[-1] < res.equity.iloc[-1]
+
+
+def test_monthly_simulator_sells_a_delisted_holding_at_its_last_close():
+    index = pd.bdate_range("2020-01-01", periods=45)
+    frames = {
+        "A": ohlcv(np.full(26, 10.0), volume=10_000_000, index=index),  # to 02-05
+        "B": ohlcv(np.full(45, 10.0), volume=10_000_000, index=index),
+    }
+    panel = sc.build_universe_panel(frames, spy(index))
+    res = sc.simulate_monthly(panel, lambda i: {"A": 1.0}, "2020-02-03", "2020-02-28")
+    assert res.delisted_exits == 1
+    assert res.holdings.iloc[-1] == 0
+    assert res.equity.iloc[-1] == pytest.approx(10_000 / 1.001 * 0.999, rel=1e-6)
+
+
+def test_stats_add_calmar_turnover_and_average_holdings():
+    panel, _ = _sim_panel()
+    res = sc.simulate_monthly(
+        panel, lambda i: {"A": 0.5, "B": 0.5}, "2020-02-03", "2020-02-28"
+    )
+    st = sc.stats(res)
+    for key in (
+        "cagr_pct",
+        "max_drawdown_pct",
+        "sharpe",
+        "calmar",
+        "positive_years_pct",
+        "turnover_annual_x",
+        "avg_holdings",
+    ):
+        assert key in st
+    years = (res.equity.index[-1] - res.equity.index[0]).days / 365.25
+    traded = res.trades["notional"].sum()
+    want = traded / 2 / res.equity.mean() / years
+    assert st["turnover_annual_x"] == pytest.approx(want, rel=1e-3)
+    assert st["avg_holdings"] == pytest.approx(res.holdings.mean(), abs=0.01)
+
+
+# --- Earnings drift with tiered costs (additive `costs` matrix) -----------------------
+
+
+def _ed_prices():
+    index = pd.bdate_range("2020-01-01", periods=40)
+    close = pd.DataFrame({"A": np.linspace(10, 12, 40)}, index=index)
+    spy_s = pd.Series(300.0, index=index)
+    return ed.Prices(open=close, close=close, spy_open=spy_s, spy_close=spy_s)
+
+
+def _ed_signal():
+    return pd.DataFrame(
+        {
+            "ticker": ["A"],
+            "entry": [5],
+            "exit_plan": [20],
+            "ear": [0.1],
+            "signal": [ed.TOP],
+            "day0": [pd.Timestamp("2020-01-06")],
+        }
+    )
+
+
+def test_earnings_simulate_costs_matrix_matches_the_scalar_when_constant():
+    prices = _ed_prices()
+    flat = np.full(prices.close.shape, 0.001)
+    a = ed.simulate(_ed_signal(), prices, 0, 39, cost=0.001)
+    b = ed.simulate(_ed_signal(), prices, 0, 39, costs=flat)
+    assert b.equity.to_numpy() == pytest.approx(a.equity.to_numpy())
+    assert b.trades["cost"].tolist() == pytest.approx(a.trades["cost"].tolist())
+
+
+def test_earnings_simulate_costs_matrix_charges_the_rate_of_each_trade_day():
+    prices = _ed_prices()
+    rates = np.full(prices.close.shape, 0.001)
+    rates[5] = 0.002  # entry day
+    res = ed.simulate(_ed_signal(), prices, 0, 39, costs=rates)
+    t = res.trades.iloc[0]
+    entry_fee = t["shares"] * t["entry_price"] * 0.002
+    exit_fee = t["shares"] * t["exit_price"] * 0.001
+    assert t["cost"] == pytest.approx(entry_fee + exit_fee)
+
+
+# --- Long-short diagnostic ------------------------------------------------------------
+
+
+def test_spread_returns_are_long_minus_short_month_end_to_month_end():
+    index = pd.bdate_range("2020-01-27", periods=30)  # Jan 31, Feb 28 month ends
+    up = np.full(30, 10.0)
+    up[5:] = 11.0  # +10% over February
+    down = np.full(30, 10.0)
+    down[5:] = 9.5  # -5%
+    frames = {
+        "UP": ohlcv(up, volume=10_000_000, index=index),
+        "DOWN": ohlcv(down, volume=10_000_000, index=index),
+    }
+    panel = sc.build_universe_panel(frames, spy(index))
+    jan31 = index.get_loc(pd.Timestamp("2020-01-31"))
+    spread = sc.spread_returns(
+        panel, lambda i: ["UP"], lambda i: ["DOWN"], "2020-01-01", "2020-03-31"
+    )
+    assert spread.index.tolist() == [index[jan31]]
+    assert spread.iloc[0] == pytest.approx(0.10 + 0.05)
+    summary = sc.spread_summary(spread)
+    assert summary["months"] == 1 and summary["mean_pct"] == pytest.approx(15.0)
