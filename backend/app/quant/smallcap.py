@@ -69,6 +69,7 @@ MAX_GAP = 10
 #: at $41), not a trade: it starts a new segment. Real moves found in the
 #: data stay below it (DFDV +843% in a day).
 MAX_JUMP = 10.0
+SEGMENT_BREAK = "segment break (another security)"
 
 #: rank-day position -> {ticker: weight of equity}.
 Selector = Callable[[int], dict[str, float]]
@@ -104,22 +105,59 @@ def segment_age(
 def build_universe_panel(
     frames: dict[str, pd.DataFrame],
     spy: pd.DataFrame,
-    traded: dict[str, pd.Series] | None = None,
+    traded: dict[str, pd.DataFrame] | None = None,
 ) -> UniversePanel:
     """`momentum.build_panel` (spliced tickers dropped) plus `age` and, from
-    `traded` (ticker -> unadjusted closes), `traded_close`."""
+    `traded` (ticker -> unadjusted `Close`, `Volume`), `traded_close` and a
+    traded dollar volume: dividend adjustment lowers past prices but not
+    volumes, so adjusted close x volume understates it. Adjusted closes stay
+    for returns; a ticker or day without traded bars keeps the adjusted
+    figures."""
     base = build_panel(frames, spy)
     fields = {k: getattr(base, k) for k in base.__dataclass_fields__}
     traded_close = None
     if traded is not None:
-        traded_close = pd.DataFrame(
-            {t: traded[t].reindex(base.index) for t in base.tickers if t in traded},
-            index=base.index,
-            columns=base.tickers,
-            dtype=float,
-        )
+
+        def matrix(field: str) -> pd.DataFrame:
+            return pd.DataFrame(
+                {
+                    t: traded[t][field].reindex(base.index)
+                    for t in base.tickers
+                    if t in traded
+                },
+                index=base.index,
+                columns=base.tickers,
+                dtype=float,
+            )
+
+        traded_close = matrix("Close")
+        dollars = traded_close * matrix("Volume")
+        fields["dollar_volume"] = dollars.where(dollars.notna(), base.dollar_volume)
     return UniversePanel(
         **fields, age=segment_age(base.close), traded_close=traded_close
+    )
+
+
+def segment_breaks(panel: UniversePanel) -> np.ndarray:
+    """True on the first bar of every segment but a ticker's first: from
+    there the symbol is another security (or back after a long gap)."""
+    has = panel.close.notna().to_numpy()
+    bars_so_far = np.cumsum(has, axis=0)
+    return (panel.age.to_numpy() == 1) & (bars_so_far > 1)
+
+
+def event_prices(
+    panel: UniversePanel, spy_close: pd.Series, spy_open: pd.Series
+) -> ed.Prices:
+    """`earnings_drift.Prices` with each segment break's bar hidden, so a
+    hold across it ends at the last close before (its delisting exit) and no
+    EAR spans it."""
+    breaks = segment_breaks(panel)
+    return ed.Prices(
+        open=panel.open.mask(breaks),
+        close=panel.close.mask(breaks),
+        spy_open=spy_open.astype(float),
+        spy_close=spy_close.astype(float),
     )
 
 
@@ -277,6 +315,7 @@ def simulate_monthly(
     rate = (cost_rates(panel.adv, mult) if rates is None else rates).to_numpy()
     tickers = panel.tickers
     column = {t: j for j, t in enumerate(tickers)}
+    breaks = segment_breaks(panel)
 
     shares = np.zeros(len(tickers))
     cash = initial_capital
@@ -287,12 +326,17 @@ def simulate_monthly(
 
     for i in range(a, b + 1):
         day, s = index[i], rate[i]
-        for j in np.flatnonzero((shares > 0) & np.isnan(closes[i])):
-            price, notional = marks[i, j], shares[j] * marks[i, j]
+        gone = (shares > 0) & (np.isnan(closes[i]) | breaks[i])
+        for j in np.flatnonzero(gone):
+            # The last close of the security held: today's bar, if any, is
+            # another security's.
+            price = marks[i, j] if np.isnan(closes[i, j]) else marks[i - 1, j]
+            reason = DELISTED if np.isnan(closes[i, j]) else SEGMENT_BREAK
+            notional = shares[j] * price
             cash += notional * (1 - s[j])
             trades.append(
                 (day, tickers[j], "sell", shares[j], price * (1 - s[j]))
-                + (notional, notional * s[j], DELISTED)
+                + (notional, notional * s[j], reason)
             )
             shares[j] = 0.0
             delisted += 1
@@ -420,23 +464,38 @@ def spread_returns(
 ) -> pd.Series:
     """Gross equal-weight return of the long names minus the short names,
     from each month-end close in `start`..`end` to the next month-end close
-    (a name without later bars counts at its last close)."""
+    (a name without later bars, or whose segment breaks, counts at its last
+    close before)."""
     index = panel.index
     ends = np.flatnonzero(month_end_mask(index))
     lo, hi = pd.Timestamp(start), pd.Timestamp(end)
-    marks, column = panel.mark, {t: j for j, t in enumerate(panel.tickers)}
-    values = marks.to_numpy()
+    column = {t: j for j, t in enumerate(panel.tickers)}
+    breaks = segment_breaks(panel)
+    # The value a name ends a window at: before a break, its last close.
+    values = panel.mark.mask(breaks).ffill().to_numpy()
+    blocked = np.cumsum(breaks, axis=0)
     out: dict[pd.Timestamp, float] = {}
     for i, j in zip(ends[:-1], ends[1:]):
         if not lo <= index[i] <= hi:
             continue
         legs = []
         for names in (long_names(i), short_names(i)):
-            cols = [column[t] for t in names]
-            r = values[j, cols] / values[i, cols] - 1 if cols else np.array([])
+            cols = np.array([column[t] for t in names], dtype=int)
+            if len(cols):
+                broke = blocked[j, cols] > blocked[i, cols]
+                k = np.where(broke, _first_break(breaks, i, j, cols), j)
+                r = values[k, cols] / values[i, cols] - 1
+            else:
+                r = np.array([])
             legs.append(float(np.nanmean(r)) if len(r) else np.nan)
         out[index[i]] = legs[0] - legs[1]
     return pd.Series(out, dtype=float)
+
+
+def _first_break(breaks: np.ndarray, i: int, j: int, cols: np.ndarray) -> np.ndarray:
+    """Per column, the session before its first break in (i, j]."""
+    window = breaks[i + 1 : j + 1, cols]  # noqa: E203
+    return i + np.argmax(window, axis=0)
 
 
 def spread_summary(spread: pd.Series) -> dict:

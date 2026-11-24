@@ -736,7 +736,7 @@ def test_runner_run_writes_the_report_and_doc(tmp_path, monkeypatch):
         runner.MOMENTUM,
         runner.COMPOSITE,
     }
-    assert u["price_test"] == "adjusted closes (unadjusted bars missing)"
+    assert u["price_test"] == "adjusted bars (unadjusted bars missing)"
     doc = (tmp_path / "smallcap.md").read_text()
     assert "Long-short diagnostic" in doc and "At 2x costs" in doc
 
@@ -770,8 +770,11 @@ def test_price_test_uses_the_traded_close_when_given():
         "OK": ohlcv(np.full(60, 50.0), volume=200_000),
     }
     traded = {
-        "RS": pd.Series(0.5, index=IDX),
-        "OK": pd.Series(np.r_[np.full(30, np.nan), np.full(30, 50.0)], index=IDX),
+        "RS": pd.DataFrame({"Close": 0.5, "Volume": 20_000_000.0}, index=IDX),
+        "OK": pd.DataFrame(
+            {"Close": np.r_[np.full(30, np.nan), np.full(30, 50.0)], "Volume": 2e5},
+            index=IDX,
+        ),
     }
     panel = sc.build_universe_panel(frames, spy(), traded=traded)
     elig = sc.eligible(panel, exclude_top=0)
@@ -787,10 +790,95 @@ def test_runner_traded_closes_fall_back_loudly(tmp_path, caplog):
     runner = _load_runner()
     traded, label = runner._traded(tmp_path, ["A"])
     assert traded is None and "missing" in label
-    assert "adjusted closes" in caplog.text
+    assert "adjusted bars" in caplog.text
     folder = tmp_path / runner.UNADJUSTED_DIR
     folder.mkdir()
     _write_ohlcv(folder / "A.parquet", np.array([1.0, 2.0]), IDX[:2], 10.0)
     traded, label = runner._traded(tmp_path, ["A", "B"])
-    assert traded["A"].tolist() == [1.0, 2.0]
-    assert label == "unadjusted closes (1 tickers, 1 without)"
+    assert traded["A"]["Close"].tolist() == [1.0, 2.0]
+    assert label == "unadjusted bars (1 tickers, 1 without)"
+
+
+# --- Rework 1: exits at segment breaks, dollar volume from traded bars --------------
+
+
+def _break_panel():
+    """A held stock whose symbol passes to another security (20x) on
+    2020-02-12 (position 29), mid-month."""
+    index = pd.bdate_range("2020-01-01", periods=45)
+    a = np.full(45, 10.0)
+    a[29:] = 200.0
+    frames = {
+        "A": ohlcv(a, volume=10_000_000, index=index),
+        "B": ohlcv(np.full(45, 10.0), volume=10_000_000, index=index),
+    }
+    return sc.build_universe_panel(frames, spy(index)), index
+
+
+def test_monthly_simulator_exits_at_the_last_close_before_a_segment_break():
+    panel, index = _break_panel()
+    res = sc.simulate_monthly(panel, lambda i: {"A": 1.0}, "2020-02-03", "2020-02-28")
+    exit_ = res.trades[res.trades["reason"] == sc.SEGMENT_BREAK]
+    assert len(exit_) == 1 and exit_["date"].iloc[0] == index[29]
+    assert exit_["price"].iloc[0] == pytest.approx(10.0 * 0.999)
+    assert res.holdings.iloc[-1] == 0
+    # No 20x gain booked: bought at 10 (+10bp), sold at 10 (-10bp).
+    assert res.equity.iloc[-1] == pytest.approx(10_000 / 1.001 * 0.999, rel=1e-6)
+
+
+def test_spread_returns_stop_a_name_at_its_last_close_before_a_break():
+    panel, index = _break_panel()
+    spread = sc.spread_returns(
+        panel, lambda i: ["A"], lambda i: ["B"], "2020-01-01", "2020-03-31"
+    )
+    assert spread.iloc[0] == pytest.approx(0.0)  # not +1900%
+
+
+def test_earnings_prices_end_a_hold_at_a_segment_break():
+    panel, index = _break_panel()
+    prices = sc.event_prices(panel, panel.close["B"], panel.open["B"])
+    assert np.isnan(prices.close["A"].iloc[29])  # the break bar is hidden
+    assert prices.close["A"].iloc[30] == 200.0
+    signal = pd.DataFrame(
+        {
+            "ticker": ["A"],
+            "entry": [23],
+            "exit_plan": [40],
+            "ear": [0.1],
+            "signal": [ed.TOP],
+            "day0": [index[21]],
+        }
+    )
+    res = ed.simulate(signal, prices, 0, 44, cost=0.0)
+    t = res.trades.iloc[0]
+    assert t["exit_date"] == index[29] and t["exit_price"] == pytest.approx(10.0)
+
+
+def test_dollar_volume_and_cost_tier_use_traded_close_and_volume():
+    # Dividend-adjusted close 20 x volume 200k = $4M; traded 30 x 200k = $6M.
+    frames = {"D": ohlcv(np.full(60, 20.0), volume=200_000)}
+    traded = {"D": pd.DataFrame({"Close": 30.0, "Volume": 200_000.0}, index=IDX)}
+    panel = sc.build_universe_panel(frames, spy(), traded=traded)
+    assert panel.dollar_volume["D"].iloc[10] == pytest.approx(6_000_000)
+    assert sc.eligible(panel, exclude_top=0)["D"].iloc[30]
+    assert not sc.eligible(sc.build_universe_panel(frames, spy()), exclude_top=0)[
+        "D"
+    ].iloc[30]
+    # Returns still use the adjusted closes.
+    assert panel.close["D"].iloc[10] == 20.0
+
+
+def test_prescreen_reads_unadjusted_bars_and_falls_back_loudly(tmp_path, caplog):
+    runner = _load_runner()
+    (tmp_path / runner.UNADJUSTED_DIR).mkdir()
+    _write_ohlcv(tmp_path / "X.parquet", np.full(30, 20.0), IDX[:30], 200_000)
+    _write_ohlcv(
+        tmp_path / runner.UNADJUSTED_DIR / "X.parquet",
+        np.full(30, 30.0),
+        IDX[:30],
+        200_000,
+    )
+    _write_ohlcv(tmp_path / "Y.parquet", np.full(30, 30.0), IDX[:30], 200_000)
+    assert runner._ever_eligible(runner._prescreen_bars(tmp_path, "X"))
+    assert runner._ever_eligible(runner._prescreen_bars(tmp_path, "Y"))
+    assert "Y" in caplog.text and "adjusted" in caplog.text

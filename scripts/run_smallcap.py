@@ -71,13 +71,13 @@ def _downloader(adjustment: str = "all") -> bu.BarsDownloader:
 
 
 def download_unadjusted(args: argparse.Namespace) -> int:
-    """Unadjusted bars of the classified common stocks, for the $5 price
-    test on the price that traded (adjusted prices of later reverse-split
-    stocks are far above it)."""
+    """Unadjusted bars of every symbol with adjusted bars: the $5 test and
+    dollar volume use what traded (adjusted prices of later reverse-split
+    stocks are far above it, dividend adjustment lowers price but not
+    volume). Run before `classify`, whose pre-screen uses them."""
     dl = _downloader("raw")
-    classified = pd.read_csv(args.raw / CLASSIFIED_FILE)
-    tickers = classified.loc[classified["common"].astype(bool), "ticker"]
-    symbols = sorted(t.replace("-", ".") for t in tickers)
+    status = json.loads((args.raw / bu.STATUS_FILE).read_text())
+    symbols = sorted(s for s, e in status.items() if e["bars"])
     status = dl.download(symbols, args.raw / UNADJUSTED_DIR)
     done = sum(s in status for s in symbols)
     log.info("%d / %d unadjusted done, %d requests", done, len(symbols), dl.requests)
@@ -125,9 +125,19 @@ def _bars(raw: Path, symbol: str) -> pd.DataFrame:
     return pd.read_parquet(raw / f"{bu.file_symbol(symbol)}.parquet")
 
 
+def _prescreen_bars(raw: Path, symbol: str) -> pd.DataFrame:
+    """Unadjusted bars (what traded), else the adjusted ones, logged."""
+    path = raw / UNADJUSTED_DIR / f"{bu.file_symbol(symbol)}.parquet"
+    if path.exists():
+        return pd.read_parquet(path)
+    log.warning("%s: no unadjusted bars, pre-screen on adjusted bars", symbol)
+    return _bars(raw, symbol)
+
+
 def _ever_eligible(df: pd.DataFrame) -> bool:
-    """A generous pre-screen: some session with close >= $5 and a 20-day
-    dollar volume >= $5M (the exact monthly test runs later)."""
+    """A generous pre-screen on unadjusted bars: some session with close >=
+    $5 and a 20-day dollar volume >= $5M (the exact monthly test runs
+    later)."""
     adv = (df["Close"] * df["Volume"]).rolling(sc.ADV_DAYS).mean()
     return bool(((df["Close"] >= sc.MIN_PRICE) & (adv >= sc.MIN_ADV)).any())
 
@@ -138,7 +148,7 @@ def classify(args: argparse.Namespace) -> int:
     for symbol, entry in sorted(status.items()):
         if not entry["bars"]:
             continue
-        if not _ever_eligible(_bars(args.raw, symbol)):
+        if not _ever_eligible(_prescreen_bars(args.raw, symbol)):
             screened_out += 1
             continue
         spans.append((bu.file_symbol(symbol), entry["first"], entry["last"]))
@@ -168,22 +178,23 @@ def _etf(symbol: str) -> pd.DataFrame:
 
 
 def _traded(raw: Path, tickers: list[str]) -> tuple[dict | None, str]:
-    """Unadjusted closes for the $5 test, or None (adjusted closes, logged
-    and recorded in the report) when they were not downloaded."""
+    """Unadjusted `Close` and `Volume` for the $5 test and dollar volume, or
+    None (adjusted bars, logged and recorded in the report) when they were
+    not downloaded."""
     folder = raw / UNADJUSTED_DIR
     if not folder.exists():
-        log.warning("no %s: the $5 test uses adjusted closes", folder)
-        return None, "adjusted closes (unadjusted bars missing)"
+        log.warning("no %s: $5 test and dollar volume on adjusted bars", folder)
+        return None, "adjusted bars (unadjusted bars missing)"
     out, missing = {}, 0
     for t in tickers:
         path = folder / f"{t}.parquet"
         if path.exists():
-            out[t] = pd.read_parquet(path, columns=["Close"])["Close"]
+            out[t] = pd.read_parquet(path, columns=["Close", "Volume"])
         else:
             missing += 1
     if missing:
-        log.warning("%d tickers have no unadjusted bars: adjusted close used", missing)
-    return out, f"unadjusted closes ({len(out)} tickers, {missing} without)"
+        log.warning("%d tickers have no unadjusted bars: adjusted bars used", missing)
+    return out, f"unadjusted bars ({len(out)} tickers, {missing} without)"
 
 
 def _membership(elig: pd.DataFrame) -> pd.DataFrame:
@@ -308,12 +319,7 @@ def run(args: argparse.Namespace) -> int:
     counts_all = sc.monthly_counts(elig)
     segment_starts = int((panel.age == 1).to_numpy().sum())
     r1, r61 = sc.return_1m(panel), sc.return_6_1(panel)
-    prices = ed.Prices(
-        open=panel.open,
-        close=panel.close,
-        spy_open=spy["Open"].astype(float),
-        spy_close=spy["Close"].astype(float),
-    )
+    prices = sc.event_prices(panel, spy["Close"], spy["Open"])
     events = pd.read_parquet(args.raw / EVENTS_FILE)
     table = ed.event_table(events, prices)
     membership = _membership(elig)
@@ -531,19 +537,27 @@ missing. Warrants, rights, units, preferreds, depositary shares, ETFs and \
 - Bars: Alpaca SIP daily, all adjustments, requested from 2015 (Alpaca's \
 history starts 2016-01-04), {u["with_bars"]:,} symbols with bars, in \
 `data/raw_broad/` (gitignored).
-- Pre-screen: {u["prescreened"]:,} symbols ever had a session with close >= \
-$5 and 20-day dollar volume >= $5M; only these were classified.
+- Pre-screen: {u["prescreened"]:,} symbols ever had a session with an \
+unadjusted close >= $5 and 20-day unadjusted dollar volume >= $5M; only these \
+were classified.
 - EDGAR classification (User-Agent "{edgar.USER_AGENT}"): {c["resolved"]:,} \
 of {c["symbols"]:,} resolved to a CIK ({sources}); **{c["unresolved"]:,} could \
 not be classified and are excluded**. Common stocks (10-K / 10-Q filers, SIC \
 not 6221 / 6722 / 6726): {c["common"]:,}. Not common: {reasons}.
 - Spliced-bar filter (`portfolio.suspect_spike`): {u["spliced_dropped"]} \
 tickers dropped. A bar gap over {sc.MAX_GAP} sessions or a one-day move \
-beyond {sc.MAX_JUMP:g}x either way starts a new segment (reused symbols); \
-returns never span one: {u.get("segment_breaks", 0):,} breaks.
-- Eligible names per month end from the build start (traded price >= $5 on \
-{u.get("price_test", "adjusted closes")}, 20-day dollar volume >= $5M, not \
-in the top {sc.EXCLUDE_TOP} by dollar volume): min {pm["min"]:,}, \
+beyond {sc.MAX_JUMP:g}x either way starts a new segment (reused symbols): \
+{u.get("segment_breaks", 0):,} breaks. The 1m and 6-1 returns and the EAR \
+never reach back across one, and a position held into one is sold at its \
+last close before it (monthly runs, earnings drift and the long-short \
+spreads alike).
+- Price and dollar volume use what traded ({u.get("price_test", "adjusted \
+bars")}): the $5 test on the unadjusted close, and dollar volume (the $5M \
+test, the top-{sc.EXCLUDE_TOP} exclusion and the cost tier) as unadjusted \
+close x unadjusted volume. Adjusted closes are used for returns only.
+- Eligible names per month end from the build start (price >= $5, 20-day \
+dollar volume >= $5M, not in the top {sc.EXCLUDE_TOP} by dollar volume): \
+min {pm["min"]:,}, \
 median {pm["median"]:,.0f}, max {pm["max"]:,} (build \
 {u["eligible_per_month_build"]["median"]:,.0f}, test \
 {u["eligible_per_month_test"]["median"]:,.0f} median).
@@ -551,6 +565,8 @@ median {pm["median"]:,.0f}, max {pm["max"]:,} (build \
 eligible ({d["pct"]:.1f}%) have no bar on the last session. This is low for \
 ten years of small caps: Alpaca's inactive list misses delisted names whose \
 symbol moved on, so some survivorship bias remains.
+- The common-stock classification is static and full-sample: one EDGAR \
+answer per symbol over its whole bar span, not point in time.
 - Known exclusions: banks that file with the FDIC, not the SEC (OZK, \
 TowneBank; FRC and SBNY in cycle 06), have no 10-K on EDGAR and are \
 excluded, as are foreign filers (20-F / 40-F).
@@ -621,20 +637,26 @@ def _first_run(report: dict) -> str:
             )
     return f"""## Data fixes after the first run (disclosed)
 
-The first run exposed two data errors, fixed in the data layer and not in \
-the rules:
+The first run exposed two data errors and review found two more, all fixed \
+in the data layer and not in the rules:
 
 1. The $5 test used split-adjusted closes, so stocks that later reverse-split \
 (CBIO, GDC) showed adjusted prices of $600 to $7,750 while trading for \
 pennies. The rule means the price that traded, so the test now uses \
-unadjusted SIP closes (dollar volume was already right: close x volume is \
-unchanged by adjustment).
+unadjusted SIP closes.
 2. Alpaca chains a reused symbol with no gap: SN jumped 116x in a day \
 (Sanchez Energy's OTC tail, then SharkNinja), LINE 448x, SPRB 124x, WW 159x \
 (post-bankruptcy shares). Their 6-1 returns of +10,000% and more swamped the \
 composite's unwinsorised z-score. A one-day move beyond {sc.MAX_JUMP:g}x now \
 starts a new segment. The threshold was set from these data errors (the \
 largest real move found was DFDV's 9.4x), not from strategy results.
+3. (Review) Positions were carried across a segment break, so the jump \
+(BHVN on 2022-10-04) was booked as profit. A holding is now sold at its last \
+close before the break.
+4. (Review) Dollar volume used adjusted close x volume. Dividend adjustment \
+lowers past prices but not volumes, so the $5M test, the top-500 exclusion, \
+the cost tier and the pre-screen depended on later dividends. All four now \
+use unadjusted close x unadjusted volume.
 
 Rules, signals and costs are unchanged. 1x costs, first run versus this run:
 
