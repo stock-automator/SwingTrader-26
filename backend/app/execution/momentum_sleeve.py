@@ -5,7 +5,8 @@ Alpaca paper account beside the swing executor.
 
 Live rules: rank today's universe (`config/universe.json`, the price and
 liquidity filters of `quant.momentum`) on the last close of the previous
-month, and trade on the first NYSE trading day of the month. The sleeve is
+month, and trade on the first NYSE trading day of the month (a missed day
+catches up on a later trading day up to the 10th). The sleeve is
 `momentum_sleeve_pct` of account equity, split equally across `top_n`
 names. Its holdings and quantities live in their own state file
 (`Settings.momentum_state_path`): the sleeve sells only its own recorded
@@ -47,6 +48,10 @@ MIN_ORDER_USD = 1.0
 QTY_DECIMALS = 6
 #: Longest run of closed days to step over (a holiday weekend is 4).
 MAX_SCAN_DAYS = 14
+#: A rebalance missed on the first trading day (Mac asleep, backend down)
+#: may still run on a later trading day up to this calendar day; after it,
+#: the month is skipped and the sleeve waits for the next one.
+CATCH_UP_LAST_DAY = 10
 
 CloseOn = Callable[[date], datetime | None]
 
@@ -74,6 +79,11 @@ def is_first_trading_day(day: date, close_on: CloseOn) -> bool:
     return first_trading_day(day.year, day.month, close_on) == day
 
 
+def in_rebalance_window(day: date, close_on: CloseOn) -> bool:
+    """A trading day no later than the `CATCH_UP_LAST_DAY`th of its month."""
+    return day.day <= CATCH_UP_LAST_DAY and _trading(day, close_on)
+
+
 def rank_day_for(day: date, close_on: CloseOn) -> date:
     """The last trading day before the month of `day` begins."""
     rank = day.replace(day=1) - timedelta(days=1)
@@ -85,13 +95,15 @@ def rank_day_for(day: date, close_on: CloseOn) -> date:
 
 
 def next_rebalance(today: date, state: dict | None, close_on: CloseOn) -> date:
-    """This month's first trading day if it is still to come (or is today
-    and the sleeve has not finished this month), else next month's."""
-    first = first_trading_day(today.year, today.month, close_on)
+    """While this month is unfinished, its next trading day up to the
+    `CATCH_UP_LAST_DAY`th (today included), else next month's first."""
     finished = bool(state and state.get("month") == f"{today:%Y-%m}")
     finished = finished and bool(state.get("complete"))
-    if today < first or (today == first and not finished):
-        return first
+    day = today
+    while not finished and day.day <= CATCH_UP_LAST_DAY:
+        if _trading(day, close_on):
+            return day
+        day += timedelta(days=1)
     following = today.replace(day=28) + timedelta(days=4)
     return first_trading_day(following.year, following.month, close_on)
 

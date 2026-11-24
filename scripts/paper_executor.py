@@ -11,10 +11,11 @@ did not place counts as `UNKNOWN_RISK_PCT`. Each pick carries its strategy in
 Alpaca's `client_order_id` so the forward journal can attribute it.
 
 Momentum sleeve: `main` first runs `scripts/momentum_sleeve.py` (it trades
-only on the first NYSE trading day of a month). Names in the sleeve's state
-file (`SLEEVE_PATH`) are the sleeve's: this executor never trades them, and
-they count toward neither `MAX_POSITIONS` nor the heat cap. An unreadable
-sleeve file counts nothing as sleeve, so the limits only get tighter.
+on the first NYSE trading day of a month, catching up to the 10th). Names in
+the sleeve's state file (`SLEEVE_PATH`) are the sleeve's: this executor never
+trades them, and they count toward neither `MAX_POSITIONS` nor the heat cap.
+An unreadable sleeve file counts nothing as sleeve, so the limits only get
+tighter.
 """
 
 import json

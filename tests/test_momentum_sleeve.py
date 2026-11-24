@@ -163,6 +163,26 @@ def test_next_rebalance_date():
     assert ms.next_rebalance(date(2026, 12, 1), None, close_on) == date(2026, 12, 1)
     done = {"month": "2026-12", "complete": True}
     assert ms.next_rebalance(date(2026, 12, 1), done, close_on) == date(2027, 1, 4)
+    # A missed first day: any trading day up to the 10th, then next month.
+    assert ms.next_rebalance(date(2026, 12, 3), None, close_on) == date(2026, 12, 3)
+    assert ms.next_rebalance(date(2026, 12, 5), None, close_on) == date(2026, 12, 7)
+    assert ms.next_rebalance(date(2026, 12, 11), None, close_on) == date(2027, 1, 4)
+    assert ms.next_rebalance(date(2026, 12, 3), done, close_on) == date(2027, 1, 4)
+
+
+@pytest.mark.parametrize(
+    "day, ok",
+    [
+        (date(2026, 12, 1), True),
+        (date(2026, 12, 2), True),
+        (date(2026, 12, 10), True),
+        (date(2026, 12, 11), False),
+        (date(2026, 12, 5), False),  # Saturday
+        (date(2027, 1, 1), False),  # holiday
+    ],
+)
+def test_rebalance_window_is_trading_days_to_the_10th(day, ok):
+    assert ms.in_rebalance_window(day, close_on) is ok
 
 
 # ------------------------------------------------------------------- ranking
@@ -416,18 +436,42 @@ def test_rerun_after_a_blocked_buy_retries_only_that_name(sleeve):
 
 
 @pytest.mark.parametrize(
-    "now",
+    "now, words",
     [
-        datetime(2026, 12, 2, 14, 40, tzinfo=UK),  # second trading day
-        datetime(2026, 11, 30, 14, 40, tzinfo=UK),
-        datetime(2026, 12, 1, 14, 30, tzinfo=UK),  # 09:30 New York
+        (datetime(2026, 12, 1, 14, 30, tzinfo=UK), "09:35"),  # 09:30 New York
+        (datetime(2026, 12, 5, 14, 40, tzinfo=UK), "not a trading day"),  # Sat
+        (datetime(2026, 12, 11, 14, 40, tzinfo=UK), "missed"),  # after the 10th
     ],
 )
-def test_only_trades_after_0935_on_the_first_trading_day(sleeve, now):
+def test_no_trades_before_0935_off_days_or_after_the_10th(sleeve, now, words):
     s = Session()
     out = sleeve.test_run(s, now=now)
-    assert s.posts == [] and out["reason"]
+    assert s.posts == [] and words in out["reason"]
     assert not sleeve.state_path.exists()
+
+
+@pytest.mark.parametrize("day", [2, 10])
+def test_a_missed_first_day_catches_up_by_the_10th(sleeve, day):
+    s = Session()
+    out = sleeve.test_run(s, now=datetime(2026, 12, day, 14, 40, tzinfo=UK))
+    assert out["rank_day"] == "2026-11-30"  # still the month-end close
+    assert sorted(p["ticker"] for p in s.posts) == TOP10
+    assert all(p["client_order_id"].startswith("mom-2026-12-") for p in s.posts)
+    assert state(sleeve)["month"] == "2026-12" and state(sleeve)["complete"]
+    # Still once per month: the next day's run places nothing.
+    s.posts.clear()
+    out = sleeve.test_run(s, now=datetime(2026, 12, day, 15, 40, tzinfo=UK))
+    assert s.posts == [] and "already rebalanced" in out["reason"]
+
+
+def test_a_month_missed_past_the_10th_is_logged_loudly(sleeve, caplog):
+    s = Session()
+    with caplog.at_level("ERROR"):
+        sleeve.test_run(s, now=datetime(2026, 12, 14, 14, 40, tzinfo=UK))
+    assert s.posts == []
+    assert any(
+        r.levelname == "ERROR" and "2026-12" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_target_held_by_the_swing_executor_is_skipped_and_logged(sleeve, caplog):

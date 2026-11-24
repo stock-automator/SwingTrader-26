@@ -5,8 +5,10 @@ weight, 2N hold buffer, no SPY filter; `backend/app/execution/
 momentum_sleeve.py`).
 
 Run by `scripts/paper_executor.py` (cron, 14:35 UK weekdays) before the swing
-executor. It only trades after 09:35 New York on the first NYSE trading day
-of a month (Alpaca's calendar via `market_clock`), ranks today's universe on
+executor. It trades after 09:35 New York on the first NYSE trading day of a
+month (Alpaca's calendar via `market_clock`) or, if that run was missed, on
+the first trading day it runs up to the 10th; after the 10th an unfinished
+month is logged as missed and skipped. It ranks today's universe on
 the previous month's last close from the price cache, and places fractional
 MARKET DAY orders through `/api/v1/execution/orders` (buys ENTRY, sells EXIT,
 every guard still runs), each tagged `mom-<YYYY-MM>-<TICKER>`: sells first,
@@ -140,8 +142,15 @@ def run(
         clock or _clock_for(settings.alpaca_api_key, settings.alpaca_api_secret)
     ).close_on
     try:
-        if not dry_run and not ms.is_first_trading_day(now.date(), close_on):
-            out["reason"] = "not the first trading day of the month"
+        if not dry_run and not ms.in_rebalance_window(now.date(), close_on):
+            if now.date().day > ms.CATCH_UP_LAST_DAY:
+                out["reason"] = (
+                    f"missed the {month} rebalance: not done by the "
+                    f"{ms.CATCH_UP_LAST_DAY}th, waiting for next month"
+                )
+                log.error("MOMENTUM SLEEVE REBALANCE MISSED: %s", out["reason"])
+            else:
+                out["reason"] = "not a trading day"
             return out
         rank = rank_day or ms.rank_day_for(day, close_on)
     except Exception as exc:  # noqa: BLE001 - any calendar failure fails closed
