@@ -39,3 +39,4 @@ Status: `todo` | `in-progress` | `blocked` | `done`. Priority P1–P3.
 | Q-1 | Decide whether `data/raw/*.parquet` (~74MB) should stay tracked in git. | P3 | todo | It's tracked while the docs say it's a gitignored cache. Open question from the Sprint 6 audit. |
 - **X-1 (P2) Executor notes from cycle 03 review:** count open (unfilled) orders toward the limits; cap brief `setups` by positions/heat as well; reject `client_order_id` on non-BRACKET orders (422); test the duplicate-tag path.
 - **G-1 (decision for A):** the live 2.5R gate rejects every zscore (2.0R) and supertrend (2.33R) signal, so only bk_squeeze can produce shortlist picks.
+- **X-2 (P2) Sleeve review notes (cycle 05):** log the cause when a kept name has no rank-day close; record filled not ordered qty; check buying power before buys; add an API-level test that a tagged MARKET order reaches the client.
