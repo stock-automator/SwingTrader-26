@@ -20,6 +20,10 @@ Monthly, long-only, equal weight, one $10k account with fractional shares:
   (less slippage) and counted as a delisted exit.
 
 Tickers with a spliced bar (`portfolio.suspect_spike`) are excluded.
+
+Point-in-time mode (cycle 04b): with a `membership` list (`date, ticker`
+snapshots, one per month), a ticker is eligible only on days whose month's
+snapshot lists it; `trim_to_membership` drops bars after a member left.
 """
 
 from __future__ import annotations
@@ -95,6 +99,8 @@ class Panel:
     dollar_volume: pd.DataFrame
     spy_close: pd.Series
     suspect: list[str] = field(default_factory=list)
+    #: True where the ticker is an index member that day; None = all.
+    member: pd.DataFrame | None = None
 
     @property
     def adv(self) -> pd.DataFrame:
@@ -120,7 +126,53 @@ def average_dollar_volume(dollar_volume: pd.DataFrame, days: int) -> pd.DataFram
     return dollar_volume.rolling(days, min_periods=days).mean()
 
 
-def build_panel(frames: dict[str, pd.DataFrame], spy: pd.DataFrame) -> Panel:
+def membership_mask(
+    membership: pd.DataFrame, index: pd.DatetimeIndex, tickers: list[str]
+) -> pd.DataFrame:
+    """True where `ticker` is in the snapshot of the day's calendar month."""
+    months = membership["date"].dt.to_period("M")
+    wide = pd.crosstab(months, membership["ticker"]).astype(bool)
+    wide = wide.reindex(columns=tickers, fill_value=False)
+    rows = wide.reindex(index.to_period("M"), fill_value=False)
+    return pd.DataFrame(rows.to_numpy(), index=index, columns=tickers)
+
+
+def trim_to_membership(
+    frames: dict[str, pd.DataFrame], membership: pd.DataFrame, days: int = 45
+) -> dict[str, pd.DataFrame]:
+    """Members only, each cut `days` after its last snapshot: enough bars to
+    sell at the next rebalance, none from a later reuse of the symbol."""
+    last = membership.groupby("ticker")["date"].max() + pd.Timedelta(days=days)
+    return {t: df.loc[: last[t]] for t, df in frames.items() if t in last.index}
+
+
+def coverage(panel: Panel, membership: pd.DataFrame, start, end) -> dict:
+    """Member-months (month-end rebalance days in `start`..`end`) with a bar
+    in the panel on that day."""
+    a, b = _window(panel.index, start, end)
+    ends = panel.index[a : b + 1][month_end_mask(panel.index)[a : b + 1]]
+    period = pd.Series(ends, index=ends.to_period("M"))
+    m = membership[membership["date"].dt.to_period("M").isin(period.index)]
+    days = period.reindex(m["date"].dt.to_period("M")).to_numpy()
+    close = panel.close.reindex(columns=sorted(set(m["ticker"])))
+    stacked = close.loc[ends].notna().stack()
+    have = stacked.reindex(pd.MultiIndex.from_arrays([days, m["ticker"]]))
+    have = have.fillna(False).astype(bool).to_numpy()
+    priced = set(m["ticker"][have])
+    total = len(m)
+    return {
+        "member_months": int(total),
+        "with_price": int(have.sum()),
+        "pct": float(have.sum() / total * 100) if total else 0.0,
+        "never_priced": sorted(set(m["ticker"]) - priced),
+    }
+
+
+def build_panel(
+    frames: dict[str, pd.DataFrame],
+    spy: pd.DataFrame,
+    membership: pd.DataFrame | None = None,
+) -> Panel:
     calendar = pd.DatetimeIndex(spy.index)
     suspect, opens, closes, volumes = [], {}, {}, {}
     for ticker in sorted(frames):
@@ -133,6 +185,9 @@ def build_panel(frames: dict[str, pd.DataFrame], spy: pd.DataFrame) -> Panel:
         volumes[ticker] = df["Close"] * df["Volume"]
     tickers = list(closes)
     close = pd.DataFrame(closes, index=calendar, columns=tickers, dtype=float)
+    member = None
+    if membership is not None:
+        member = membership_mask(membership, calendar, tickers)
     return Panel(
         index=calendar,
         tickers=tickers,
@@ -142,6 +197,7 @@ def build_panel(frames: dict[str, pd.DataFrame], spy: pd.DataFrame) -> Panel:
         dollar_volume=pd.DataFrame(volumes, index=calendar, columns=tickers),
         spy_close=spy["Close"].astype(float).copy(),
         suspect=suspect,
+        member=member,
     )
 
 
@@ -164,9 +220,10 @@ def momentum_scores(
 def eligibility(panel: Panel, cfg: MomentumConfig) -> pd.DataFrame:
     adv = average_dollar_volume(panel.dollar_volume, cfg.adv_days)
     scores = momentum_scores(panel.close, panel.mark, cfg.lookback, cfg.skip)
-    return (
+    ok = (
         (panel.close >= cfg.min_price) & (adv >= cfg.min_dollar_volume) & scores.notna()
     )
+    return ok if panel.member is None else ok & panel.member
 
 
 def select_holdings(
@@ -214,8 +271,11 @@ def momentum_selector(panel: Panel, cfg: MomentumConfig) -> Selector:
 
 
 def equal_weight_selector(panel: Panel) -> Selector:
-    """Every ticker with a bar on the rebalance day, equal weight."""
-    has_bar = panel.close.notna().to_numpy()
+    """Every ticker (member) with a bar on the rebalance day, equal weight."""
+    has_bar = panel.close.notna()
+    if panel.member is not None:
+        has_bar &= panel.member
+    has_bar = has_bar.to_numpy()
     tickers = np.array(panel.tickers)
 
     def select(i: int, held: set[str]) -> dict[str, float]:
@@ -278,15 +338,27 @@ def simulate(
             weights = selector(i - 1, held)
             o = opens[i]
             pos = np.flatnonzero(shares > 0)
-            gross = cash + float(np.sum(shares[pos] * o[pos]))
-            net = cash + float(np.sum(shares[pos] * o[pos])) * (1 - s)
+            # A held name without an open cannot trade today: keep it as is,
+            # valued at its last close, and size the rest around it.
+            stuck = pos[np.isnan(o[pos])]
+            live = pos[~np.isnan(o[pos])]
+            frozen = float(np.sum(shares[stuck] * marks[i - 1, stuck]))
+            gross = cash + float(np.sum(shares[live] * o[live])) + frozen
+            net = cash + float(np.sum(shares[live] * o[live])) * (1 - s) + frozen
             target = np.zeros(len(tickers))
+            target[stuck] = shares[stuck]
+            no_open += len(stuck)
+            tradable = {}
             for t, w in weights.items():
                 j = column[t]
                 if np.isnan(o[j]):
-                    no_open += 1
+                    no_open += j not in stuck
                     continue
-                target[j] = w * net / (o[j] * (1 + s))
+                tradable[j] = w
+            wanted = sum(tradable.values()) * net
+            scale = min(1.0, (net - frozen) / wanted) if wanted > 0 else 0.0
+            for j, w in tradable.items():
+                target[j] = w * scale * net / (o[j] * (1 + s))
             delta = target - shares
             buys = sells = 0.0
             for j in np.flatnonzero(delta < 0):

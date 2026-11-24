@@ -372,3 +372,113 @@ def test_run_momentum_script_writes_doc_and_json(tmp_path, monkeypatch):
     assert out["sensitivity"]["excluded"] == ["T3"]
     assert set(out["sensitivity"]) >= {"build", "test"}
     assert "without the latest index additions" in text
+
+
+# --- point-in-time membership (cycle 04b) -----------------------------------
+
+
+def _members(rows) -> pd.DataFrame:
+    df = pd.DataFrame(rows, columns=["date", "ticker"])
+    df["date"] = pd.to_datetime(df["date"])
+    return df
+
+
+def test_membership_mask_uses_the_snapshot_of_each_days_month():
+    idx = pd.DatetimeIndex(["2020-01-30", "2020-01-31", "2020-02-03", "2020-03-02"])
+    m = _members([("2020-01-31", "A"), ("2020-02-29", "B"), ("2020-02-29", "X")])
+    mask = momentum.membership_mask(m, idx, ["A", "B", "C"])
+    assert list(mask.columns) == ["A", "B", "C"]
+    assert mask["A"].tolist() == [True, True, False, False]
+    assert mask["B"].tolist() == [False, False, True, False]
+    assert not mask["C"].any()
+
+
+def test_eligibility_and_selection_require_membership_on_the_rank_day():
+    panel, idx = _two_stock_panel()
+    month_end = idx[month_end_mask(idx)][0]
+    # UP has the better momentum but is not a member in January.
+    m = _members([(month_end, "DOWN"), (idx[-1], "UP"), (idx[-1], "DOWN")])
+    panel = build_panel(
+        {t: _frame(panel.close[t], idx, open_=panel.open[t]) for t in panel.tickers},
+        _frame(panel.spy_close, idx),
+        membership=m,
+    )
+    cfg = MomentumConfig(top_n=1, **SMALL)
+    ok = eligibility(panel, cfg)
+    assert not ok.loc[month_end, "UP"] and ok.loc[month_end, "DOWN"]
+    res = simulate(panel, momentum_selector(panel, cfg), idx[0], idx[-1])
+    assert res.trades.iloc[0]["ticker"] == "DOWN"
+    ew = simulate(panel, equal_weight_selector(panel), idx[0], idx[-1])
+    first = ew.trades[ew.trades["date"] == ew.trades["date"].min()]
+    assert first["ticker"].tolist() == ["DOWN"]
+
+
+def test_trim_to_membership_cuts_bars_after_the_last_snapshot_plus_buffer():
+    idx = pd.bdate_range("2020-01-01", "2020-06-30")
+    frames = {"GONE": _frame(np.full(len(idx), 10.0), idx)}
+    frames["STAY"] = frames["GONE"].copy()
+    frames["NEVER"] = frames["GONE"].copy()
+    m = _members([("2020-02-29", "GONE"), ("2020-06-30", "STAY")])
+    out = momentum.trim_to_membership(frames, m, days=45)
+    assert set(out) == {"GONE", "STAY"}
+    assert out["GONE"].index[-1] == pd.Timestamp("2020-04-14")
+    assert out["STAY"].index[-1] == idx[-1]
+
+
+def test_coverage_counts_member_months_with_a_bar_on_the_rebalance_day():
+    idx = pd.bdate_range("2020-01-01", "2020-04-15")
+    frames = {
+        "A": _frame(np.full(len(idx), 10.0), idx),
+        "B": _frame(np.full(40, 10.0), idx[:40]),  # ends in February
+    }
+    m = _members(
+        [(d, t) for d in ("2020-01-31", "2020-02-29", "2020-03-31") for t in "AB"]
+        + [("2020-03-31", "C")]
+    )
+    panel = build_panel(frames, _frame(np.full(len(idx), 100.0), idx), membership=m)
+    cov = momentum.coverage(panel, m, idx[0], idx[-1])
+    # Month ends: Jan 31, Feb 28, Mar 31. A: 3/3, B: Jan only, C: never.
+    assert cov["member_months"] == 7
+    assert cov["with_price"] == 4
+    assert cov["pct"] == pytest.approx(400 / 7)
+    assert cov["never_priced"] == ["C"]
+
+
+def test_simulate_keeps_a_held_name_whose_open_is_missing_on_a_rebalance_day():
+    """Reviewer NOTE (cycle 04): a held name with a close but no open on a
+    rebalance day made gross/net NaN and sold it at a NaN price."""
+    panel, idx = _two_stock_panel(70)
+    cfg = MomentumConfig(top_n=1, **SMALL)
+    ends = idx[month_end_mask(idx)]
+    second_exec = idx[idx.get_loc(ends[1]) + 1]
+    panel.open.loc[second_exec, "UP"] = np.nan
+    res = simulate(panel, momentum_selector(panel, cfg), idx[0], idx[-1])
+    assert np.isfinite(res.equity).all() and np.isfinite(res.cash).all()
+    day = res.trades[res.trades["date"] == second_exec]
+    assert "UP" not in set(day["ticker"])
+    assert res.holdings.loc[second_exec] == 1
+    assert res.trades["price"].notna().all()
+
+
+def test_simulate_sizes_around_a_stuck_holding_without_borrowing():
+    """A stuck holding that the selector drops stays held; the new names are
+    sized from what is left (nothing here: all equity is in the stuck name),
+    so cash never goes negative. It is sold at the next rebalance."""
+    panel, idx = _two_stock_panel(70)
+    ends = idx[month_end_mask(idx)]
+    first_exec = idx[idx.get_loc(ends[0]) + 1]
+    second_exec = idx[idx.get_loc(ends[1]) + 1]
+    panel.open.loc[second_exec, "UP"] = np.nan
+
+    def selector(i, held):
+        return {"UP": 1.0} if idx[i] < ends[1] else {"DOWN": 1.0}
+
+    res = simulate(panel, selector, first_exec, idx[-1])
+    assert (res.cash >= -1e-9).all()
+    day = res.trades[res.trades["date"] == second_exec]
+    assert day.empty
+    assert res.holdings.loc[second_exec] == 1
+    assert res.no_open_skips == 1
+    third_exec = idx[idx.get_loc(ends[2]) + 1]
+    later = res.trades[res.trades["date"] == third_exec]
+    assert set(later["ticker"]) == {"UP", "DOWN"}
