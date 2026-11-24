@@ -150,7 +150,8 @@ def coverage(panel: Panel, membership: pd.DataFrame, start, end) -> dict:
     """Member-months (month-end rebalance days in `start`..`end`) with a bar
     in the panel on that day."""
     a, b = _window(panel.index, start, end)
-    ends = panel.index[a : b + 1][month_end_mask(panel.index)[a : b + 1]]
+    window = slice(a, b + 1)
+    ends = panel.index[window][month_end_mask(panel.index)[window]]
     period = pd.Series(ends, index=ends.to_period("M"))
     m = membership[membership["date"].dt.to_period("M").isin(period.index)]
     days = period.reindex(m["date"].dt.to_period("M")).to_numpy()
