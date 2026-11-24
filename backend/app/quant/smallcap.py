@@ -112,9 +112,11 @@ def eligible(
     panel: Panel,
     min_price: float = MIN_PRICE,
     min_adv: float = MIN_ADV,
-    exclude_top: int = EXCLUDE_TOP,
+    exclude_top: int | None = None,
 ) -> pd.DataFrame:
-    """True where a ticker is eligible at that close."""
+    """True where a ticker is eligible at that close (`exclude_top` defaults
+    to `EXCLUDE_TOP`)."""
+    exclude_top = EXCLUDE_TOP if exclude_top is None else exclude_top
     has = panel.close.notna()
     adv = panel.adv.where(has)
     rank = adv.rank(axis=1, ascending=False, method="first")

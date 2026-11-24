@@ -630,3 +630,110 @@ def test_spread_returns_are_long_minus_short_month_end_to_month_end():
     assert spread.iloc[0] == pytest.approx(0.10 + 0.05)
     summary = sc.spread_summary(spread)
     assert summary["months"] == 1 and summary["mean_pct"] == pytest.approx(15.0)
+
+
+# --- Runner end to end (synthetic data in tmp_path) ----------------------------------
+
+
+def _load_runner():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "run_smallcap", ROOT / "scripts" / "run_smallcap.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_ohlcv(path: Path, close: np.ndarray, index, volume: float) -> None:
+    df = pd.DataFrame(
+        {
+            "Open": close,
+            "High": close,
+            "Low": close,
+            "Close": close,
+            "Volume": volume,
+        },
+        index=pd.DatetimeIndex(index, name="Date"),
+    )
+    df["Adj Close"] = df["Close"]
+    df.to_parquet(path)
+
+
+def test_runner_run_writes_the_report_and_doc(tmp_path, monkeypatch):
+    runner = _load_runner()
+    raw, etf = tmp_path / "raw_broad", tmp_path / "raw_etf"
+    raw.mkdir()
+    etf.mkdir()
+    index = pd.bdate_range("2016-01-04", "2023-06-30")
+    rng = np.random.default_rng(7)
+    tickers = [f"T{k:02d}" for k in range(40)]
+    status, events = {}, []
+    for k, t in enumerate(tickers):
+        n = len(index) if k % 8 else len(index) // 2  # every 8th one delists
+        close = 20 * np.exp(np.cumsum(rng.normal(0, 0.02, n)))
+        _write_ohlcv(raw / f"{t}.parquet", close, index[:n], 1_000_000)
+        status[t] = {"bars": n, "first": "2016-01-04", "last": str(index[n - 1])}
+        for day in index[30 : n - 5 : 63]:  # noqa: E203
+            events.append((t, k, f"{day.date()}T12:00:00.000Z", day))
+    for sym in ("SPY", "IWM"):
+        px = 200 * np.exp(np.cumsum(rng.normal(0, 0.01, len(index))))
+        pd.DataFrame(
+            {"open": px, "high": px, "low": px, "close": px, "volume": 1e6},
+            index=index,
+        ).to_parquet(etf / f"{sym}.parquet")
+    (raw / "_status.json").write_text(json.dumps(status))
+    pd.DataFrame(
+        {
+            "symbol": tickers,
+            "name": "X Inc",
+            "exchange": "NYSE",
+            "status": "active",
+        }
+    ).to_parquet(raw / "_assets.parquet")
+    pd.DataFrame(
+        {
+            "ticker": tickers,
+            "cik": range(40),
+            "source": "current",
+            "sic": "1000",
+            "common": True,
+            "reason": "",
+        }
+    ).to_csv(raw / "_classified.csv", index=False)
+    pd.DataFrame(events, columns=["ticker", "cik", "accepted", "day0"]).to_parquet(
+        raw / "_events.parquet"
+    )
+    monkeypatch.setattr(runner, "ETF", etf)
+    monkeypatch.setattr(runner, "REPORT_JSON", tmp_path / "smallcap.json")
+    monkeypatch.setattr(runner, "DOC", tmp_path / "smallcap.md")
+    monkeypatch.setattr(sc, "EXCLUDE_TOP", 5)
+    monkeypatch.setattr(ed, "MIN_POOL", 20)
+
+    assert runner.main(["run", "--raw", str(raw)]) == 0
+
+    report = json.loads((tmp_path / "smallcap.json").read_text())
+    u = report["universe"]
+    assert u["eligible_per_month"]["max"] == 35  # 40 names minus the top 5
+    assert u["delisted"]["delisted"] == 5
+    build = report["periods"]["build"]
+    for cost in ("1x", "2x"):
+        for name in (runner.REVERSAL, runner.MOMENTUM, runner.EARNINGS):
+            assert build[cost][name]["calmar"] is not None
+    assert build["1x"][runner.COMPOSITE]["avg_holdings"] == pytest.approx(20, abs=1)
+    assert (
+        build["2x"][runner.COMPOSITE]["cagr_pct"]
+        < build["1x"][runner.COMPOSITE]["cagr_pct"]
+    )
+    # The build period starts after 6-1 momentum can rank (126 sessions).
+    assert report["windows"]["build"][0] >= "2016-07-01"
+    assert report["windows"]["build"][1] == "2022-12-30"
+    assert report["windows"]["test"][0] == "2023-01-02"
+    assert set(report["spreads"]["test"]) == {
+        runner.REVERSAL,
+        runner.MOMENTUM,
+        runner.COMPOSITE,
+    }
+    doc = (tmp_path / "smallcap.md").read_text()
+    assert "Long-short diagnostic" in doc and "At 2x costs" in doc
