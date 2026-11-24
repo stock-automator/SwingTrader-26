@@ -10,7 +10,8 @@ caps), pre-registered in `docs/research/strategy-evidence-2026-11.md`.
    depositary shares, ETFs, 5-letter foreign / ADR / warrant / right / unit
    suffixes) are dropped before download; EDGAR classification (below)
    decides the rest.
-2. Bars: SIP daily bars, all adjustments, from `START`, many symbols per
+2. Bars: SIP daily bars, all adjustments (or `adjustment="raw"` for the
+   traded prices the $5 test needs), from `START`, many symbols per
    request (`/v2/stocks/bars`, paged by `next_page_token`). Requests are
    spaced `MIN_INTERVAL_SECONDS` apart (under 200 a minute). Each finished
    batch is written to `<dir>/<SYMBOL>.parquet` (the `load_prices` format)
@@ -116,6 +117,7 @@ class BarsDownloader:
         clock: Callable[[], float] = time.monotonic,
         batch_size: int = BATCH_SIZE,
         start: str = START,
+        adjustment: str = "all",
     ):
         self._headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
         self._secrets = [key, secret]
@@ -125,6 +127,7 @@ class BarsDownloader:
         self._last: float | None = None
         self.batch_size = batch_size
         self.start = start
+        self.adjustment = adjustment
         self.requests = 0
 
     def _request(self, url: str, params: dict) -> dict:
@@ -165,7 +168,7 @@ class BarsDownloader:
             "symbols": ",".join(symbols),
             "timeframe": "1Day",
             "start": self.start,
-            "adjustment": "all",
+            "adjustment": self.adjustment,
             "feed": "sip",
             "limit": PAGE_LIMIT,
         }

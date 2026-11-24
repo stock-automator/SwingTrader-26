@@ -737,3 +737,9 @@ def test_runner_run_writes_the_report_and_doc(tmp_path, monkeypatch):
     }
     doc = (tmp_path / "smallcap.md").read_text()
     assert "Long-short diagnostic" in doc and "At 2x costs" in doc
+
+
+def test_fetch_batch_can_request_unadjusted_bars():
+    http = FakeAlpaca()
+    _downloader(http, adjustment="raw").fetch_batch(["C"])
+    assert http.calls[0]["params"]["adjustment"] == "raw"

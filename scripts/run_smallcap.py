@@ -5,6 +5,7 @@ Small/mid-cap backtest (cycle 07b), rules pre-registered in
 
     python scripts/run_smallcap.py download [--limit N]   # Alpaca, resumable
     python scripts/run_smallcap.py classify               # EDGAR, cached
+    python scripts/run_smallcap.py download --unadjusted  # traded prices
     python scripts/run_smallcap.py run                    # cached data only
 
 `download` writes `data/raw_broad/` (gitignored): `_assets.parquet`, one
@@ -43,6 +44,7 @@ RAW = ROOT / "data/raw_broad"
 ETF = ROOT / "data/raw_etf"
 EDGAR_CACHE = ROOT / "data/edgar"
 CLASSIFIED_FILE = "_classified.csv"
+UNADJUSTED_DIR = "unadjusted"
 EVENTS_FILE = "_events.parquet"
 REPORT_JSON = ROOT / "data/reports/smallcap.json"
 DOC = ROOT / "docs/smallcap.md"
@@ -56,7 +58,7 @@ EW, IWM, SPY = "Equal-weight universe", "IWM buy & hold", "SPY buy & hold"
 log = logging.getLogger("smallcap")
 
 
-def _downloader() -> bu.BarsDownloader:
+def _downloader(adjustment: str = "all") -> bu.BarsDownloader:
     from dotenv import load_dotenv
 
     load_dotenv(ROOT / ".env")
@@ -64,10 +66,26 @@ def _downloader() -> bu.BarsDownloader:
     secret = os.environ.get("ALPACA_SECRET_KEY") or os.environ.get("ALPACA_API_SECRET")
     if not key or not secret:
         raise SystemExit("ALPACA_API_KEY / ALPACA_SECRET_KEY missing from .env")
-    return bu.BarsDownloader(key, secret)
+    return bu.BarsDownloader(key, secret, adjustment=adjustment)
+
+
+def download_unadjusted(args: argparse.Namespace) -> int:
+    """Unadjusted bars of the classified common stocks, for the $5 price
+    test on the price that traded (adjusted prices of later reverse-split
+    stocks are far above it)."""
+    dl = _downloader("raw")
+    classified = pd.read_csv(args.raw / CLASSIFIED_FILE)
+    tickers = classified.loc[classified["common"].astype(bool), "ticker"]
+    symbols = sorted(t.replace("-", ".") for t in tickers)
+    status = dl.download(symbols, args.raw / UNADJUSTED_DIR)
+    done = sum(s in status for s in symbols)
+    log.info("%d / %d unadjusted done, %d requests", done, len(symbols), dl.requests)
+    return 0 if done == len(symbols) else 1
 
 
 def download(args: argparse.Namespace) -> int:
+    if args.unadjusted:
+        return download_unadjusted(args)
     dl = _downloader()
     assets_path = args.raw / bu.ASSETS_FILE
     if assets_path.exists():
@@ -558,6 +576,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("step", choices=["download", "classify", "run"])
     parser.add_argument("--raw", type=Path, default=RAW)
     parser.add_argument("--limit", type=int, default=0, help="first N symbols")
+    parser.add_argument(
+        "--unadjusted", action="store_true", help="raw bars of the common stocks"
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     steps = {"download": download, "classify": classify, "run": run}
