@@ -36,8 +36,8 @@ import numpy as np
 import pandas as pd
 
 from . import earnings_drift as ed
+from .momentum import ADV_DAYS  # noqa: F401 (the 20-day dollar volume)
 from .momentum import (
-    ADV_DAYS,
     DELISTED,
     INITIAL_CAPITAL,
     REBALANCE,
@@ -192,9 +192,7 @@ def composite_score(
     with both returns."""
     ok = elig & r1.notna() & r61.notna()
     names = ok[ok].index
-    return (
-        _z(-r1[names]) + _z(r61[names]) + _z(ear.reindex(names).fillna(0.0))
-    ) / 3
+    return (_z(-r1[names]) + _z(r61[names]) + _z(ear.reindex(names).fillna(0.0))) / 3
 
 
 def latest_ear(

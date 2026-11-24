@@ -15,7 +15,6 @@ import pytest
 from backend.app.data import broad_universe as bu
 from backend.app.quant import earnings_drift as ed
 from backend.app.quant import smallcap as sc
-from backend.app.quant.momentum import build_panel
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -354,7 +353,7 @@ def test_panel_drops_spliced_tickers_with_the_portfolio_filter():
 def test_segment_age_restarts_after_a_long_gap():
     close = pd.DataFrame({"X": np.arange(1.0, 61.0)}, index=IDX)
     close.iloc[10:13, 0] = np.nan  # 3-session halt: same segment
-    close.iloc[20 : 20 + sc.MAX_GAP + 1, 0] = np.nan  # long gap: new company
+    close.iloc[20 : 20 + sc.MAX_GAP + 1, 0] = np.nan  # noqa: E203 (new company)
     age = sc.segment_age(close)["X"]
     assert age.iloc[9] == 10
     assert age.iloc[13] == 14  # the short halt does not restart the count
@@ -404,7 +403,10 @@ def test_monthly_eligibility_counts_and_summary():
     elig = sc.eligible(panel, exclude_top=2)
     counts = sc.monthly_counts(elig)
     # Month ends of IDX (Jan, Feb; March is unfinished): Jan has 23 sessions.
-    assert counts.index.tolist() == [pd.Timestamp("2020-01-31"), pd.Timestamp("2020-02-28")]
+    assert counts.index.tolist() == [
+        pd.Timestamp("2020-01-31"),
+        pd.Timestamp("2020-02-28"),
+    ]
     assert counts.tolist() == [2, 2]
     assert sc.count_summary(counts) == {"min": 2, "median": 2.0, "max": 2}
 
