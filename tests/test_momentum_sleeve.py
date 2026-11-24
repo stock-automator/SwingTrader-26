@@ -4,15 +4,25 @@ the market calendar and the price cache are all faked."""
 
 from __future__ import annotations
 
+import importlib.util
+import json
+from dataclasses import replace
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
 import backend.app.api.execution as execution_module
 from backend.app.config import Settings, get_settings
+from backend.app.execution import momentum_sleeve as ms
 from backend.app.execution.alpaca_client import AlpacaExecutionClient
+from backend.app.execution.market_clock import NY
 from backend.app.main import app
+from backend.app.quant import momentum
 
 # ------------------------------------------ MARKET orders carry the order tag
 
@@ -94,8 +104,6 @@ def test_sleeve_exit_of_held_quantity_passes_a_closed_session(api, market):
 
 
 def test_sleeve_pct_defaults_to_30_percent_and_reads_the_env(monkeypatch):
-    from pathlib import Path
-
     assert Settings().momentum_sleeve_pct == 0.30
     monkeypatch.setenv("MOMENTUM_SLEEVE_PCT", "0.25")
     get_settings.cache_clear()
@@ -112,10 +120,6 @@ def test_sleeve_pct_defaults_to_30_percent_and_reads_the_env(monkeypatch):
 
 # ------------------------------------------------------- calendar and tagging
 
-from datetime import date, datetime, time, timedelta  # noqa: E402
-
-from backend.app.execution import momentum_sleeve as ms  # noqa: E402
-from backend.app.execution.market_clock import NY  # noqa: E402
 
 HOLIDAYS = {date(2026, 11, 26), date(2026, 12, 25), date(2027, 1, 1)}
 
@@ -163,9 +167,6 @@ def test_next_rebalance_date():
 
 # ------------------------------------------------------------------- ranking
 
-import pandas as pd  # noqa: E402
-
-from backend.app.quant import momentum  # noqa: E402
 
 RANK_DAY = date(2026, 11, 30)
 
@@ -191,9 +192,7 @@ def universe(n=15, extra_after=0):
     if extra_after:
         index = index.append(pd.bdate_range(RANK_DAY + timedelta(1), periods=3))
     steps = pd.Series(range(len(index)), index=index, dtype=float)
-    frames = {
-        f"T{k:02d}": _bars(index, 50 + (k + 1) * 0.05 * steps) for k in range(n)
-    }
+    frames = {f"T{k:02d}": _bars(index, 50 + (k + 1) * 0.05 * steps) for k in range(n)}
     if extra_after:  # a late crash in the fastest name must not change ranks
         frames[f"T{n - 1:02d}"].iloc[-3:, :4] = 1.0
     frames["PENNY"] = _bars(index, 1 + 0.02 * steps, volume=100_000_000)
@@ -294,10 +293,6 @@ def test_order_body_is_a_tagged_fractional_market_order():
 
 # -------------------------------------------------------------------- runner
 
-import importlib.util  # noqa: E402
-import json  # noqa: E402
-from pathlib import Path  # noqa: E402
-from zoneinfo import ZoneInfo  # noqa: E402
 
 UK = ZoneInfo("Europe/London")
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "momentum_sleeve.py"
@@ -542,8 +537,6 @@ def test_dry_run_plans_without_orders_or_state(sleeve):
 
 
 def test_sleeve_size_follows_the_setting(sleeve, tmp_path):
-    from dataclasses import replace
-
     s = Session()
     settings = replace(
         Settings(data_dir=tmp_path / "raw", allow_downloads=False),
@@ -639,8 +632,13 @@ def test_executor_runs_the_sleeve_before_the_swing_book(swing, monkeypatch):
     calls = []
     monkeypatch.setattr(swing, "run_sleeve", lambda: calls.append("sleeve"))
     monkeypatch.setattr(
-        swing, "run_once", lambda: calls.append("swing") or {**dict.fromkeys(
-            ("placed", "skipped", "blocked", "limited"), []), "reason": ""}
+        swing,
+        "run_once",
+        lambda: calls.append("swing")
+        or {
+            **dict.fromkeys(("placed", "skipped", "blocked", "limited"), []),
+            "reason": "",
+        },
     )
     assert swing.main() == 0 and calls == ["sleeve", "swing"]
 
@@ -654,3 +652,105 @@ def test_a_crashing_sleeve_never_stops_the_swing_run(swing, monkeypatch, capsys)
     monkeypatch.setattr(script, "run", boom)
     swing.run_sleeve()
     assert "momentum_sleeve: failed (RuntimeError)" in capsys.readouterr().out
+
+
+# ----------------------------------------------------------------- reporting
+
+SLEEVE_STATE = {
+    "month": "2026-12",
+    "complete": True,
+    "holdings": {"AAA": 2.0, "BBB": 4.0},
+    "start": {"date": "2026-12-01", "spy": 600.0},
+    "index": 1.1,
+    "base_value": 400.0,
+}
+CLOSES = {"AAA": 110.0, "BBB": 50.0, "SPY": 630.0}
+
+
+def test_sleeve_lines_show_holdings_value_return_vs_spy_and_next_date():
+    lines = ms.sleeve_lines(SLEEVE_STATE, CLOSES.get, date(2027, 1, 4), 0.30)
+    text = "\n".join(lines)
+    assert "Momentum sleeve (6-1, top 10, 30% of equity)" in text
+    assert "Holdings (2): AAA, BBB" in text
+    # 2 x 110 + 4 x 50 = 420 now vs 400 after the last rebalance, x 1.1.
+    assert "Value $420.00, +15.5% since 2026-12-01 vs SPY +5.0%" in text
+    assert "Next rebalance Mon 04 Jan 2027" in text
+    line = ms.sleeve_line(SLEEVE_STATE, CLOSES.get, date(2027, 1, 4))
+    assert line == (
+        "Momentum sleeve: 2 holdings, $420.00, +15.5% since 2026-12-01 "
+        "vs SPY +5.0%, next rebalance 2027-01-04"
+    )
+
+
+def test_sleeve_lines_before_the_first_rebalance_and_without_prices():
+    text = "\n".join(ms.sleeve_lines({}, CLOSES.get, date(2026, 12, 1), 0.3))
+    assert "No holdings yet" in text and "Next rebalance Tue 01 Dec 2026" in text
+    assert "no holdings yet" in ms.sleeve_line({}, CLOSES.get, date(2026, 12, 1))
+    gaps = "\n".join(ms.sleeve_lines(SLEEVE_STATE, {}.get, date(2027, 1, 4), 0.3))
+    assert "Value n/a (no cached close for AAA, BBB)" in gaps
+
+
+def _sleeve_settings(tmp_path):
+    settings = Settings(data_dir=tmp_path / "raw", allow_downloads=False)
+    settings.data_dir.mkdir(parents=True)
+    index = pd.bdate_range(end="2026-12-04", periods=5)
+    for t, c in CLOSES.items():
+        _bars(index, [c] * 5).to_parquet(settings.data_dir / f"{t}.parquet")
+    ms.save_state(settings.momentum_state_path, SLEEVE_STATE)
+    return settings
+
+
+def test_daily_brief_has_the_momentum_section(tmp_path):
+    from backend.app.reports import daily
+
+    settings = _sleeve_settings(tmp_path)
+    now = datetime(2026, 12, 7, 8, tzinfo=UK)
+    lines = daily.momentum_lines(settings, now)
+    assert "Value $420.00, +15.5% since 2026-12-01 vs SPY +5.0%" in lines
+    assert "Next rebalance Mon 04 Jan 2027" in lines
+    text = daily._render(
+        now,
+        date(2026, 12, 4),
+        date(2026, 12, 4),
+        "BULL",
+        False,
+        None,
+        [],
+        "x",
+        momentum=lines,
+    )
+    assert text.index("Momentum sleeve") < text.index(daily.FOOTER)
+
+
+def test_daily_section_survives_an_unreadable_state(tmp_path):
+    from backend.app.reports import daily
+
+    settings = _sleeve_settings(tmp_path)
+    settings.momentum_state_path.write_text("{oops")
+    lines = daily.momentum_lines(settings, datetime(2026, 12, 7, 8, tzinfo=UK))
+    assert any("state unreadable" in line for line in lines)
+
+
+def test_long_brief_with_the_section_still_splits_under_4096():
+    from backend.app.alerts.dispatcher import split_message
+
+    lines = ms.sleeve_lines(SLEEVE_STATE, CLOSES.get, date(2027, 1, 4), 0.3)
+    text = "\n".join(["x" * 90] * 60 + lines)
+    parts = split_message(text)
+    assert len(parts) > 1 and all(len(p) <= 4096 for p in parts)
+    assert "Momentum sleeve" in "".join(parts)
+
+
+def test_weekly_report_has_a_sleeve_line(tmp_path, monkeypatch):
+    from backend.app.reports import weekly
+
+    settings = _sleeve_settings(tmp_path)
+    monkeypatch.setattr(weekly, "load_fills", lambda: pd.DataFrame())
+    monkeypatch.setattr(weekly, "latest_gbp_rate", lambda *a, **k: None)
+    report = weekly.build_weekly_report(
+        settings, now=datetime(2026, 12, 12, 9, tzinfo=UK)
+    )
+    assert (
+        "Momentum sleeve: 2 holdings, $420.00, +15.5% since 2026-12-01 "
+        "vs SPY +5.0%, next rebalance 2027-01-04"
+    ) in report.text.splitlines()

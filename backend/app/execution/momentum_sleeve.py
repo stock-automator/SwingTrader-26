@@ -48,7 +48,7 @@ QTY_DECIMALS = 6
 #: Longest run of closed days to step over (a holiday weekend is 4).
 MAX_SCAN_DAYS = 14
 
-CloseOn = Callable[[date], "datetime | None"]
+CloseOn = Callable[[date], datetime | None]
 
 
 def order_tag(month: str, ticker: str) -> str:
@@ -228,3 +228,86 @@ def plan_rebalance(
         if short * prices[ticker] >= MIN_ORDER_USD:
             plan.buys.append(SleeveOrder(ticker, "buy", short, prices[ticker]))
     return plan
+
+
+# ----------------------------------------------------------------- reporting
+
+
+def sleeve_status(state: dict, last_close: Callable[[str], float | None]) -> dict:
+    """Holdings, value at the last cached closes (`None` if any is missing),
+    return since the start chained through `index`, and SPY's return since
+    the start (from the rank-day close before the first trade)."""
+    holdings = state.get("holdings") or {}
+    closes = {t: last_close(t) for t in sorted(holdings)}
+    missing = [t for t, c in closes.items() if c is None]
+    value = None
+    if not missing:
+        value = sum(float(holdings[t]) * float(c) for t, c in closes.items())
+    base = float(state.get("base_value") or 0.0)
+    ret = None
+    if value is not None and base > 0:
+        ret = float(state.get("index") or 1.0) * value / base - 1
+    start = state.get("start") or {}
+    spy_now, spy_start = last_close("SPY"), start.get("spy")
+    spy_ret = spy_now / float(spy_start) - 1 if spy_now and spy_start else None
+    return {
+        "tickers": list(closes),
+        "missing": missing,
+        "value": value,
+        "return": ret,
+        "spy_return": spy_ret,
+        "start": start.get("date"),
+    }
+
+
+def _pct(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:+.1%}"
+
+
+def _performance(status: dict) -> str:
+    return (
+        f"{_pct(status['return'])} since {status['start'] or 'n/a'} "
+        f"vs SPY {_pct(status['spy_return'])}"
+    )
+
+
+def sleeve_lines(
+    state: dict,
+    last_close: Callable[[str], float | None],
+    next_day: date,
+    sleeve_pct: float,
+) -> list[str]:
+    """The daily brief's momentum section."""
+    cfg = SLEEVE_CONFIG
+    lines = [
+        "",
+        f"Momentum sleeve ({cfg.lookback // 21}-{cfg.skip // 21}, top {cfg.top_n}, "
+        f"{sleeve_pct:.0%} of equity)",
+    ]
+    status = sleeve_status(state, last_close)
+    if not status["tickers"]:
+        lines.append("No holdings yet.")
+    else:
+        lines.append(
+            f"Holdings ({len(status['tickers'])}): {', '.join(status['tickers'])}"
+        )
+        if status["value"] is None:
+            missing = ", ".join(status["missing"])
+            lines.append(f"Value n/a (no cached close for {missing})")
+        else:
+            lines.append(f"Value ${status['value']:,.2f}, {_performance(status)}")
+    lines.append(f"Next rebalance {next_day:%a %d %b %Y}")
+    return lines
+
+
+def sleeve_line(
+    state: dict, last_close: Callable[[str], float | None], next_day: date
+) -> str:
+    """The weekly report's one sleeve line."""
+    status = sleeve_status(state, last_close)
+    tail = f"next rebalance {next_day.isoformat()}"
+    n = len(status["tickers"])
+    if not n:
+        return f"Momentum sleeve: no holdings yet, {tail}"
+    value = "value n/a" if status["value"] is None else f"${status['value']:,.2f}"
+    return f"Momentum sleeve: {n} holdings, {value}, {_performance(status)}, {tail}"

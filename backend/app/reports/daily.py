@@ -56,6 +56,7 @@ from ..data.loader import (
     fetch_stock_splits,
     load_prices,
 )
+from ..execution import momentum_sleeve
 from ..execution.guards import EarningsLockoutGuard
 from ..execution.market_clock import NY, _clock_for
 from ..quant.portfolio import PortfolioConfig
@@ -600,6 +601,7 @@ def _render(
     reason: str,
     day_trades: int | None = None,
     shortlist: list[ShortlistSection] | None = None,
+    momentum: list[str] | None = None,
 ) -> str:
     lines = [] if setups else [f"No trades today: {reason}."]
     lines.append(f"SwingTrader daily brief, {now.astimezone(UK):%a %d %b %Y}")
@@ -625,8 +627,38 @@ def _render(
             f"Why: {s.reason}",
         ]
     lines += _render_shortlist(shortlist or [], SHORTLIST_ENGINE.initial_capital)
+    lines += momentum or []
     lines += ["", FOOTER]
     return "\n".join(lines)
+
+
+def last_cached_close(settings: Settings) -> Callable[[str], float | None]:
+    """`ticker -> last cached close` (no downloads), `None` when uncached."""
+
+    def close(ticker: str) -> float | None:
+        try:
+            bars = load_prices(ticker, data_dir=settings.data_dir, allow_download=False)
+        except DataUnavailableError:
+            return None
+        value = bars["Close"].dropna()
+        return float(value.iloc[-1]) if len(value) else None
+
+    return close
+
+
+def momentum_lines(settings: Settings, now: datetime) -> list[str]:
+    """The momentum sleeve section: holdings, value and return vs SPY since
+    the start, and the next rebalance (offline NYSE calendar)."""
+    try:
+        state = momentum_sleeve.load_state(settings.momentum_state_path)
+    except (OSError, ValueError) as exc:
+        log.warning("momentum sleeve state unreadable: %s", exc)
+        return ["", f"Momentum sleeve: state unreadable ({type(exc).__name__})"]
+    today = now.astimezone(NY).date()
+    next_day = momentum_sleeve.next_rebalance(today, state, _offline_close)
+    return momentum_sleeve.sleeve_lines(
+        state, last_cached_close(settings), next_day, settings.momentum_sleeve_pct
+    )
 
 
 def build_daily_brief(settings: Settings, now: datetime | None = None) -> DailyBrief:
@@ -663,6 +695,7 @@ def build_daily_brief(settings: Settings, now: datetime | None = None) -> DailyB
         reason,
         _day_trades(settings),
         shortlist,
+        momentum_lines(settings, now),
     )
     return DailyBrief(
         as_of=as_of,

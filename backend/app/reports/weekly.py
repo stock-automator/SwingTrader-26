@@ -24,9 +24,12 @@ from ..alerts.dispatcher import TelegramAlertChannel
 from ..config import Settings
 from ..data.fx import FxRate, fx_context, latest_gbp_rate
 from ..data.loader import SPY_TICKER, DataUnavailableError, load_prices
+from ..execution import momentum_sleeve
 from ..execution.alpaca_client import AlpacaExecutionClient
+from ..execution.market_clock import NY
 from ..journal.executor import TradeJournal
 from ..journal.fills import ingest_fills, load_fills, open_positions, round_trips
+from .daily import _offline_close, last_cached_close
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +89,16 @@ def _spy_line(settings: Settings, trades: pd.DataFrame) -> str:
         f"vs SPY: avg trade {trade_return:+.2%} after costs, "
         f"SPY {spy_return:+.2%} over the same days ({n} trades)"
     )
+
+
+def _sleeve_line(settings: Settings, now: datetime) -> str:
+    try:
+        state = momentum_sleeve.load_state(settings.momentum_state_path)
+    except (OSError, ValueError) as exc:
+        return f"Momentum sleeve: state unreadable ({type(exc).__name__})"
+    today = now.astimezone(NY).date()
+    next_day = momentum_sleeve.next_rebalance(today, state, _offline_close)
+    return momentum_sleeve.sleeve_line(state, last_cached_close(settings), next_day)
 
 
 def _universe_lines(settings: Settings) -> list[str]:
@@ -158,6 +171,7 @@ def _render(
         )
     lines.append(_spy_line(settings, trades))
     lines.append(f"Open positions: {n_open}")
+    lines.append(_sleeve_line(settings, now))
     lines += _universe_lines(settings)
     if rate is not None:
         lines.append(
