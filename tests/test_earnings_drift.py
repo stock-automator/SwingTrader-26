@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -174,6 +175,33 @@ def test_client_raises_with_status_and_does_not_cache_errors(tmp_path):
     assert not list(tmp_path.rglob("*.json"))
 
 
+class FlakyHttp(FakeHttp):
+    """Answers 500 `fails` times, then from `answers`."""
+
+    def __init__(self, answers, fails):
+        super().__init__(answers)
+        self.fails = fails
+
+    def __call__(self, url, params=None, headers=None, timeout=None):
+        if self.fails:
+            self.fails -= 1
+            self.calls.append((url, params, headers))
+            return type("R", (), {"status_code": 500, "text": "Internal"})()
+        return super().__call__(url, params, headers, timeout)
+
+
+def test_client_retries_server_errors_then_gives_up(tmp_path):
+    answers = {SUB_URL: (200, SUBMISSION), PAGE_NEW: (200, PAGE)}
+    http = FlakyHttp(answers, fails=edgar.RETRIES - 1)
+    client = edgar.EdgarClient(tmp_path / "a", http_get=http, sleep=lambda s: None)
+    assert len(client.filings(1, since="2015-01-01")) == 2
+    http = FlakyHttp(answers, fails=edgar.RETRIES)
+    client = edgar.EdgarClient(tmp_path / "b", http_get=http, sleep=lambda s: None)
+    with pytest.raises(edgar.EdgarError, match="500"):
+        client.filings(1, since="2015-01-01")
+    assert len(http.calls) == edgar.RETRIES
+
+
 def test_client_offline_raises_on_cache_miss(tmp_path):
     client, http = _client(tmp_path, {}, offline=True)
     with pytest.raises(edgar.EdgarError, match="offline"):
@@ -313,3 +341,204 @@ def test_real_events_cache_coverage():
     spy = pd.read_parquet(ROOT / "data" / "raw" / "SPY.parquet")
     assert events["day0"].isin(pd.DatetimeIndex(spy.index)).all()
     assert not events.duplicated(["ticker", "day0"]).any()
+
+
+# --- Strategy ---------------------------------------------------------------
+
+from backend.app.quant import earnings_drift as ed  # noqa: E402
+
+COST = ed.COST_PER_SIDE
+
+
+def _prices(n: int = 120, tickers=("A", "B")) -> ed.Prices:
+    index = pd.bdate_range("2020-01-01", periods=n)
+    flat = pd.DataFrame(100.0, index=index, columns=list(tickers))
+    spy = pd.Series(100.0, index=index)
+    return ed.Prices(open=flat.copy(), close=flat.copy(), spy_open=spy, spy_close=spy)
+
+
+def test_rules_match_the_preregistered_design():
+    assert ed.HOLD_DAYS == 60
+    assert ed.ENTRY_OFFSET == 2
+    assert ed.POOL_DAYS == 252
+    assert ed.MAX_POSITIONS == 20
+    assert ed.COST_PER_SIDE == 0.0005
+    assert (ed.TOP_QUANTILE, ed.BOTTOM_QUANTILE) == (0.9, 0.1)
+
+
+def test_ear_compounds_abnormal_returns_days_minus_1_to_plus_1():
+    p = _prices()
+    i0 = 10
+    p.close.iloc[i0 - 1, 0] = 101.0  # day -1: +1%
+    p.close.iloc[i0, 0] = 103.02  # day 0: +2%
+    p.close.iloc[i0 + 1 :, 0] = 103.02 * 0.99  # noqa: E203 (day +1: -1%)
+    spy = p.spy_close.copy()
+    spy.iloc[i0 - 1 :] = 100.5  # noqa: E203 (SPY +0.5% on day -1)
+    p = ed.Prices(p.open, p.close, p.spy_open, spy)
+    events = pd.DataFrame({"ticker": ["A"], "day0": [p.close.index[i0]]})
+    table = ed.event_table(events, p)
+    expected = (1 + 0.01 - 0.005) * 1.02 * 0.99 - 1
+    assert table.loc[0, "ear"] == pytest.approx(expected)
+    assert table.loc[0, ["known", "entry", "exit_plan"]].tolist() == [11, 12, 71]
+
+
+def test_event_table_bhar_from_entry_open_to_exit_close_vs_spy():
+    p = _prices()
+    p.open.iloc[12, 0] = 100.0
+    p.close.iloc[71:, 0] = 110.0
+    spy_close = p.spy_close.copy()
+    spy_close.iloc[71:] = 102.0
+    p = ed.Prices(p.open, p.close, p.spy_open, spy_close)
+    events = pd.DataFrame({"ticker": ["A"], "day0": [p.close.index[10]]})
+    row = ed.event_table(events, p).iloc[0]
+    assert row["bhar"] == pytest.approx(0.10 - 0.02)
+    assert row["exit"] == 71 and not row["delisted"] and row["complete"]
+
+
+def test_event_table_delisted_exits_at_last_close():
+    p = _prices()
+    p.close.iloc[30, 0] = 90.0
+    p.close.iloc[31:, 0] = np.nan
+    events = pd.DataFrame({"ticker": ["A"], "day0": [p.close.index[10]]})
+    row = ed.event_table(events, p).iloc[0]
+    assert row["exit"] == 30 and row["delisted"]
+    assert row["bhar"] == pytest.approx(-0.10)
+
+
+def test_membership_at_day_zero():
+    membership = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2016-01-31", "2016-02-29", "2016-02-29"]),
+            "ticker": ["A", "A", "B"],
+        }
+    )
+    events = pd.DataFrame(
+        {
+            "ticker": ["A", "B", "B", "B", "A"],
+            "day0": pd.to_datetime(
+                ["2015-06-01", "2015-06-01", "2016-01-15", "2016-02-10", "2016-03-07"]
+            ),
+        }
+    )
+    # Before the first snapshot its list is used (for the trailing pool only).
+    assert ed.member_at_day0(events, membership).tolist() == [
+        True,
+        False,
+        False,
+        True,
+        False,
+    ]
+
+
+def _table(rows: list[tuple]) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=["ear", "known", "member"])
+
+
+def test_classify_uses_only_earlier_member_ears_in_the_window():
+    table = _table(
+        [
+            (1.0, 0, True),
+            (2.0, 1, True),
+            (3.0, 2, True),
+            (4.0, 3, True),
+            (100.0, 3, False),  # not a member: not in the pool
+            (10.0, 4, True),
+            (0.0, 4, True),
+            (5.0, 9, True),  # pool = known 4..8: two events < min_pool
+        ]
+    )
+    out = ed.classify(table, pool_days=5, min_pool=3)
+    assert out.tolist()[5:] == ["top", "bottom", None]
+    assert out.iloc[4] is None  # non-members are never classified
+
+
+def test_classify_never_sees_later_ears():
+    base = [(float(i), i, True) for i in range(10)] + [(5.0, 10, True)]
+    a = ed.classify(_table(base), pool_days=20, min_pool=3)
+    b = ed.classify(_table(base + [(1000.0, 11, True)]), pool_days=20, min_pool=3)
+    assert a.iloc[10] == b.iloc[10]
+
+
+def _signals(p: ed.Prices, rows: list[tuple[str, int, float, str]]) -> pd.DataFrame:
+    """rows: ticker, entry index, ear, signal."""
+    t = pd.DataFrame(rows, columns=["ticker", "entry", "ear", "signal"])
+    t["exit_plan"] = t["entry"] + ed.HOLD_DAYS - 1
+    t["day0"] = p.close.index[t["entry"] - ed.ENTRY_OFFSET]
+    return t
+
+
+def test_simulate_long_entry_open_exit_close_with_costs():
+    p = _prices()
+    p.close.iloc[71:, 0] = 110.0
+    result = ed.simulate(_signals(p, [("A", 12, 0.1, "top")]), p, 0, 119)
+    shares = 10_000 / ed.MAX_POSITIONS / 100.0
+    expected = 10_000 - shares * 100 * (1 + COST) + shares * 110 * (1 - COST)
+    assert result.equity.iloc[-1] == pytest.approx(expected)
+    trade = result.trades.iloc[0]
+    assert trade["entry_date"] == p.close.index[12]
+    assert trade["exit_date"] == p.close.index[71]
+    assert trade["reason"] == ed.HOLD_EXIT
+    # Held from the day +2 open through the day +61 close: 60 sessions.
+    assert (result.holdings > 0).sum() == ed.HOLD_DAYS
+
+
+def test_simulate_caps_positions_taking_largest_ear_first():
+    tickers = [f"T{i}" for i in range(25)]
+    p = _prices(tickers=tickers)
+    rows = [(t, 12, float(i), "top") for i, t in enumerate(tickers)]
+    result = ed.simulate(_signals(p, rows), p, 0, 119)
+    held = set(result.trades["ticker"])
+    assert len(held) == ed.MAX_POSITIONS
+    assert held == set(tickers[5:])
+
+
+def test_simulate_delisted_exit_at_last_close():
+    p = _prices()
+    p.close.iloc[30, 0] = 80.0
+    p.close.iloc[31:, 0] = np.nan
+    result = ed.simulate(_signals(p, [("A", 12, 0.1, "top")]), p, 0, 119)
+    trade = result.trades.iloc[0]
+    assert trade["reason"] == ed.DELISTED
+    assert trade["exit_price"] == pytest.approx(80.0)
+    assert result.delisted_exits == 1
+
+
+def test_simulate_long_only_ignores_bottom_and_long_short_shorts_it():
+    p = _prices()
+    p.close.iloc[71:, 0] = 90.0
+    signals = _signals(p, [("A", 12, -0.1, "bottom")])
+    flat = ed.simulate(signals, p, 0, 119)
+    assert flat.equity.iloc[-1] == pytest.approx(10_000)
+    short = ed.simulate(signals, p, 0, 119, long_short=True)
+    shares = 10_000 / ed.MAX_POSITIONS / 100.0
+    expected = 10_000 + shares * 100 * (1 - COST) - shares * 90 * (1 + COST)
+    assert short.equity.iloc[-1] == pytest.approx(expected)
+    assert short.trades.iloc[0]["side"] == "short"
+    assert short.short_exposure.max() > 0
+
+
+def test_event_study_mean_and_t_stat():
+    t = pd.DataFrame(
+        {
+            "signal": ["top", "top", "bottom", None],
+            "bhar": [0.01, 0.03, -0.02, 0.5],
+            "complete": [True, True, True, True],
+            "day0": pd.to_datetime(
+                ["2020-01-02", "2020-02-03", "2020-01-02"] * 1 + ["2020-01-02"]
+            ),
+        }
+    )
+    out = ed.event_study(t, "2020-01-01", "2020-12-31")
+    assert out["top"]["n"] == 2
+    assert out["top"]["mean_pct"] == pytest.approx(2.0)
+    assert out["top"]["t"] == pytest.approx(2.0)
+    assert out["bottom"]["n"] == 1 and out["bottom"]["t"] is None
+
+
+def test_exposure_matched_spy_follows_invested_fraction():
+    spy = pd.Series(
+        [100.0, 110.0, 121.0], index=pd.bdate_range("2020-01-01", periods=3)
+    )
+    invested = pd.Series([0.5, 0.5, 0.5], index=spy.index)
+    curve = ed.exposure_matched(spy, invested, 10_000)
+    assert curve.iloc[-1] == pytest.approx(10_000 * 1.05 * 1.05)
