@@ -34,3 +34,25 @@ Context: published anomaly returns fall about 26% out-of-sample and 58% after pu
 - **Plain short-term reversal:** failed replication.
 - **Pre-FOMC drift:** gone after 2015.
 - **Historical-news strategies:** Alpaca has no news history.
+
+## Cycle 07 pre-registered rules (2026-11-24): steady multi-asset edge
+
+A asked for a steady edge with a good reward-to-risk ratio; options, hedges and gold are allowed. Every rule below is taken as published, with no tuning.
+
+- **Universe (ETFs):** SPY, QQQ, IWM, EFA, EEM, TLT, IEF, SHY (cash proxy), GLD, DBC, VNQ.
+- **GTAA, Faber (2007, updated 2013):**
+  - assets: SPY, EFA, IEF, DBC, VNQ, equal weight;
+  - rule: hold each one only if its month-end close is above its 10-month SMA, otherwise hold SHY;
+  - rebalance monthly.
+- **GTAA aggressive (Faber):** of the same 5 assets plus GLD and TLT, hold the top 3 by the average of 1/3/6/12-month returns, each only while it is above its 10-month SMA.
+- **Global equities momentum / dual momentum (Antonacci 2014):**
+  - each month, if SPY's 12-month return is above SHY's, hold the better of SPY and EFA by 12-month return;
+  - otherwise hold IEF.
+- **Risk parity, inverse volatility:** SPY, TLT, GLD, DBC, weighted by the inverse of 60-day volatility and rebalanced monthly. A variant adds the 10-month SMA filter.
+- **Permanent portfolio (Browne):** 25% each in SPY, TLT, GLD and SHY, rebalanced yearly.
+- **Options proxy, cash-secured put writing:**
+  - data: the CBOE S&P 500 PutWrite Index (PUT) and the BuyWrite Index (BXM), if the daily history can be downloaded from CBOE for free; otherwise skip;
+  - benchmarks: SPY and 60/40 (SPY/IEF).
+- **Judged on:** CAGR, max drawdown, Sharpe, Calmar (CAGR / max drawdown), worst year and % positive months.
+- **Test periods:** build 2016–2022, test 2023+; also full-history results where the ETF data goes back to 2007, which covers 2008.
+- **Costs:** 2bp per side.
