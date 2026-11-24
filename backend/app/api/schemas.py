@@ -641,7 +641,8 @@ class ExecutionOrderRequest(BaseModel):
         max_length=128,
         pattern=r"^[A-Za-z0-9._:-]+$",
         description="Alpaca client order id, e.g. the paper executor's "
-        "strategy tag. BRACKET orders only.",
+        "strategy tag or the momentum sleeve's `mom-<YYYY-MM>-<TICKER>`. "
+        "MARKET and BRACKET orders; LIMIT ignores it.",
     )
 
     @field_validator("ticker")

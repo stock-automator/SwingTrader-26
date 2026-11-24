@@ -94,7 +94,13 @@ def submit_order(
 
     try:
         if request.order_type == "MARKET":
-            return client.submit_market_order(request.ticker, request.qty, request.side)
+            tag = {"client_order_id": request.client_order_id}
+            return client.submit_market_order(
+                request.ticker,
+                request.qty,
+                request.side,
+                **(tag if request.client_order_id else {}),
+            )
         if request.order_type == "LIMIT":
             if request.limit_price is None:
                 raise HTTPException(
