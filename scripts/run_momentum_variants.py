@@ -185,7 +185,10 @@ exits at the last close, slippage only).
 - Residual momentum coverage, share of baseline-eligible member-months with \
 a residual score: {cov_text}. Removed members need 12 monthly returns from \
 2016-01, so in 2016 only names with 2015 prices (today's members) can be \
-ranked: a survivorship tilt in the first build year.
+ranked: a survivorship tilt in the first build year. One-off check \
+(2026-11-24), build period 2017-2022 without 2016: residual Sharpe 0.75, \
+CAGR 15.2%, max drawdown -42.5%, still the best candidate (inverse vol 0.53, \
+baseline 0.45, SPY 0.64).
 - Six runs on one build/test split; the winner's build Sharpe is the best \
 of five, so it is biased upward. The test period is under four years.
 - Sharpe uses daily returns with a zero risk-free rate (`metrics.py`); cash \
