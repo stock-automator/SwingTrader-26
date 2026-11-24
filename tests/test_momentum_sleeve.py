@@ -290,3 +290,275 @@ def test_order_body_is_a_tagged_fractional_market_order():
         "client_order_id": "mom-2026-12-OLD",
     }
     assert buy.body("2026-12")["intent"] == "ENTRY"
+
+
+# -------------------------------------------------------------------- runner
+
+import importlib.util  # noqa: E402
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+UK = ZoneInfo("Europe/London")
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "momentum_sleeve.py"
+DEC_1 = datetime(2026, 12, 1, 14, 40, tzinfo=UK)  # 09:40 New York
+TOP10 = [f"T{k:02d}" for k in range(5, 15)]
+
+
+class Resp:
+    def __init__(self, status=200, body=None):
+        self.status_code, self._body = status, body if body is not None else {}
+
+    def json(self):
+        return self._body
+
+
+class Session:
+    """Fake backend: the brief, positions and account, and the order route
+    (`status` per ticker, default 200)."""
+
+    def __init__(self, positions=(), equity=10_000.0, brief=None, status=None):
+        self.brief = brief or Resp(200, {"stale": False})
+        self.positions = Resp(200, {"positions": list(positions)})
+        self.account = Resp(200, {"equity": equity})
+        self.status = status or {}
+        self.posts: list[dict] = []
+        self.gets: list[str] = []
+
+    def get(self, url, timeout=None):
+        self.gets.append(url)
+        if url.endswith("/reports/daily"):
+            return self.brief
+        if url.endswith("/execution/positions"):
+            return self.positions
+        return self.account
+
+    def post(self, url, json=None, timeout=None):
+        assert url.endswith("/api/v1/execution/orders")
+        self.posts.append(json)
+        code = self.status.get(json["ticker"], 200)
+        body = {"id": f"o-{json['ticker']}"}
+        if code == 422:
+            body = {"detail": "Order blocked (ENTRY): within 48h of earnings"}
+        return Resp(code, body)
+
+
+class Clock:
+    def __init__(self, raises=None):
+        self.raises = raises
+
+    def close_on(self, day):
+        if self.raises:
+            raise self.raises
+        return close_on(day)
+
+
+@pytest.fixture
+def sleeve(tmp_path):
+    spec = importlib.util.spec_from_file_location("momentum_sleeve_script", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    settings = Settings(data_dir=tmp_path / "raw", allow_downloads=False)
+    frames, spy = universe()
+
+    def run(session, now=DEC_1, frames=frames, spy=spy, clock=None, **kw):
+        return mod.run(
+            session=session,
+            now=now,
+            settings=settings,
+            clock=clock or Clock(),
+            load=lambda s: (frames, spy),
+            **kw,
+        )
+
+    mod.test_run = run
+    mod.state_path = settings.momentum_state_path
+    return mod
+
+
+def state(mod) -> dict:
+    return json.loads(mod.state_path.read_text())
+
+
+def test_first_day_buys_ten_tagged_equal_weight_market_orders(sleeve):
+    s = Session()
+    out = sleeve.test_run(s)
+    assert out["reason"] == "" and sorted(p["ticker"] for p in s.posts) == TOP10
+    frames, _ = universe()
+    for body in s.posts:
+        t = body["ticker"]
+        price = float(frames[t].loc[str(RANK_DAY), "Close"])
+        assert body["order_type"] == "MARKET" and body["side"] == "buy"
+        assert body["intent"] == "ENTRY"
+        assert body["client_order_id"] == f"mom-2026-12-{t}"
+        assert body["qty"] == pytest.approx(300.0 / price, abs=1e-6)
+        assert body["qty"] * price <= 300.0
+    saved = state(sleeve)
+    assert saved["month"] == "2026-12" and saved["complete"] is True
+    assert sorted(saved["holdings"]) == TOP10
+    assert saved["start"]["date"] == "2026-12-01"
+    assert saved["base_value"] == pytest.approx(3000.0, abs=0.01)
+
+
+def test_rerun_in_the_same_month_places_nothing(sleeve):
+    s = Session()
+    sleeve.test_run(s)
+    out = sleeve.test_run(s)
+    assert len(s.posts) == 10 and "already rebalanced 2026-12" in out["reason"]
+
+
+def test_rerun_after_a_blocked_buy_retries_only_that_name(sleeve):
+    s = Session(status={"T14": 422})
+    out = sleeve.test_run(s)
+    assert "T14" in out["blocked"][0] and "earnings" in out["blocked"][0]
+    assert state(sleeve)["complete"] is False
+    assert "T14" not in state(sleeve)["holdings"]
+    s.status = {}
+    s.posts.clear()
+    sleeve.test_run(s)
+    assert [p["ticker"] for p in s.posts] == ["T14"]
+    assert state(sleeve)["complete"] is True
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        datetime(2026, 12, 2, 14, 40, tzinfo=UK),  # second trading day
+        datetime(2026, 11, 30, 14, 40, tzinfo=UK),
+        datetime(2026, 12, 1, 14, 30, tzinfo=UK),  # 09:30 New York
+    ],
+)
+def test_only_trades_after_0935_on_the_first_trading_day(sleeve, now):
+    s = Session()
+    out = sleeve.test_run(s, now=now)
+    assert s.posts == [] and out["reason"]
+    assert not sleeve.state_path.exists()
+
+
+def test_target_held_by_the_swing_executor_is_skipped_and_logged(sleeve, caplog):
+    s = Session(positions=[pos("T14", 3.0)])
+    with caplog.at_level("INFO"):
+        out = sleeve.test_run(s)
+    assert "T14" not in [p["ticker"] for p in s.posts] and len(s.posts) == 9
+    assert out["conflicts"] == ["T14"]
+    assert "T14" in caplog.text and "swing" in caplog.text
+    assert "T14" not in state(sleeve)["holdings"]
+
+
+def test_exit_sells_only_the_sleeve_quantity_first(sleeve):
+    sleeve.state_path.parent.mkdir(parents=True)
+    sleeve.state_path.write_text(
+        json.dumps({"month": "2026-11", "complete": True, "holdings": {"OLD": 2.0}})
+    )
+    s = Session(positions=[pos("OLD", 5.0)])
+    sleeve.test_run(s)
+    first = s.posts[0]
+    assert first == {
+        "ticker": "OLD",
+        "side": "sell",
+        "qty": 2.0,
+        "order_type": "MARKET",
+        "intent": "EXIT",
+        "client_order_id": "mom-2026-12-OLD",
+    }
+    assert all(p["side"] == "buy" for p in s.posts[1:])
+    assert "OLD" not in state(sleeve)["holdings"]
+
+
+def test_a_failed_sell_fails_closed_before_any_buy(sleeve):
+    sleeve.state_path.parent.mkdir(parents=True)
+    sleeve.state_path.write_text(
+        json.dumps({"month": "2026-11", "complete": True, "holdings": {"OLD": 2.0}})
+    )
+    s = Session(positions=[pos("OLD", 2.0)], status={"OLD": 422})
+    out = sleeve.test_run(s)
+    assert [p["ticker"] for p in s.posts] == ["OLD"]
+    assert out["blocked"] and "buys skipped" in out["reason"]
+    assert state(sleeve)["holdings"] == {"OLD": 2.0}
+
+
+def _down(status, body=None):
+    return Resp(status, body)
+
+
+@pytest.mark.parametrize(
+    "fault, words",
+    [
+        ({"brief": _down(404)}, "brief"),
+        ({"brief": _down(200, {"stale": True})}, "stale"),
+        ({"brief": _down(500)}, "brief"),
+        ({"positions": _down(503, {"detail": "down"})}, "positions"),
+        ({"positions": _down(200, {})}, "positions"),
+        ({"account": _down(503)}, "account"),
+        ({"account": _down(200, {"equity": 0})}, "account"),
+    ],
+)
+def test_fails_closed_when_backend_data_is_unavailable(sleeve, fault, words):
+    s = Session()
+    for name, resp in fault.items():
+        setattr(s, name, resp)
+    out = sleeve.test_run(s)
+    assert s.posts == [] and words in out["reason"]
+    assert not sleeve.state_path.exists()
+
+
+def test_fails_closed_without_the_calendar(sleeve):
+    s = Session()
+    out = sleeve.test_run(s, clock=Clock(raises=RuntimeError("no keys")))
+    assert s.posts == [] and "calendar" in out["reason"]
+
+
+def test_fails_closed_when_the_cache_lacks_the_rank_day(sleeve):
+    frames, spy = universe()
+    cut = {t: df.loc[:"2026-11-27"] for t, df in frames.items()}
+    s = Session()
+    out = sleeve.test_run(s, frames=cut, spy=spy.loc[:"2026-11-27"])
+    assert s.posts == [] and "2026-11-30" in out["reason"]
+
+
+def test_fails_closed_with_fewer_than_ten_eligible_names(sleeve):
+    frames, spy = universe(n=6)
+    s = Session()
+    out = sleeve.test_run(s, frames=frames, spy=spy)
+    assert s.posts == [] and "eligible" in out["reason"]
+
+
+def test_fails_closed_on_an_unreadable_state_file(sleeve):
+    sleeve.state_path.parent.mkdir(parents=True)
+    sleeve.state_path.write_text("{not json")
+    s = Session()
+    out = sleeve.test_run(s)
+    assert s.posts == [] and "state" in out["reason"]
+
+
+def test_dry_run_plans_without_orders_or_state(sleeve):
+    s = Session()
+    out = sleeve.test_run(
+        s, now=datetime(2026, 11, 24, 10, tzinfo=UK), dry_run=True, month="2026-12"
+    )
+    assert s.posts == [] and not sleeve.state_path.exists()
+    assert out["rank_day"] == "2026-11-30" and out["month"] == "2026-12"
+    assert sorted(o.ticker for o in out["plan"].buys) == TOP10
+
+
+def test_sleeve_size_follows_the_setting(sleeve, tmp_path):
+    from dataclasses import replace
+
+    s = Session()
+    settings = replace(
+        Settings(data_dir=tmp_path / "raw", allow_downloads=False),
+        momentum_sleeve_pct=0.5,
+    )
+    frames, spy = universe()
+    sleeve.run(
+        session=s,
+        now=DEC_1,
+        settings=settings,
+        clock=Clock(),
+        load=lambda _: (frames, spy),
+    )
+    notional = sum(
+        p["qty"] * float(frames[p["ticker"]].loc[str(RANK_DAY), "Close"])
+        for p in s.posts
+    )
+    assert notional == pytest.approx(5000.0, abs=0.1)
