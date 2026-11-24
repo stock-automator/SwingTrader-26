@@ -271,6 +271,16 @@ def momentum_selector(panel: Panel, cfg: MomentumConfig) -> Selector:
     return select
 
 
+def holdings_on(
+    panel: Panel, cfg: MomentumConfig, day, held: set[str]
+) -> list[str]:
+    """What `momentum_selector` holds after the close of `day` given `held`
+    (kept names first, best-ranked first): the live rebalance's targets.
+    KeyError if `day` is not a bar of `panel`."""
+    i = panel.index.get_loc(pd.Timestamp(day))
+    return list(momentum_selector(panel, cfg)(i, held))
+
+
 def equal_weight_selector(panel: Panel) -> Selector:
     """Every ticker (member) with a bar on the rebalance day, equal weight."""
     has_bar = panel.close.notna()
