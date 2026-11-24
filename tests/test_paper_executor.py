@@ -18,7 +18,17 @@ def ex(tmp_path, monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     monkeypatch.setattr(mod, "STATE_PATH", tmp_path / "executor_state.json")
+    monkeypatch.setattr(mod, "SLEEVE_PATH", tmp_path / "momentum_sleeve.json")
+    # The sleeve run reads its own real state file: covered in
+    # test_momentum_sleeve.py with tmp paths, stubbed here.
+    monkeypatch.setattr(mod, "run_sleeve", lambda: None)
     return mod
+
+
+def test_fixture_never_points_at_real_state(ex, tmp_path):
+    for path in (ex.STATE_PATH, ex.SLEEVE_PATH):
+        assert tmp_path in path.parents
+    assert ex.run_sleeve() is None
 
 
 class Resp:
