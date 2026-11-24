@@ -798,3 +798,15 @@ def test_weekly_report_has_a_sleeve_line(tmp_path, monkeypatch):
         "Momentum sleeve: 2 holdings, $420.00, +15.5% since 2026-12-01 "
         "vs SPY +5.0%, next rebalance 2027-01-04"
     ) in report.text.splitlines()
+
+
+def test_sleeve_holdings_missing_from_an_empty_book_fail_closed(sleeve):
+    """An empty positions list while the sleeve holds names is suspect:
+    never re-buy the whole sleeve on it (reviewer NOTE 1)."""
+    sleeve.state_path.parent.mkdir(parents=True, exist_ok=True)
+    sleeve.state_path.write_text(
+        json.dumps({"month": "2026-11", "complete": True, "holdings": {"T1": 3.0}})
+    )
+    s = Session(positions=[])
+    out = sleeve.test_run(s)
+    assert s.posts == [] and "fail closed" in out["reason"]

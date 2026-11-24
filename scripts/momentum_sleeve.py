@@ -176,6 +176,14 @@ def run(
 
     frames, spy = (load or load_universe)(settings)
     sleeve = {t: float(q) for t, q in (state.get("holdings") or {}).items()}
+    longs = {p.get("symbol") for p in positions if p.get("side", "long") == "long"}
+    if state.get("month") != month and sleeve and not set(sleeve) & longs:
+        # At a new month the last rebalance has long settled, so every sleeve
+        # name missing at once looks like a bad positions read, not real
+        # exits: never re-buy the whole sleeve on it.
+        out["reason"] = "no sleeve holding found in the account positions: fail closed"
+        log.error("momentum sleeve: %s", out["reason"])
+        return out
     cfg = ms.SLEEVE_CONFIG
     try:
         targets, prices = ms.rank_targets(frames, spy, rank, set(sleeve), cfg)
