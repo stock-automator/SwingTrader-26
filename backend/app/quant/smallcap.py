@@ -1,0 +1,509 @@
+"""
+Small and mid caps (cycle 07b). Rules pre-registered in
+`docs/research/strategy-evidence-2026-11.md`, used as written:
+
+- universe: EDGAR-classified common stocks (`data.broad_universe`), active
+  and delisted. Eligible at a month-end close: a bar that day, traded
+  (unadjusted) close >= `MIN_PRICE`, 20-day average dollar volume >= `MIN_ADV`, and not among the
+  `EXCLUDE_TOP` largest common stocks by that dollar volume;
+- signals at the month-end close, traded at the next open, held a month:
+  1. reversal: the lowest decile of the 1-month (21-session) return;
+  2. 6-1 momentum: the highest decile of the return from 126 to 21 sessions
+     ago (`momentum.momentum_scores`);
+  3. earnings drift: cycle 06's rules (`quant.earnings_drift`), with the
+     month's eligible names as the member list;
+  4. composite: the mean cross-sectional z-score (population sd, eligible
+     names with both returns) of -1m return, 6-1 return and the latest EAR
+     known within `EAR_DAYS` sessions (else 0); the top `TOP_COMPOSITE`;
+- equal weight, long-only, fractional shares, cash earns 0;
+- costs per side on traded notional: `COST_LIQUID` where the previous
+  close's 20-day dollar volume is above `COST_TIER_ADV`, else
+  `COST_ILLIQUID`; `mult` scales both (2x costs);
+- a held stock with no bar is sold at its last close (delisted exit).
+
+Data hygiene: tickers with a spliced bar (`portfolio.suspect_spike`) are
+dropped (`momentum.build_panel`); a bar gap longer than `MAX_GAP` sessions
+or a one-day move beyond `MAX_JUMP` times starts a new segment (Alpaca
+reuses symbols), and returns never reach back across it (`segment_age`).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+from . import earnings_drift as ed
+from .momentum import ADV_DAYS  # noqa: F401 (the 20-day dollar volume)
+from .momentum import (
+    DELISTED,
+    INITIAL_CAPITAL,
+    REBALANCE,
+    TRADE_COLUMNS,
+    MomentumResult,
+    Panel,
+    _window,
+    build_panel,
+    mar,
+    momentum_scores,
+    month_end_mask,
+    run_stats,
+)
+
+MIN_PRICE = 5.0
+MIN_ADV = 5_000_000.0
+EXCLUDE_TOP = 500
+COST_TIER_ADV = 20_000_000.0
+COST_LIQUID = 0.0010
+COST_ILLIQUID = 0.0020
+R1_DAYS = 21
+MOM_LOOKBACK, MOM_SKIP = 126, 21
+EAR_DAYS = 60
+TOP_COMPOSITE = 20
+DECILE = 10
+MAX_GAP = 10
+#: A one-day close ratio beyond this (up or down) is another security under
+#: the same symbol (SN: Sanchez Energy's OTC tail at $0.35, then SharkNinja
+#: at $41), not a trade: it starts a new segment. Real moves found in the
+#: data stay below it (DFDV +843% in a day).
+MAX_JUMP = 10.0
+SEGMENT_BREAK = "segment break (another security)"
+
+#: rank-day position -> {ticker: weight of equity}.
+Selector = Callable[[int], dict[str, float]]
+
+
+@dataclass
+class UniversePanel(Panel):
+    #: Sessions since the current bar segment began (NaN before any bar).
+    age: pd.DataFrame | None = None
+    #: Unadjusted (traded) closes for the price test; None = use `close`.
+    traded_close: pd.DataFrame | None = None
+
+
+def segment_age(
+    close: pd.DataFrame, max_gap: int = MAX_GAP, max_jump: float = MAX_JUMP
+) -> pd.DataFrame:
+    """Sessions since each ticker's current segment began, counting the
+    first bar as 1. More than `max_gap` sessions without a bar end a
+    segment, and so does a close more than `max_jump` times (or under
+    1/`max_jump` of) the previous bar's; the next bar starts a new one."""
+    has = close.notna().to_numpy()
+    ratio = (close / close.ffill().shift(1)).to_numpy()
+    jump = has & ((ratio > max_jump) | (ratio < 1.0 / max_jump))
+    pos = np.arange(len(close), dtype=float)[:, None] * np.ones(close.shape[1])
+    last_bar = pd.DataFrame(np.where(has, pos, np.nan)).ffill()
+    prev_bar = last_bar.shift(1).to_numpy()
+    gap = pos - prev_bar - 1
+    new = has & (np.isnan(prev_bar) | (gap > max_gap) | jump)
+    start = pd.DataFrame(np.where(new, pos, np.nan)).ffill().to_numpy()
+    return pd.DataFrame(pos - start + 1, index=close.index, columns=close.columns)
+
+
+def build_universe_panel(
+    frames: dict[str, pd.DataFrame],
+    spy: pd.DataFrame,
+    traded: dict[str, pd.DataFrame] | None = None,
+) -> UniversePanel:
+    """`momentum.build_panel` (spliced tickers dropped) plus `age` and, from
+    `traded` (ticker -> unadjusted `Close`, `Volume`), `traded_close` and a
+    traded dollar volume: dividend adjustment lowers past prices but not
+    volumes, so adjusted close x volume understates it. Adjusted closes stay
+    for returns; a ticker or day without traded bars keeps the adjusted
+    figures."""
+    base = build_panel(frames, spy)
+    fields = {k: getattr(base, k) for k in base.__dataclass_fields__}
+    traded_close = None
+    if traded is not None:
+
+        def matrix(field: str) -> pd.DataFrame:
+            return pd.DataFrame(
+                {
+                    t: traded[t][field].reindex(base.index)
+                    for t in base.tickers
+                    if t in traded
+                },
+                index=base.index,
+                columns=base.tickers,
+                dtype=float,
+            )
+
+        traded_close = matrix("Close")
+        dollars = traded_close * matrix("Volume")
+        fields["dollar_volume"] = dollars.where(dollars.notna(), base.dollar_volume)
+    return UniversePanel(
+        **fields, age=segment_age(base.close), traded_close=traded_close
+    )
+
+
+def segment_breaks(panel: UniversePanel) -> np.ndarray:
+    """True on the first bar of every segment but a ticker's first: from
+    there the symbol is another security (or back after a long gap)."""
+    has = panel.close.notna().to_numpy()
+    bars_so_far = np.cumsum(has, axis=0)
+    return (panel.age.to_numpy() == 1) & (bars_so_far > 1)
+
+
+def event_prices(
+    panel: UniversePanel, spy_close: pd.Series, spy_open: pd.Series
+) -> ed.Prices:
+    """`earnings_drift.Prices` with each segment break's bar hidden, so a
+    hold across it ends at the last close before (its delisting exit) and no
+    EAR spans it."""
+    breaks = segment_breaks(panel)
+    return ed.Prices(
+        open=panel.open.mask(breaks),
+        close=panel.close.mask(breaks),
+        spy_open=spy_open.astype(float),
+        spy_close=spy_close.astype(float),
+    )
+
+
+def return_1m(panel: UniversePanel) -> pd.DataFrame:
+    r = panel.mark / panel.mark.shift(R1_DAYS) - 1
+    return r.where(panel.close.notna() & (panel.age > R1_DAYS))
+
+
+def return_6_1(panel: UniversePanel) -> pd.DataFrame:
+    r = momentum_scores(panel.close, panel.mark, MOM_LOOKBACK, MOM_SKIP)
+    return r.where(panel.age > MOM_LOOKBACK)
+
+
+def eligible(
+    panel: Panel,
+    min_price: float = MIN_PRICE,
+    min_adv: float = MIN_ADV,
+    exclude_top: int | None = None,
+) -> pd.DataFrame:
+    """True where a ticker is eligible at that close (`exclude_top` defaults
+    to `EXCLUDE_TOP`)."""
+    exclude_top = EXCLUDE_TOP if exclude_top is None else exclude_top
+    has = panel.close.notna()
+    adv = panel.adv.where(has)
+    rank = adv.rank(axis=1, ascending=False, method="first")
+    price = panel.close
+    traded = getattr(panel, "traded_close", None)
+    if traded is not None:
+        price = traded.where(traded.notna(), panel.close)
+    return has & (price >= min_price) & (adv >= min_adv) & (rank > exclude_top)
+
+
+def monthly_counts(elig: pd.DataFrame) -> pd.Series:
+    """Eligible names at each month-end close."""
+    month_end = month_end_mask(pd.DatetimeIndex(elig.index))
+    return elig[month_end].sum(axis=1).astype(int)
+
+
+def count_summary(counts: pd.Series) -> dict:
+    return {
+        "min": int(counts.min()),
+        "median": float(counts.median()),
+        "max": int(counts.max()),
+    }
+
+
+def delisted_share(panel: Panel, elig: pd.DataFrame) -> dict:
+    """Of the names eligible at any month end, how many have no bar on the
+    panel's last session (delisted, acquired or otherwise gone)."""
+    ever = elig[month_end_mask(pd.DatetimeIndex(elig.index))].any()
+    names = ever[ever].index
+    gone = int(panel.close[names].iloc[-1].isna().sum())
+    total = int(len(names))
+    return {
+        "ever_eligible": total,
+        "delisted": gone,
+        "pct": float(gone / total * 100) if total else 0.0,
+    }
+
+
+# --- Signals ---------------------------------------------------------------------
+
+
+def _weights(names) -> dict[str, float]:
+    names = list(names)
+    return {t: 1.0 / len(names) for t in names} if names else {}
+
+
+def _decile(values: pd.Series, elig: pd.Series, lowest: bool) -> dict[str, float]:
+    v = values[elig.reindex(values.index, fill_value=False) & values.notna()]
+    n = max(1, len(v) // DECILE) if len(v) else 0
+    picked = v.nsmallest(n) if lowest else v.nlargest(n)
+    return _weights(picked.index)
+
+
+def lowest_decile(values: pd.Series, elig: pd.Series) -> dict[str, float]:
+    return _decile(values, elig, lowest=True)
+
+
+def highest_decile(values: pd.Series, elig: pd.Series) -> dict[str, float]:
+    return _decile(values, elig, lowest=False)
+
+
+def equal_weight(elig: pd.Series) -> dict[str, float]:
+    return _weights(elig[elig].index)
+
+
+def top_n(score: pd.Series, n: int) -> dict[str, float]:
+    return _weights(score.nlargest(n).index)
+
+
+def _z(x: pd.Series) -> pd.Series:
+    sd = x.std(ddof=0)
+    return (x - x.mean()) / sd if sd > 0 else x * 0.0
+
+
+def composite_score(
+    r1: pd.Series, r61: pd.Series, ear: pd.Series, elig: pd.Series
+) -> pd.Series:
+    """Mean z-score of -r1, r61 and ear (0 when missing) over eligible names
+    with both returns."""
+    ok = elig & r1.notna() & r61.notna()
+    names = ok[ok].index
+    return (_z(-r1[names]) + _z(r61[names]) + _z(ear.reindex(names).fillna(0.0))) / 3
+
+
+def latest_ear(
+    table: pd.DataFrame,
+    index: pd.DatetimeIndex,
+    tickers: list[str],
+    days: int = EAR_DAYS,
+) -> pd.DataFrame:
+    """Per session and ticker, the EAR of the latest event known (day +1
+    close, `known`) within the last `days` sessions, else 0."""
+    column = {t: j for j, t in enumerate(tickers)}
+    t = table.dropna(subset=["ear"])
+    t = t[t["ticker"].isin(column) & (t["known"] >= 0) & (t["known"] < len(index))]
+    t = t.sort_values("known").drop_duplicates(["ticker", "known"], keep="last")
+    out = np.full((len(index), len(tickers)), np.nan)
+    out[t["known"].to_numpy(dtype=int), t["ticker"].map(column).to_numpy()] = t[
+        "ear"
+    ].to_numpy(dtype=float)
+    frame = pd.DataFrame(out).ffill(limit=days - 1).fillna(0.0)
+    frame.index, frame.columns = index, tickers
+    return frame
+
+
+# --- Costs and simulation ---------------------------------------------------------
+
+
+def cost_rates(adv: pd.DataFrame, mult: float = 1.0) -> pd.DataFrame:
+    """Per-side cost rate for a trade on each session, from the previous
+    close's dollar volume (unknown counts as illiquid)."""
+    prev = adv.shift(1)
+    rate = np.where(prev > COST_TIER_ADV, COST_LIQUID, COST_ILLIQUID)
+    return pd.DataFrame(rate * mult, index=adv.index, columns=adv.columns)
+
+
+def simulate_monthly(
+    panel: Panel,
+    selector: Selector,
+    start,
+    end,
+    mult: float = 1.0,
+    rates: pd.DataFrame | None = None,
+    initial_capital: float = INITIAL_CAPITAL,
+) -> MomentumResult:
+    """`momentum.simulate` with a per-ticker cost rate: on the session after
+    each month end, trade to `selector(month end)` at the open."""
+    index = panel.index
+    a, b = _window(index, start, end)
+    month_end = month_end_mask(index)
+    opens, closes = panel.open.to_numpy(), panel.close.to_numpy()
+    marks = panel.mark.to_numpy()
+    rate = (cost_rates(panel.adv, mult) if rates is None else rates).to_numpy()
+    tickers = panel.tickers
+    column = {t: j for j, t in enumerate(tickers)}
+    breaks = segment_breaks(panel)
+
+    shares = np.zeros(len(tickers))
+    cash = initial_capital
+    trades: list[tuple] = []
+    turnover: dict[pd.Timestamp, float] = {}
+    rows: list[tuple] = []
+    delisted = no_open = 0
+
+    for i in range(a, b + 1):
+        day, s = index[i], rate[i]
+        gone = (shares > 0) & (np.isnan(closes[i]) | breaks[i])
+        for j in np.flatnonzero(gone):
+            # The last close of the security held: today's bar, if any, is
+            # another security's.
+            price = marks[i, j] if np.isnan(closes[i, j]) else marks[i - 1, j]
+            reason = DELISTED if np.isnan(closes[i, j]) else SEGMENT_BREAK
+            notional = shares[j] * price
+            cash += notional * (1 - s[j])
+            trades.append(
+                (day, tickers[j], "sell", shares[j], price * (1 - s[j]))
+                + (notional, notional * s[j], reason)
+            )
+            shares[j] = 0.0
+            delisted += 1
+
+        if i > 0 and month_end[i - 1]:
+            weights = selector(i - 1)
+            o = opens[i]
+            pos = np.flatnonzero(shares > 0)
+            stuck = pos[np.isnan(o[pos])]
+            live = pos[~np.isnan(o[pos])]
+            frozen = float(np.sum(shares[stuck] * marks[i - 1, stuck]))
+            held = shares[live] * o[live]
+            gross = cash + float(held.sum()) + frozen
+            net = cash + float(np.sum(held * (1 - s[live]))) + frozen
+            target = np.zeros(len(tickers))
+            target[stuck] = shares[stuck]
+            no_open += len(stuck)
+            tradable = {}
+            for t, w in weights.items():
+                j = column[t]
+                if np.isnan(o[j]):
+                    no_open += j not in stuck
+                    continue
+                tradable[j] = w
+            wanted = sum(tradable.values()) * net
+            scale = min(1.0, (net - frozen) / wanted) if wanted > 0 else 0.0
+            for j, w in tradable.items():
+                target[j] = w * scale * net / (o[j] * (1 + s[j]))
+            delta = target - shares
+            buys = sells = 0.0
+            for j in np.flatnonzero(delta < 0):
+                notional = -delta[j] * o[j]
+                cash += notional * (1 - s[j])
+                sells += notional
+                trades.append(
+                    (day, tickers[j], "sell", -delta[j], o[j] * (1 - s[j]))
+                    + (notional, notional * s[j], REBALANCE)
+                )
+            for j in np.flatnonzero(delta > 0):
+                notional = delta[j] * o[j]
+                cash -= notional * (1 + s[j])
+                buys += notional
+                trades.append(
+                    (day, tickers[j], "buy", delta[j], o[j] * (1 + s[j]))
+                    + (notional, notional * s[j], REBALANCE)
+                )
+            shares = target
+            turnover[day] = max(buys, sells) / gross if gross > 0 else 0.0
+
+        pos = np.flatnonzero(shares > 0)
+        value = float(np.sum(shares[pos] * marks[i, pos]))
+        equity = cash + value
+        rows.append((day, equity, cash, value / equity if equity else 0.0, len(pos)))
+
+    frame = pd.DataFrame(rows, columns=["date", "equity", "cash", "inv", "n"])
+    frame = frame.set_index("date")
+    equity = frame["equity"]
+    if a > 0:
+        equity = pd.concat([pd.Series([initial_capital], index=[index[a - 1]]), equity])
+    return MomentumResult(
+        equity=equity.rename("equity"),
+        cash=frame["cash"],
+        invested=frame["inv"],
+        holdings=frame["n"],
+        trades=pd.DataFrame(trades, columns=TRADE_COLUMNS),
+        turnover=pd.Series(turnover, dtype=float),
+        delisted_exits=delisted,
+        no_open_skips=no_open,
+    )
+
+
+# --- Statistics -------------------------------------------------------------------
+
+
+def stats(result: MomentumResult, traded: float | None = None) -> dict:
+    """`momentum.run_stats` plus Calmar (CAGR / |max drawdown|) and annual
+    one-way turnover: traded notional / 2 / mean equity / years. `traded`
+    defaults to the trades' `notional`."""
+    out = run_stats(result)
+    out["calmar"] = round(mar(out), 3) if np.isfinite(mar(out)) else None
+    equity = result.equity
+    years = (equity.index[-1] - equity.index[0]).days / 365.25
+    if traded is None:
+        trades = result.trades
+        traded = float(trades["notional"].sum()) if len(trades) else 0.0
+    out["turnover_annual_x"] = (
+        round(traded / 2 / float(equity.mean()) / years, 3) if years > 0 else None
+    )
+    return out
+
+
+def event_stats(result: ed.EventResult) -> dict:
+    """`stats` for an earnings-drift run (entries and exits both traded)."""
+    trades = result.trades
+    traded = float(
+        (trades["shares"] * (trades["entry_price"] + trades["exit_price"])).sum()
+    )
+    as_monthly = MomentumResult(
+        equity=result.equity,
+        cash=result.equity * 0,
+        invested=result.long_exposure + result.short_exposure,
+        holdings=result.holdings,
+        trades=pd.DataFrame(columns=TRADE_COLUMNS),
+        turnover=pd.Series(dtype=float),
+        delisted_exits=result.delisted_exits,
+        no_open_skips=result.no_open_skips,
+    )
+    out = stats(as_monthly, traded=traded)
+    out["trades"] = int(len(trades))
+    out["costs"] = round(float(trades["cost"].sum()), 2) if len(trades) else 0.0
+    for key in ("rebalances", "monthly_turnover_pct"):
+        out.pop(key)
+    return out
+
+
+# --- Long-short diagnostic --------------------------------------------------------
+
+
+def spread_returns(
+    panel: Panel,
+    long_names: Callable[[int], list[str]],
+    short_names: Callable[[int], list[str]],
+    start,
+    end,
+) -> pd.Series:
+    """Gross equal-weight return of the long names minus the short names,
+    from each month-end close in `start`..`end` to the next month-end close
+    (a name without later bars, or whose segment breaks, counts at its last
+    close before)."""
+    index = panel.index
+    ends = np.flatnonzero(month_end_mask(index))
+    lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+    column = {t: j for j, t in enumerate(panel.tickers)}
+    breaks = segment_breaks(panel)
+    # The value a name ends a window at: before a break, its last close.
+    values = panel.mark.mask(breaks).ffill().to_numpy()
+    blocked = np.cumsum(breaks, axis=0)
+    out: dict[pd.Timestamp, float] = {}
+    for i, j in zip(ends[:-1], ends[1:]):
+        if not lo <= index[i] <= hi:
+            continue
+        legs = []
+        for names in (long_names(i), short_names(i)):
+            cols = np.array([column[t] for t in names], dtype=int)
+            if len(cols):
+                broke = blocked[j, cols] > blocked[i, cols]
+                k = np.where(broke, _first_break(breaks, i, j, cols), j)
+                r = values[k, cols] / values[i, cols] - 1
+            else:
+                r = np.array([])
+            legs.append(float(np.nanmean(r)) if len(r) else np.nan)
+        out[index[i]] = legs[0] - legs[1]
+    return pd.Series(out, dtype=float)
+
+
+def _first_break(breaks: np.ndarray, i: int, j: int, cols: np.ndarray) -> np.ndarray:
+    """Per column, the session before its first break in (i, j]."""
+    window = breaks[i + 1 : j + 1, cols]  # noqa: E203
+    return i + np.argmax(window, axis=0)
+
+
+def spread_summary(spread: pd.Series) -> dict:
+    v = spread.dropna().to_numpy(dtype=float)
+    sd = float(np.std(v, ddof=1)) if len(v) > 1 else 0.0
+    return {
+        "months": int(len(v)),
+        "mean_pct": float(v.mean() * 100) if len(v) else None,
+        "t": float(v.mean() / (sd / np.sqrt(len(v)))) if sd > 0 else None,
+        "positive_pct": float((v > 0).mean() * 100) if len(v) else None,
+    }
