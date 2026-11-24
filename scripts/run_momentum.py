@@ -200,7 +200,8 @@ this understates the bias. It is a check only, not a selection input.
 ## Caveats
 
 - Survivorship and index-inclusion bias: the universe is today's index \
-members. Names that fell out, often after crashing, are missing; that hurts \
+members, which is why no run had a single delisted exit. Names that fell \
+out, often after crashing, are missing; that hurts \
 mean reversion (which buys falling names) more than momentum, which rarely \
 holds a name through a long slide. But the opposite bias, names that joined \
 the index after a big run, favours momentum directly: the check above \
