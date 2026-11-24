@@ -136,14 +136,18 @@ def run(
         out["reason"] = "stale brief: fail closed"
         return out
 
-    close_on = (clock or _clock_for(settings.alpaca_api_key, settings.alpaca_api_secret)).close_on
+    close_on = (
+        clock or _clock_for(settings.alpaca_api_key, settings.alpaca_api_secret)
+    ).close_on
     try:
         if not dry_run and not ms.is_first_trading_day(now.date(), close_on):
             out["reason"] = "not the first trading day of the month"
             return out
         rank = rank_day or ms.rank_day_for(day, close_on)
     except Exception as exc:  # noqa: BLE001 - any calendar failure fails closed
-        out["reason"] = f"market calendar unavailable ({type(exc).__name__}): fail closed"
+        out["reason"] = (
+            f"market calendar unavailable ({type(exc).__name__}): fail closed"
+        )
         return out
     out["rank_day"] = rank.isoformat()
 
@@ -156,7 +160,9 @@ def run(
         out["reason"] = f"account equity unavailable (HTTP {code}): fail closed"
         return out
     if not 0 < settings.momentum_sleeve_pct <= 1:
-        out["reason"] = f"momentum_sleeve_pct {settings.momentum_sleeve_pct} not in (0, 1]"
+        out["reason"] = (
+            f"momentum_sleeve_pct {settings.momentum_sleeve_pct} not in (0, 1]"
+        )
         return out
 
     frames, spy = (load or load_universe)(settings)
@@ -175,7 +181,9 @@ def run(
         return out
 
     sleeve_value = settings.momentum_sleeve_pct * float(equity)
-    plan = ms.plan_rebalance(targets, sleeve, positions, prices, sleeve_value, cfg.top_n)
+    plan = ms.plan_rebalance(
+        targets, sleeve, positions, prices, sleeve_value, cfg.top_n
+    )
     out.update(plan=plan, conflicts=plan.conflicts, dropped=plan.dropped)
     for t in plan.conflicts:
         log.info("momentum sleeve: %s already held by the swing executor, skipped", t)

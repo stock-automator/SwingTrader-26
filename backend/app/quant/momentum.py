@@ -271,9 +271,7 @@ def momentum_selector(panel: Panel, cfg: MomentumConfig) -> Selector:
     return select
 
 
-def holdings_on(
-    panel: Panel, cfg: MomentumConfig, day, held: set[str]
-) -> list[str]:
+def holdings_on(panel: Panel, cfg: MomentumConfig, day, held: set[str]) -> list[str]:
     """What `momentum_selector` holds after the close of `day` given `held`
     (kept names first, best-ranked first): the live rebalance's targets.
     KeyError if `day` is not a bar of `panel`."""
