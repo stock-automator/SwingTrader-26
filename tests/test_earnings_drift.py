@@ -304,6 +304,61 @@ def test_resolve_removed_ticker_by_fulltext_and_predecessor():
     assert out.loc[("NEW", 32), "until"] == pd.Timestamp("2019-04-01")
 
 
+def _one_filing_client(current: dict[str, int], first: dict[int, str]):
+    class Client:
+        def company_tickers(self):
+            return current
+
+        def fulltext_hits(self, *a):
+            return []
+
+        def filings(self, cik, since):
+            return pd.DataFrame(
+                {
+                    "form": ["8-K"],
+                    "items": ["2.02"],
+                    "acceptanceDateTime": [first[cik] + "T12:00:00.000Z"],
+                    "filingDate": [first[cik]],
+                }
+            )
+
+    return Client()
+
+
+def test_resolve_falls_back_to_symbol_owner_that_reported_in_span():
+    membership = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2015-12-31", "2018-06-30", "2026-01-31"]),
+            "ticker": ["GT", "GT", "ZZZ"],
+        }
+    )
+    client = _one_filing_client({"GT": 5, "ZZZ": 6}, {5: "2016-02-01", 6: "2015-01-02"})
+    out = edgar.resolve_ciks(membership, client, overrides={}, predecessors={})
+    row = out.set_index("ticker").loc["GT"]
+    assert (row["cik"], row["source"]) == (5, "current-verified")
+    # Reported only after the member span: not the same company.
+    client = _one_filing_client({"GT": 5, "ZZZ": 6}, {5: "2020-02-01", 6: "2015-01-02"})
+    out = edgar.resolve_ciks(membership, client, overrides={}, predecessors={})
+    assert out.set_index("ticker").loc["GT", "source"] == "unresolved"
+
+
+def test_resolve_uses_checked_predecessor_overrides():
+    membership = pd.DataFrame(
+        {"date": pd.to_datetime(["2015-12-31", "2026-01-31"]), "ticker": ["XOM"] * 2}
+    )
+    client = _one_filing_client({"XOM": 2}, {2: "2026-01-30", 1: "2015-02-02"})
+    out = edgar.resolve_ciks(membership, client, overrides={}, predecessors={"XOM": 1})
+    pred = out[out["source"] == "predecessor-checked"].iloc[0]
+    assert (pred["cik"], pred["until"]) == (1, pd.Timestamp("2026-01-30"))
+
+
+def test_checked_overrides_are_documented_ciks():
+    # Each was checked against the EDGAR name / former names (2026-11-24).
+    assert edgar.CIK_OVERRIDES["TWX"] == 1105705
+    assert edgar.PREDECESSORS["XOM"] == 34088
+    assert not set(edgar.CIK_OVERRIDES) & set(edgar.PREDECESSORS)
+
+
 def test_member_quarter_coverage():
     membership = pd.DataFrame(
         {

@@ -70,6 +70,36 @@ MIN_SHARE = 0.5
 #: FOXA / FOX until its last day, see `pit_prices.QUERY_OVERRIDES`).
 SEARCH_SYMBOL: dict[str, str] = {"TFCFA": "FOXA", "TFCF": "FOX"}
 
+#: Removed members full-text search could not resolve (share classes the
+#: releases do not quote, symbols last used years ago). Each checked against
+#: the EDGAR name / former names and its Item 2.02 dates (2026-11-24).
+CIK_OVERRIDES: dict[str, int] = {
+    "AA": 4281,  # ALCOA INC. (now Howmet), AA to 2016-10
+    "ADS": 1101215,  # ALLIANCE DATA SYSTEMS CORP
+    "ANDV": 50104,  # ANDEAVOR / TESORO CORP
+    "BBBY": 886158,  # BED BATH & BEYOND INC
+    "CCE": 1491675,  # COCA-COLA ENTERPRISES, INC.
+    "DISCK": 1437107,  # Discovery Communications, Inc.
+    "DO": 949039,  # DIAMOND OFFSHORE DRILLING INC
+    "EMC": 790070,  # EMC CORP
+    "LLTC": 791907,  # LINEAR TECHNOLOGY CORP
+    "PCP": 79958,  # PRECISION CASTPARTS CORP
+    "TFCF": 1308161,  # TWENTY-FIRST CENTURY FOX, INC.
+    "TWX": 1105705,  # TIME WARNER INC.
+    "UAA": 1336917,  # Under Armour, Inc.
+    "WFM": 865436,  # WHOLE FOODS MARKET INC
+}
+
+#: Current members whose CIK changed while the symbol did not, or whose
+#: predecessor traded under another symbol, so full-text search for today's
+#: symbol cannot find it. Checked like `CIK_OVERRIDES`.
+PREDECESSORS: dict[str, int] = {
+    "XOM": 34088,  # EXXON MOBIL CORP, new holding company 2026
+    "LIN": 884905,  # LINDE INC (Praxair, PX) before Linde plc
+    "VTRS": 1623613,  # Mylan N.V. (MYL) before Viatris
+    "SKYD": 813828,  # Paramount Global (PARA) before Paramount Skydance
+}
+
 FILING_COLUMNS = ["form", "items", "acceptanceDateTime", "filingDate"]
 
 HttpGet = Callable[..., object]
@@ -232,20 +262,31 @@ def first_earnings(client, cik: int) -> pd.Timestamp | None:
     return pd.Timestamp(found["filingDate"].min())
 
 
+def _reported_between(client, cik: int, lo, hi) -> bool:
+    found = earnings_filings(client.filings(cik, HISTORY_START))
+    days = pd.to_datetime(found["filingDate"])
+    return bool(((days >= lo) & (days <= hi)).any())
+
+
 def resolve_ciks(
     membership: pd.DataFrame,
     client,
     overrides: dict[str, int] | None = None,
+    predecessors: dict[str, int] | None = None,
 ) -> pd.DataFrame:
     """Each member ticker -> its CIK(s): `ticker, cik, source, until`.
 
     Current members use today's `company_tickers`; removed members (whose
     symbol may now belong to another company) use full-text search over their
     index years. If the CIK first reports more than `PREDECESSOR_GAP_DAYS`
-    after it is needed, a predecessor found by full-text search before that
-    date covers the gap (`until` = the successor's first Item 2.02).
+    after it is needed, a predecessor covers the gap (`until` = the
+    successor's first Item 2.02): from `predecessors`, else full-text search
+    before that date. A removed member search cannot resolve falls back to
+    today's owner of the symbol if it filed an Item 2.02 within the member
+    span. `overrides` / `predecessors` default to the checked module lists.
     Unresolved tickers get `cik` None."""
-    overrides = overrides or {}
+    overrides = CIK_OVERRIDES if overrides is None else overrides
+    predecessors = PREDECESSORS if predecessors is None else predecessors
     current = client.company_tickers()
     latest, first_snapshot = membership["date"].max(), membership["date"].min()
     span = membership.groupby("ticker")["date"].agg(["min", "max"])
@@ -260,6 +301,9 @@ def resolve_ciks(
         else:
             hits = client.fulltext_hits(symbol, _iso(need_from), _iso(hi))
             cik, source = pick_cik(hits), "fulltext"
+            if cik is None and ticker in current:
+                if _reported_between(client, current[ticker], need_from, hi):
+                    cik, source = current[ticker], "current-verified"
         if cik is None:
             rows.append(dict(ticker=ticker, cik=None, source="unresolved", until=None))
             log.warning("no CIK for %s (%s to %s)", ticker, _iso(lo), _iso(hi))
@@ -271,10 +315,13 @@ def resolve_ciks(
         ):
             continue
         end = start if start is not None else hi
-        hits = client.fulltext_hits(symbol, _iso(need_from), _iso(end))
-        pred = pick_cik(hits, exclude=cik)
+        if ticker in predecessors:
+            pred, how = predecessors[ticker], "predecessor-checked"
+        else:
+            hits = client.fulltext_hits(symbol, _iso(need_from), _iso(end))
+            pred, how = pick_cik(hits, exclude=cik), "predecessor"
         if pred is not None:
-            rows.append(dict(ticker=ticker, cik=pred, source="predecessor", until=end))
+            rows.append(dict(ticker=ticker, cik=pred, source=how, until=end))
     out = pd.DataFrame(rows, columns=["ticker", "cik", "source", "until"])
     out["until"] = pd.to_datetime(out["until"])
     return out
