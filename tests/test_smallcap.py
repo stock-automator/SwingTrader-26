@@ -195,3 +195,121 @@ def test_raw_broad_is_gitignored():
         ["git", "check-ignore", "-q", "data/raw_broad/AAPL.parquet"], cwd=ROOT
     )
     assert result.returncode == 0
+
+
+# --- EDGAR classification ------------------------------------------------------
+
+
+def _hit(cik: int, items=("2.02",)) -> dict:
+    return {"_source": {"ciks": [f"{cik:010d}"], "items": list(items)}}
+
+
+class FakeEdgar:
+    """`company_tickers`, `submission`, `filings` and `fulltext_hits`."""
+
+    def __init__(self):
+        self.current = {"AAPL": 320193, "XLF": 999, "ABC": 555}
+        self.sic = {320193: "3571", 999: "6221", 777: "7372", 555: "1000", 888: ""}
+        self.forms = {
+            320193: [("10-K", "2020-10-30"), ("8-K", "2020-07-30")],
+            999: [("10-K", "2020-02-01")],
+            777: [("10-Q", "2018-05-01"), ("8-K", "2018-04-25")],
+            # Today's owner of ABC began filing after the old ABC stopped.
+            555: [("10-K", "2024-03-01")],
+            888: [("20-F", "2019-04-01"), ("6-K", "2019-05-01")],
+        }
+        self.hits = {"OLD": [_hit(777)] * 3, "ABC": [_hit(888)] * 3}
+        self.fts_calls: list[str] = []
+
+    def company_tickers(self):
+        return dict(self.current)
+
+    def submission(self, name: str) -> dict:
+        cik = int(name.removeprefix("CIK").removesuffix(".json"))
+        return {"sic": self.sic[cik]}
+
+    def filings(self, cik: int, since: str = "2015-01-01") -> pd.DataFrame:
+        rows = self.forms[cik]
+        return pd.DataFrame(
+            {
+                "form": [f for f, _ in rows],
+                "items": [""] * len(rows),
+                "acceptanceDateTime": [f"{d}T21:00:00.000Z" for _, d in rows],
+                "filingDate": [d for _, d in rows],
+            }
+        )
+
+    def fulltext_hits(self, symbol: str, start: str, end: str) -> list[dict]:
+        self.fts_calls.append(symbol)
+        return self.hits.get(symbol, [])
+
+
+def _spans(rows) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=["ticker", "first", "last"]).assign(
+        first=lambda d: pd.to_datetime(d["first"]),
+        last=lambda d: pd.to_datetime(d["last"]),
+    )
+
+
+def test_classify_uses_current_owner_fulltext_and_sic_and_reports_unresolved():
+    spans = _spans(
+        [
+            ("AAPL", "2016-01-04", "2026-11-20"),
+            ("XLF", "2016-01-04", "2026-11-20"),  # commodity-pool SIC
+            ("OLD", "2016-01-04", "2018-06-01"),  # delisted: full-text search
+            ("OLDQ", "2016-01-04", "2018-06-01"),  # bankruptcy suffix: OLD
+            ("ABC", "2016-01-04", "2019-06-01"),  # reused symbol, 20-F filer
+            ("NONE", "2016-01-04", "2017-01-01"),
+        ]
+    )
+    out = bu.classify(spans, FakeEdgar()).set_index("ticker")
+    assert out.loc["AAPL", "source"] == "current"
+    assert bool(out.loc["AAPL", "common"]) is True
+    assert bool(out.loc["XLF", "common"]) is False
+    assert out.loc["XLF", "reason"] == "fund SIC 6221"
+    assert out.loc["OLD", "cik"] == 777 and out.loc["OLD", "source"] == "fulltext"
+    assert bool(out.loc["OLD", "common"]) is True
+    assert out.loc["OLDQ", "cik"] == 777
+    # Today's ABC (555) filed nothing while the old ABC had bars, so full-text
+    # search finds the old one, a 20-F filer: not a common-stock 10-K filer.
+    assert out.loc["ABC", "cik"] == 888
+    assert out.loc["ABC", "reason"] == "no 10-K/10-Q"
+    assert bool(out.loc["ABC", "common"]) is False
+    assert out.loc["NONE", "source"] == "unresolved"
+    assert bool(out.loc["NONE", "common"]) is False
+    assert out.loc["NONE", "reason"] == "no CIK"
+
+
+def test_classification_summary_counts_classified_and_unresolved():
+    out = bu.classify(
+        _spans(
+            [
+                ("AAPL", "2016-01-04", "2026-11-20"),
+                ("XLF", "2016-01-04", "2026-11-20"),
+                ("NONE", "2016-01-04", "2017-01-01"),
+            ]
+        ),
+        FakeEdgar(),
+    )
+    s = bu.classification_summary(out)
+    assert s == {"symbols": 3, "resolved": 2, "unresolved": 1, "common": 1}
+
+
+def test_classify_logs_an_edgar_error_and_keeps_going(caplog):
+    from backend.app.data.edgar import EdgarError
+
+    client = FakeEdgar()
+
+    def broken(symbol, start, end):
+        raise EdgarError("HTTP 500")
+
+    client.fulltext_hits = broken
+    out = bu.classify(
+        _spans(
+            [("OLD", "2016-01-04", "2018-06-01"), ("AAPL", "2016-01-04", "2026-11-20")]
+        ),
+        client,
+    ).set_index("ticker")
+    assert out.loc["OLD", "reason"] == "EDGAR error"
+    assert bool(out.loc["AAPL", "common"]) is True
+    assert "OLD" in caplog.text and "HTTP 500" in caplog.text

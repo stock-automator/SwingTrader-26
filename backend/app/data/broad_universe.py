@@ -225,3 +225,87 @@ def _frame(bars: list[dict]) -> pd.DataFrame:
     ).astype(float)
     out.index = pd.DatetimeIndex(day.dt.tz_localize(None).dt.normalize(), name="Date")
     return out
+
+
+# --- EDGAR classification ------------------------------------------------------
+
+REPORT_FORMS = {"10-K", "10-Q", "10-K405", "10-KT", "10-QT"}
+#: Commodity pools (6221), open-end funds (6722), unit investment trusts and
+#: closed-end funds (6726): funds, not operating companies.
+EXCLUDED_SIC = {"6221", "6722", "6726"}
+#: Today's owner of a symbol counts if it filed within this many days of the
+#: symbol's bar span.
+SPAN_SLACK_DAYS = 120
+CLASSIFY_COLUMNS = ["ticker", "cik", "source", "sic", "common", "reason"]
+
+
+def _filed_within(filings: pd.DataFrame, first, last) -> bool:
+    days = pd.to_datetime(filings["filingDate"])
+    slack = pd.Timedelta(days=SPAN_SLACK_DAYS)
+    return bool(((days >= first - slack) & (days <= last + slack)).any())
+
+
+def _search_symbols(ticker: str) -> list[str]:
+    """`ticker`, then the pre-bankruptcy symbol of a Q-suffixed one."""
+    out = [ticker]
+    if len(ticker) >= 4 and ticker.endswith("Q"):
+        out.append(ticker[:-1])
+    return out
+
+
+def classify(spans: pd.DataFrame, client) -> pd.DataFrame:
+    """`spans` (`ticker, first, last` bar dates, repo symbol form) -> one row
+    per ticker: `cik` (None if unresolved), `source` (current / fulltext /
+    unresolved), `sic`, `common` and the `reason` when not common."""
+    current = client.company_tickers()
+    rows: list[dict] = []
+    for t in spans.itertuples(index=False):
+        try:
+            rows.append(_classify_one(t, current, client))
+        except edgar.EdgarError as exc:
+            log.warning("EDGAR error classifying %s: %s", t.ticker, exc)
+            rows.append(
+                dict(ticker=t.ticker, cik=None, source="unresolved", sic=None)
+                | dict(common=False, reason="EDGAR error")
+            )
+    return pd.DataFrame(rows, columns=CLASSIFY_COLUMNS)
+
+
+def _classify_one(t, current: dict[str, int], client) -> dict:
+    cik, source = None, "unresolved"
+    if t.ticker in current:
+        owner = current[t.ticker]
+        if _filed_within(client.filings(owner, START), t.first, t.last):
+            cik, source = owner, "current"
+    if cik is None:
+        for symbol in _search_symbols(t.ticker):
+            hits = client.fulltext_hits(symbol, edgar._iso(t.first), edgar._iso(t.last))
+            found = edgar.pick_cik(hits)
+            if found is not None:
+                cik, source = found, "fulltext"
+                break
+    if cik is None:
+        return dict(ticker=t.ticker, cik=None, source=source, sic=None) | dict(
+            common=False, reason="no CIK"
+        )
+    sic = str(client.submission(f"CIK{int(cik):010d}.json").get("sic") or "")
+    forms = set(client.filings(cik, START)["form"])
+    if not forms & REPORT_FORMS:
+        common, reason = False, "no 10-K/10-Q"
+    elif sic in EXCLUDED_SIC:
+        common, reason = False, f"fund SIC {sic}"
+    else:
+        common, reason = True, ""
+    return dict(ticker=t.ticker, cik=int(cik), source=source, sic=sic) | dict(
+        common=common, reason=reason
+    )
+
+
+def classification_summary(classified: pd.DataFrame) -> dict:
+    resolved = int(classified["cik"].notna().sum())
+    return {
+        "symbols": int(len(classified)),
+        "resolved": resolved,
+        "unresolved": int(len(classified) - resolved),
+        "common": int(classified["common"].astype(bool).sum()),
+    }
