@@ -72,6 +72,23 @@ def zscore_rows(path: Path) -> dict[str, dict]:
     return {}
 
 
+def _years(stats: dict) -> str:
+    years = stats.get("yearly_returns_pct") or {}
+    return ", ".join(f"{y}: {_fmt(v, 1)}%" for y, v in years.items())
+
+
+def without_additions(frames, spy, added: list[str], cfg, windows) -> dict:
+    """The chosen variant rerun without the names the latest universe sync
+    added: a partial check on index-inclusion bias, not a selection input."""
+    excluded = sorted(t for t in added if t in frames)
+    panel = build_panel({t: f for t, f in frames.items() if t not in added}, spy)
+    selector = momentum_selector(panel, cfg)
+    out: dict = {"excluded": excluded}
+    for period, (lo, hi) in windows.items():
+        out[period] = run_stats(simulate(panel, selector, lo, hi))
+    return out
+
+
 def _fmt(value, digits: int) -> str:
     if value is None:
         return "n/a"
@@ -96,6 +113,11 @@ def markdown(report: dict) -> str:
     missing = ", ".join(report["missing_symbols"]) or "none"
     suspect = ", ".join(report["suspect_data"]) or "none"
     b, t = build[chosen], test[chosen]
+    sens = report["sensitivity"]
+    sens_rows = {
+        f"{chosen}, build, without additions": sens["build"],
+        f"{chosen}, test, without additions": sens["test"],
+    }
     return f"""# Ranked cross-sectional momentum (cycle 04)
 
 Generated {report["generated_at"]} by `scripts/run_momentum.py` in \
@@ -156,35 +178,55 @@ Chosen variant on the test period: CAGR {_fmt(t["cagr_pct"], 1)}%, total \
 {_fmt(t["total_return_pct"], 1)}%, max drawdown \
 {_fmt(t["max_drawdown_pct"], 1)}%, Sharpe {_fmt(t["sharpe"], 2)} \
 (SPY: CAGR {_fmt(test[SPY_BH]["cagr_pct"], 1)}%, max drawdown \
-{_fmt(test[SPY_BH]["max_drawdown_pct"], 1)}%). Per-year returns are in \
-`data/reports/momentum.json`.
+{_fmt(test[SPY_BH]["max_drawdown_pct"], 1)}%). Calendar-year returns, \
+chosen variant: build {_years(b)}; test {_years(t)}.
 
 The zscore row is copied from `data/reports/scorecard.json` (cycle 03): \
 it ran under different rules (whole shares, 1% risk per trade, 6 positions, \
 0.1% commission plus 0.05% spread per leg, FX), and its Sharpe, turnover and \
 holdings were not recorded, so it is shown as reported.
 
+## Chosen variant without the latest index additions
+
+The universe is today's S&P 500 and Nasdaq-100. Names added to them recently \
+were usually added because they had already risen, which is exactly what \
+momentum buys. As a partial check, the chosen variant was rerun without the \
+{len(sens["excluded"])} names the latest universe sync added \
+({", ".join(sens["excluded"]) or "none"}). Earlier additions stay in, so \
+this understates the bias. It is a check only, not a selection input.
+
+{table(sens_rows, "", {})}
+
 ## Caveats
 
-- Survivorship bias: the universe is today's index members, so names that \
-fell out (and often crashed first) are missing. This favours momentum less \
-than mean reversion, since momentum rarely holds a name while it collapses, \
-but winners that later left the index and losers that never joined are both \
-absent, so returns are still overstated by an unknown amount.
-- Adjusted prices: the $5 floor is checked on dividend-adjusted closes, \
-which sit below the traded price early in the history, so a few names were \
-excluded early that a live run would have allowed.
-- Only 0.05% slippage per side is charged; no commission, FX or market \
-impact. With N=10 or 20 and a $10k account, fractional shares make every \
-position exact, which a whole-share account could not match.
-- One path per variant and one train/test split; eight variants were run, \
-so the chosen one's build result is the best of eight.
+- Survivorship and index-inclusion bias: the universe is today's index \
+members. Names that fell out, often after crashing, are missing; that hurts \
+mean reversion (which buys falling names) more than momentum, which rarely \
+holds a name through a long slide. But the opposite bias, names that joined \
+the index after a big run, favours momentum directly: the check above \
+removes only the latest additions. These results overstate what the rules \
+would have earned by an unknown, probably large, amount. A point-in-time \
+membership list is needed before trusting any of these numbers.
+- Adjustment artefacts (one-off check, 2026-11-24): 10 cached series have a \
+one-day jump of more than 10% in Adj Close / Close (spin-off adjustments, \
+e.g. DHR 2016-07-05 +56%). No variant held a name across one, so none \
+creates P&L, but each can distort that name's rank for up to a year.
+- The $5 floor is checked on dividend-adjusted closes, which sit below the \
+traded price early in the history, so it may have excluded a few names that \
+a live run would have allowed.
+- Only 0.05% slippage per side is charged: no commission, FX or market \
+impact. Fractional shares make every position exact on a $10k account.
+- The test period is under four years and dominated by a few themes (AI \
+hardware and storage); one path per variant and one train/test split. \
+Eight variants were run, so the chosen one's build result is the best of \
+eight.
 """
 
 
 def run(args: argparse.Namespace) -> dict:
     started = time.time()
-    symbols = json.loads(args.universe.read_text())["symbols"]
+    universe = json.loads(args.universe.read_text())
+    symbols = universe["symbols"]
     frames, spy, missing = load_universe(args.data_dir, symbols)
     panel = build_panel(frames, spy)
     split = pd.Timestamp(args.split_date)
@@ -205,8 +247,13 @@ def run(args: argparse.Namespace) -> dict:
     for period, stats in zscore_rows(args.scorecard_json).items():
         report[period][ZSCORE] = {**stats, "sharpe": None}
     variants = [v.name for v in VARIANTS]
+    chosen = choose_variant({n: report["build"][n] for n in variants})
+    added = (universe.get("last_changes") or {}).get("added") or []
+    report["sensitivity"] = without_additions(
+        frames, spy, added, VARIANTS[variants.index(chosen)], windows
+    )
     report.update(
-        chosen=choose_variant({n: report["build"][n] for n in variants}),
+        chosen=chosen,
         selection_rule="max build-period CAGR / |max drawdown|",
         variants=variants,
         generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),

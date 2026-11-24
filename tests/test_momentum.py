@@ -335,7 +335,14 @@ def test_run_momentum_script_writes_doc_and_json(tmp_path, monkeypatch):
         df["Adj Close"] = df["Close"]
         df.to_parquet(data / f"{sym}.parquet")
     universe = tmp_path / "universe.json"
-    universe.write_text(json.dumps({"symbols": symbols + ["MISSING"]}))
+    universe.write_text(
+        json.dumps(
+            {
+                "symbols": symbols + ["MISSING"],
+                "last_changes": {"added": ["T3", "MISSING"]},
+            }
+        )
+    )
     scorecard = tmp_path / "scorecard.json"
     scorecard.write_text(json.dumps({"rows": []}))
     md, js = tmp_path / "momentum.md", tmp_path / "momentum.json"
@@ -361,3 +368,7 @@ def test_run_momentum_script_writes_doc_and_json(tmp_path, monkeypatch):
     text = md.read_text()
     assert out["chosen"] in text
     assert "survivorship" in text.lower()
+    # Sensitivity: the chosen variant without the latest index additions.
+    assert out["sensitivity"]["excluded"] == ["T3"]
+    assert set(out["sensitivity"]) >= {"build", "test"}
+    assert "without the latest index additions" in text
