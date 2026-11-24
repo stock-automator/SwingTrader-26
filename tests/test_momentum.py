@@ -320,29 +320,39 @@ def test_variants_are_the_eight_approved_combinations():
 
 
 def test_run_momentum_script_writes_doc_and_json(tmp_path, monkeypatch):
+    """Point-in-time run (cycle 04b): members only, removed names from the
+    pit cache, selection on the build period, biased test numbers alongside."""
     sys.path.insert(0, str(ROOT / "scripts"))
     import run_momentum
 
     idx = pd.bdate_range("2015-01-01", "2024-03-29")
     rng = np.random.default_rng(0)
-    data = tmp_path / "raw"
+    data, pit = tmp_path / "raw", tmp_path / "raw_pit"
     data.mkdir()
+    pit.mkdir()
     symbols = [f"T{i}" for i in range(25)]
-    for i, sym in enumerate(symbols + ["SPY"]):
+
+    def write(sym, i, where, days=idx):
         drift = 0.0002 * (i % 7)
-        close = 50 * np.exp(np.cumsum(rng.normal(drift, 0.01, len(idx))))
-        df = _frame(close, idx, volume=1e6)
+        close = 50 * np.exp(np.cumsum(rng.normal(drift, 0.01, len(days))))
+        df = _frame(close, days, volume=1e6)
         df["Adj Close"] = df["Close"]
-        df.to_parquet(data / f"{sym}.parquet")
-    universe = tmp_path / "universe.json"
-    universe.write_text(
-        json.dumps(
-            {
-                "symbols": symbols + ["MISSING"],
-                "last_changes": {"added": ["T3", "MISSING"]},
-            }
-        )
+        df.to_parquet(where / f"{sym}.parquet")
+
+    for i, sym in enumerate(symbols + ["SPY"]):
+        write(sym, i, data)
+    write("GONE", 6, pit, idx[idx <= "2020-06-15"])  # bought out mid-2020
+    months = pd.date_range("2015-12-31", "2024-03-31", freq="ME")
+    rows = [(d, f"T{i}") for d in months for i in range(20) if i != 3]
+    rows += [(d, "T3") for d in months if d >= pd.Timestamp("2021-01-31")]
+    rows += [(d, "GONE") for d in months if d <= pd.Timestamp("2020-06-30")]
+    rows += [(d, "NOPRICE") for d in months[:3]]
+    membership = tmp_path / "membership.csv"
+    pd.DataFrame(rows, columns=["date", "ticker"]).to_csv(
+        membership, index=False, date_format="%Y-%m-%d"
     )
+    universe = tmp_path / "universe.json"
+    universe.write_text(json.dumps({"symbols": symbols + ["MISSING"]}))
     scorecard = tmp_path / "scorecard.json"
     scorecard.write_text(json.dumps({"rows": []}))
     md, js = tmp_path / "momentum.md", tmp_path / "momentum.json"
@@ -350,6 +360,10 @@ def test_run_momentum_script_writes_doc_and_json(tmp_path, monkeypatch):
         [
             "--data-dir",
             str(data),
+            "--pit-dir",
+            str(pit),
+            "--membership",
+            str(membership),
             "--universe",
             str(universe),
             "--scorecard-json",
@@ -361,17 +375,27 @@ def test_run_momentum_script_writes_doc_and_json(tmp_path, monkeypatch):
         ]
     )
     out = json.loads(js.read_text())
-    assert out["chosen"] in {v.name for v in momentum.VARIANTS}
-    assert out["missing_symbols"] == ["MISSING"]
-    assert set(out["build"]) >= {v.name for v in momentum.VARIANTS}
-    assert set(out["test"]) >= {"SPY buy & hold", "Equal-weight universe"}
+    variants = {v.name for v in momentum.VARIANTS}
+    assert out["chosen"] in variants
+    assert out["tickers"] == 21  # T0-T19 and GONE; T20-T24 never members
+    assert out["missing_symbols"] == ["NOPRICE"]
+    assert out["coverage"]["never_priced"] == ["NOPRICE"]
+    assert 90 < out["coverage"]["pct"] < 100
+    assert set(out["build"]) >= variants
+    assert set(out["test"]) >= variants | {"SPY buy & hold", "Equal-weight universe"}
+    # Today's-universe (biased) runs, test period only, for comparison.
+    assert set(out["biased_test"]) == variants
+    assert out["biased_missing_symbols"] == ["MISSING"]
+    # Share of member-months with a full lookback, per lookback.
+    assert set(out["coverage"]["rankable_pct"]) == {"12-1", "6-1"}
+    assert 0 < out["coverage"]["rankable_pct"]["12-1"] <= 100
+    # Today's members without the membership rule: survivorship alone.
+    assert set(out["today_members_test"]) == {"stats", "tickers"}
+    assert out["today_members_test"]["tickers"] == 20  # T0-T19 incl. T3
     text = md.read_text()
     assert out["chosen"] in text
-    assert "survivorship" in text.lower()
-    # Sensitivity: the chosen variant without the latest index additions.
-    assert out["sensitivity"]["excluded"] == ["T3"]
-    assert set(out["sensitivity"]) >= {"build", "test"}
-    assert "without the latest index additions" in text
+    assert "point-in-time" in text.lower()
+    assert "today's universe" in text.lower()
 
 
 # --- point-in-time membership (cycle 04b) -----------------------------------
