@@ -336,7 +336,8 @@ def spy_buy_hold(
 ) -> pd.Series:
     """SPY held from the close before `start` (when known) to `end`."""
     a, b = _window(pd.DatetimeIndex(spy_close.index), start, end)
-    curve = spy_close.iloc[max(a - 1, 0) : b + 1]
+    lo, hi = max(a - 1, 0), b + 1
+    curve = spy_close.iloc[lo:hi]
     return initial_capital * curve / curve.iloc[0]
 
 

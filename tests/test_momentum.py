@@ -214,7 +214,8 @@ def test_simulate_exits_delisted_holding_at_last_close():
     assert exit_["date"] == idx[30]
     assert exit_["price"] == pytest.approx(gone["Close"].iloc[-1] * (1 - 0.0005))
     assert res.delisted_exits == 1
-    assert res.holdings.loc[idx[30] :].eq(0).all()
+    after = idx[30]
+    assert res.holdings.loc[after:].eq(0).all()
 
 
 def test_simulate_market_filter_holds_cash():
@@ -233,8 +234,9 @@ def test_selection_uses_no_data_after_the_rebalance_close():
     month_end = idx[month_end_mask(idx)][0]
     k = idx.get_loc(month_end)
     # Make DOWN explode from the execution day on: selection must not see it.
-    panel.close.iloc[k + 1 :, panel.tickers.index("DOWN")] *= 10
-    panel.mark.iloc[k + 1 :, panel.tickers.index("DOWN")] *= 10
+    later, col = k + 1, panel.tickers.index("DOWN")
+    panel.close.iloc[later:, col] *= 10
+    panel.mark.iloc[later:, col] *= 10
     changed = simulate(panel, momentum_selector(panel, cfg), idx[0], idx[-1])
     assert base.trades.iloc[0]["ticker"] == changed.trades.iloc[0]["ticker"] == "UP"
 
